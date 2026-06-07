@@ -16,6 +16,7 @@ struct TicketInspectorView: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 16) {
 				if let ticket {
+					let inspectorState = TicketInspectorState(ticket: ticket, queueItem: queueItem, latestRun: latestRun, events: events)
 					header(ticket)
 					section("Ticket Metadata") {
 						LabeledContent("External ID", value: ticket.externalID)
@@ -25,18 +26,18 @@ struct TicketInspectorView: View {
 						LabeledContent("Assignee", value: ticket.assignee ?? "Unassigned")
 					}
 					section("Current Orchestration State") {
-						LabeledContent("Queue", value: queueItem.map { "Position \($0.position + 1)" } ?? "Not queued")
-						LabeledContent("Latest Run", value: latestRun?.status.title ?? "No run")
-						LabeledContent("Workspace", value: latestRun?.workspacePath.isEmpty == false ? latestRun?.workspacePath ?? "None" : "None")
-						LabeledContent("Container", value: latestRun?.containerID.isEmpty == false ? latestRun?.containerID ?? "None" : "None")
-						LabeledContent("Branch", value: latestRun?.branchName.isEmpty == false ? latestRun?.branchName ?? "None" : "None")
-						LabeledContent("Pull Request", value: latestRun?.pullRequestURL ?? "None")
-						LabeledContent("Confidence", value: latestRun == nil ? "None" : "\(Int((latestRun?.confidence ?? 0) * 100))%")
+						LabeledContent("Queue", value: inspectorState.queueState)
+						LabeledContent("Latest Run", value: inspectorState.latestRunState)
+						LabeledContent("Workspace", value: inspectorState.workspace)
+						LabeledContent("Container", value: inspectorState.container)
+						LabeledContent("Branch", value: inspectorState.branch)
+						LabeledContent("Pull Request", value: inspectorState.pullRequest)
+						LabeledContent("Confidence", value: inspectorState.confidence)
 					}
 					section("Failure and Next Action") {
-						Text(latestRun?.failureReason ?? "No failure recorded.")
+						Text(inspectorState.failureText)
 							.foregroundStyle(latestRun?.failureReason == nil ? .secondary : .primary)
-						Text(nextAction(ticket: ticket))
+						Text(inspectorState.nextAction)
 							.font(.callout.weight(.medium))
 					}
 					section("Timeline Events") {
@@ -121,19 +122,6 @@ struct TicketInspectorView: View {
 			}
 			.buttonStyle(.bordered)
 		}
-	}
-
-	private func nextAction(ticket: TicketRecord) -> String {
-		if latestRun?.status == .needsReview {
-			return "Review the pull request and merge if acceptable."
-		}
-		if latestRun?.status == .blocked {
-			return "Resolve the missing context, then retry."
-		}
-		if latestRun?.status == .failed {
-			return "Inspect validation failure and retry."
-		}
-		return queueItem == nil ? "Add this ticket to the queue." : "Run the queue when ready."
 	}
 
 	private func open(_ value: String?) {

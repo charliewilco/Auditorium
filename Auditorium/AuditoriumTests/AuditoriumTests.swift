@@ -31,6 +31,55 @@ struct AuditoriumTests {
 		#expect(ordered.map(\.ticketID) == [second.ticketID, first.ticketID])
 	}
 
+	@Test func queueServiceAddsSelectedTicketsAndAvoidsDuplicates() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let projectID = UUID()
+		let first = TicketRecord(
+			provider: .githubIssues,
+			externalID: "1",
+			title: "First issue",
+			body: "",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .high,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+		let second = TicketRecord(
+			provider: .githubIssues,
+			externalID: "2",
+			title: "Second issue",
+			body: "",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+		context.insert(first)
+		context.insert(second)
+		try context.save()
+
+		try QueueService().addTickets([first.id, second.id], projectID: projectID, context: context)
+		try QueueService().addTickets([first.id], projectID: projectID, context: context)
+		let queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>()).sorted { $0.position < $1.position }
+
+		#expect(queueItems.count == 2)
+		#expect(Set(queueItems.map(\.ticketID)) == Set([first.id, second.id]))
+		#expect(Set(queueItems.map(\.position)) == Set([0, 1]))
+		#expect(first.status == .queued)
+		#expect(second.status == .queued)
+	}
+
 	@Test func projectCreationCommitsRepositoryIssueTrackerTicketsAndNoRuns() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -391,6 +440,54 @@ struct AuditoriumTests {
 		#expect(markdown.contains("## Pull Requests"))
 		#expect(markdown.contains("BUR-101"))
 		#expect(markdown.contains("https://example.com/pr/101"))
+	}
+
+	@Test func ticketInspectorStateReflectsCurrentRunState() {
+		let projectID = UUID()
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "101",
+			title: "Inspector state",
+			body: "Body",
+			status: .needsReview,
+			labels: ["ui"],
+			assignee: "Charlie",
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: projectID
+		)
+		let queueItem = QueueItemRecord(ticketID: ticket.id, projectID: projectID, position: 2, priority: .high)
+		let run = RunRecord(projectID: projectID, status: .completed, totalTickets: 1)
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			workspacePath: "/tmp/auditorium/workspace",
+			containerID: "local",
+			branchName: "auditorium/issue-101",
+			status: .needsReview,
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/101",
+			summary: "Ready for review.",
+			confidence: 0.91
+		)
+		let events = [
+			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 2), level: .info, category: .agent, message: "Second"),
+			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 1), level: .info, category: .agent, message: "First")
+		]
+
+		let state = TicketInspectorState(ticket: ticket, queueItem: queueItem, latestRun: ticketRun, events: events)
+
+		#expect(state.queueState == "Position 3")
+		#expect(state.latestRunState == "Needs Review")
+		#expect(state.workspace == "/tmp/auditorium/workspace")
+		#expect(state.container == "local")
+		#expect(state.branch == "auditorium/issue-101")
+		#expect(state.pullRequest == "https://github.com/charliewilco/Auditorium/pull/101")
+		#expect(state.confidence == "91%")
+		#expect(state.nextAction == "Review the pull request and merge if acceptable.")
+		#expect(state.timelineMessages == ["First", "Second"])
 	}
 
 	@Test func workflowPolicyParserReadsFrontMatter() throws {

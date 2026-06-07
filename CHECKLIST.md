@@ -166,7 +166,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] User can select real GitHub issues, queue them, reorder them, and run only enabled items.
+- [~] User can select real GitHub issues, queue them, reorder them, and run only enabled items.
 
 ## 9. Runtime Detection And Runtime Providers
 
@@ -458,9 +458,9 @@ Acceptance gate:
 - [~] User authenticates GitHub.
 - [x] User selects GitHub repository.
 - [x] User imports GitHub Issues.
-- [ ] User queues issues.
-- [ ] User reorders queue.
-- [ ] User starts run.
+- [x] User queues issues.
+- [x] User reorders queue.
+- [x] User starts run.
 - [x] Runtime preflight passes or blocks with actionable reason.
 - [x] Codex preflight passes or blocks with actionable reason.
 - [x] Real Codex run processes one issue.
@@ -469,7 +469,7 @@ Acceptance gate:
 - [x] Changes are committed.
 - [x] Pull request is opened.
 - [x] Live events appear in UI.
-- [ ] Ticket inspector reflects current state.
+- [x] Ticket inspector reflects current state.
 - [x] Markdown report is generated and saved.
 - [x] `symphony doctor` works.
 - [x] `symphony run` works.
