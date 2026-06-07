@@ -1587,8 +1587,12 @@ struct AuditoriumTests {
 		let ticketRun = TicketRunRecord(
 			runID: run.id,
 			ticketID: ticket.id,
+			workspacePath: "/tmp/auditorium/workspaces/bur-101",
 			branchName: "auditorium/bur-101",
 			status: .needsReview,
+			startedAt: Date(timeIntervalSince1970: 100),
+			endedAt: Date(timeIntervalSince1970: 220),
+			logPath: "/tmp/auditorium/logs/BUR-101.log",
 			pullRequestURL: "https://example.com/pr/101",
 			summary: "Done",
 			confidence: 0.9
@@ -1609,16 +1613,31 @@ struct AuditoriumTests {
 			ticketRuns: [ticketRun],
 			tickets: [ticket],
 			pullRequests: [pullRequest],
-			events: []
+			events: [
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .success,
+					category: .tests,
+					message: "Validation passed."
+				)
+			]
 		)
 
 		#expect(markdown.contains("# Auditorium Run Report"))
+		#expect(markdown.contains("Run Status: Completed"))
 		#expect(markdown.contains("## Pull Requests"))
 		#expect(markdown.contains("BUR-101"))
 		#expect(markdown.contains("https://example.com/pr/101"))
 		#expect(markdown.contains("| BUR-101 | https://example.com/pr/101 | Open | Passed | Needs Review | 90% |"))
 		#expect(markdown.contains("PR Status: Open"))
 		#expect(markdown.contains("Checks: Passed"))
+		#expect(markdown.contains("Workspace: /tmp/auditorium/workspaces/bur-101"))
+		#expect(markdown.contains("Log: /tmp/auditorium/logs/BUR-101.log"))
+		#expect(markdown.contains("- Recorded Events: 1"))
+		#expect(markdown.contains("- Last Event: [tests] Validation passed."))
+		#expect(!markdown.contains("Mocked file list unavailable"))
+		#expect(!markdown.contains("Relevant tests simulated"))
 	}
 
 	@Test func reportGenerationIncludesFailureGuidanceAndCheckStatusActions() throws {
@@ -1698,8 +1717,12 @@ struct AuditoriumTests {
 		let failedRun = TicketRunRecord(
 			runID: run.id,
 			ticketID: failedTicket.id,
+			workspacePath: "/tmp/auditorium/workspaces/202",
+			branchName: "auditorium/202",
 			status: .failed,
 			retryCount: 1,
+			logPath: "/tmp/auditorium/logs/202.log",
+			summary: "Tests failed before PR creation.",
 			failureReason: "Unit tests failed",
 			confidence: 0.2
 		)
@@ -1727,11 +1750,23 @@ struct AuditoriumTests {
 			ticketRuns: [reviewRun, failedRun, noChangeRun],
 			tickets: [reviewTicket, failedTicket, noChangeTicket],
 			pullRequests: [pullRequest],
-			events: []
+			events: [
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: failedRun.id,
+					level: .error,
+					category: .tests,
+					message: "swift test failed."
+				)
+			]
 		)
 
 		#expect(markdown.contains("| 201 | https://example.com/pr/201 | Open | Failed | Needs Review | 80% |"))
 		#expect(markdown.contains("Failure reason: Unit tests failed"))
+		#expect(markdown.contains("Where it failed: [tests] swift test failed."))
+		#expect(markdown.contains("Workspace: /tmp/auditorium/workspaces/202"))
+		#expect(markdown.contains("Log: /tmp/auditorium/logs/202.log"))
+		#expect(markdown.contains("Recorded Events: 1"))
 		#expect(markdown.contains("Suggested next action: Inspect the failure and retry after addressing the blocker."))
 		#expect(markdown.contains("## Suggested Actions"))
 		#expect(markdown.contains("201: Review failed checks: review failed checks on https://example.com/pr/201 before merging."))

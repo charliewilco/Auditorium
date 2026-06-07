@@ -198,6 +198,133 @@ struct AuditoriumCoreTests {
 		#expect(appState.selectedTicketID == selectedTicketID)
 	}
 
+	@Test func reportGeneratorUsesRecordedRunEvidenceInsteadOfMockPlaceholders() {
+		let project = Project(
+			name: "Evidence Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let run = RunRecord(
+			projectID: project.id,
+			status: .completed,
+			totalTickets: 1,
+			completedTickets: 1,
+			pullRequestsCreated: 1,
+			summary: "Completed 1 ticket."
+		)
+		run.endedAt = run.startedAt.addingTimeInterval(120)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "42",
+			title: "Use real report evidence",
+			body: "Body",
+			status: .needsReview,
+			labels: ["reports"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/42",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			workspacePath: "/tmp/auditorium/workspaces/42",
+			branchName: "auditorium/issue-42",
+			status: .needsReview,
+			logPath: "/tmp/auditorium/logs/42.log",
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/42",
+			summary: "Implemented the requested change.",
+			confidence: 0.91
+		)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: ticketRun.id,
+			title: "42: Use real report evidence",
+			url: "https://github.com/charliewilco/Auditorium/pull/42",
+			branchName: "auditorium/issue-42",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .passed
+		)
+		let event = RuntimeEventRecord(
+			runID: run.id,
+			ticketRunID: ticketRun.id,
+			level: .success,
+			category: .tests,
+			message: "cargo test passed."
+		)
+
+		let markdown = ReportGenerator().generate(
+			project: project,
+			run: run,
+			ticketRuns: [ticketRun],
+			tickets: [ticket],
+			pullRequests: [pullRequest],
+			events: [event]
+		)
+
+		#expect(markdown.contains("Run Status: Completed"))
+		#expect(markdown.contains("Run Summary: Completed 1 ticket."))
+		#expect(markdown.contains("Workspace: /tmp/auditorium/workspaces/42"))
+		#expect(markdown.contains("Log: /tmp/auditorium/logs/42.log"))
+		#expect(markdown.contains("- Pull Request Checks: Passed"))
+		#expect(markdown.contains("- Last Event: [tests] cargo test passed."))
+		#expect(!markdown.contains("Mocked file list unavailable"))
+		#expect(!markdown.contains("Relevant tests simulated"))
+	}
+
+	@Test func reportGeneratorDocumentsCompletedDryRunsWithoutTicketRuns() {
+		let project = Project(
+			name: "Dry Run Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let run = RunRecord(
+			projectID: project.id,
+			status: .completed,
+			totalTickets: 0,
+			completedTickets: 0,
+			summary: "Dry run completed. No workspaces or agents were started."
+		)
+		run.endedAt = run.startedAt.addingTimeInterval(1)
+		let event = RuntimeEventRecord(
+			runID: run.id,
+			level: .success,
+			category: .orchestration,
+			message: "Dry run validated 0 enabled queue items."
+		)
+
+		let markdown = ReportGenerator().generate(
+			project: project,
+			run: run,
+			ticketRuns: [],
+			tickets: [],
+			pullRequests: [],
+			events: [event]
+		)
+
+		#expect(markdown.contains("Run Status: Completed"))
+		#expect(markdown.contains("Run Summary: Dry run completed. No workspaces or agents were started."))
+		#expect(markdown.contains("No completed tickets."))
+		#expect(markdown.contains("No failed tickets."))
+		#expect(markdown.contains("No blocked tickets."))
+		#expect(markdown.contains("No canceled tickets."))
+		#expect(markdown.contains("[orchestration] Dry run validated 0 enabled queue items."))
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(

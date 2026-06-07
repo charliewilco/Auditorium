@@ -334,24 +334,53 @@ struct RootView: View {
 	}
 
 	private func dryRun() {
-		guard let projectID = appState.selectedProjectID else { return }
+		guard let project = selectedProject else { return }
 		let run = RunRecord(
-			projectID: projectID,
+			projectID: project.id,
 			status: .completed,
 			totalTickets: projectQueueItems.filter { $0.isEnabled }.count,
 			summary: "Dry run completed. No workspaces or agents were started."
 		)
 		run.endedAt = .now
 		modelContext.insert(run)
-		modelContext.insert(
-			RuntimeEventRecord(
-				runID: run.id,
-				level: .success,
-				category: .orchestration,
-				message: "Dry run validated \(run.totalTickets) enabled queue items."
-			)
+		let event = RuntimeEventRecord(
+			runID: run.id,
+			level: .success,
+			category: .orchestration,
+			message: "Dry run validated \(run.totalTickets) enabled queue items."
 		)
-		try? modelContext.save()
+		modelContext.insert(event)
+		do {
+			let markdown = services.reportGenerator.generate(
+				project: project,
+				run: run,
+				ticketRuns: [],
+				tickets: projectTickets,
+				pullRequests: [],
+				events: [event]
+			)
+			let reportURL = try services.reportGenerator.save(
+				markdown: markdown,
+				projectID: project.id,
+				runID: run.id,
+				workspace: services.workspace
+			)
+			run.reportMarkdown = markdown
+			modelContext.insert(
+				ReportRecord(
+					projectID: project.id,
+					runID: run.id,
+					title: "Dry Run \(run.id.uuidString.prefix(8))",
+					markdown: markdown,
+					filePath: reportURL.path()
+				)
+			)
+			try ModelIntegrityValidator.save(context: modelContext)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+			return
+		}
 		appState.selectedDestination = .runs
 	}
 

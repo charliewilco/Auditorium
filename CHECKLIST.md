@@ -279,7 +279,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Every completed run produces a useful markdown report suitable for human review.
+- [x] Every completed run produces a useful markdown report suitable for human review.
 
 ## 15. UI Screens
 

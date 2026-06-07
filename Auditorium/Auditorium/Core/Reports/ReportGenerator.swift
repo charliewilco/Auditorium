@@ -12,35 +12,39 @@ struct ReportGenerator {
 		let ended = run.endedAt ?? .now
 		let duration = ended.timeIntervalSince(run.startedAt)
 		let successRate = run.totalTickets == 0 ? 0 : Double(run.completedTickets) / Double(run.totalTickets)
+		let canceled = ticketRuns.filter { $0.status == .canceled }.count
 		var markdown = """
-		# Auditorium Run Report
-		Project: \(project.name)
-		Repository: \(project.repositoryName)
-		Issue Source: \(project.issueProviderKind.title)
-		Run ID: \(run.id.uuidString)
-		Started: \(run.startedAt.formatted(date: .abbreviated, time: .standard))
-		Ended: \(ended.formatted(date: .abbreviated, time: .standard))
-		Duration: \(formatDuration(duration))
+			# Auditorium Run Report
+			Project: \(project.name)
+			Repository: \(project.repositoryName)
+			Issue Source: \(project.issueProviderKind.title)
+			Run ID: \(run.id.uuidString)
+			Run Status: \(run.status.title)
+			Started: \(run.startedAt.formatted(date: .abbreviated, time: .standard))
+			Ended: \(ended.formatted(date: .abbreviated, time: .standard))
+			Duration: \(formatDuration(duration))
+			Run Summary: \(valueOrNone(run.summary))
 
-		## Summary
-		Queued Tickets: \(run.totalTickets)
-		Completed: \(run.completedTickets)
-		Failed: \(run.failedTickets)
-		Blocked: \(run.blockedTickets)
-		Canceled: 0
-		Pull Requests Created: \(run.pullRequestsCreated)
-		Success Rate: \(Int(successRate * 100))%
+			## Summary
+			Queued Tickets: \(run.totalTickets)
+			Completed: \(run.completedTickets)
+			Failed: \(run.failedTickets)
+			Blocked: \(run.blockedTickets)
+			Canceled: \(canceled)
+			Pull Requests Created: \(run.pullRequestsCreated)
+			Success Rate: \(Int(successRate * 100))%
 
-		## Pull Requests
-		| Ticket | PR | PR Status | Checks | Ticket Status | Confidence |
-		|---|---|---|---|---|---|
-		"""
+			## Pull Requests
+			| Ticket | PR | PR Status | Checks | Ticket Status | Confidence |
+			|---|---|---|---|---|---|
+			"""
 
 		var pullRequestRows = 0
 		for ticketRun in ticketRuns where ticketRun.pullRequestURL != nil {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
 			let pullRequest = pullRequests.first { $0.ticketRunID == ticketRun.id }
-			markdown += "\n| \(ticket?.externalID ?? "Unknown") | \(pullRequest?.url ?? ticketRun.pullRequestURL ?? "") | \(pullRequest?.status.title ?? "Unknown") | \(pullRequest?.checksStatus.title ?? "Unknown") | \(ticketRun.status.title) | \(Int(ticketRun.confidence * 100))% |"
+			markdown +=
+				"\n| \(ticket?.externalID ?? "Unknown") | \(pullRequest?.url ?? ticketRun.pullRequestURL ?? "") | \(pullRequest?.status.title ?? "Unknown") | \(pullRequest?.checksStatus.title ?? "Unknown") | \(ticketRun.status.title) | \(Int(ticketRun.confidence * 100))% |"
 			pullRequestRows += 1
 		}
 		if pullRequestRows == 0 {
@@ -51,19 +55,25 @@ struct ReportGenerator {
 		for ticketRun in ticketRuns where ticketRun.status == .completed || ticketRun.status == .needsReview {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
 			let pullRequest = pullRequests.first { $0.ticketRunID == ticketRun.id }
-			markdown += completedSection(ticketRun: ticketRun, ticket: ticket, pullRequest: pullRequest)
+			markdown += completedSection(ticketRun: ticketRun, ticket: ticket, pullRequest: pullRequest, events: events)
 		}
 
 		markdown += "\n\n## Failed Tickets"
 		for ticketRun in ticketRuns where ticketRun.status == .failed {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
-			markdown += failedSection(ticketRun: ticketRun, ticket: ticket)
+			markdown += failedSection(ticketRun: ticketRun, ticket: ticket, events: events)
 		}
 
 		markdown += "\n\n## Blocked Tickets"
 		for ticketRun in ticketRuns where ticketRun.status == .blocked {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
-			markdown += blockedSection(ticketRun: ticketRun, ticket: ticket)
+			markdown += blockedSection(ticketRun: ticketRun, ticket: ticket, events: events)
+		}
+
+		markdown += "\n\n## Canceled Tickets"
+		for ticketRun in ticketRuns where ticketRun.status == .canceled {
+			let ticket = tickets.first { $0.id == ticketRun.ticketID }
+			markdown += canceledSection(ticketRun: ticketRun, ticket: ticket, events: events)
 		}
 
 		markdown += suggestedActionsSection(ticketRuns: ticketRuns, tickets: tickets, pullRequests: pullRequests)
@@ -74,7 +84,28 @@ struct ReportGenerator {
 		}
 
 		if markdown.contains("## Completed Tickets\n\n## Failed Tickets") {
-			markdown = markdown.replacingOccurrences(of: "## Completed Tickets\n\n## Failed Tickets", with: "## Completed Tickets\nNo completed tickets.\n\n## Failed Tickets")
+			markdown = markdown.replacingOccurrences(
+				of: "## Completed Tickets\n\n## Failed Tickets",
+				with: "## Completed Tickets\nNo completed tickets.\n\n## Failed Tickets"
+			)
+		}
+		if markdown.contains("## Failed Tickets\n\n## Blocked Tickets") {
+			markdown = markdown.replacingOccurrences(
+				of: "## Failed Tickets\n\n## Blocked Tickets",
+				with: "## Failed Tickets\nNo failed tickets.\n\n## Blocked Tickets"
+			)
+		}
+		if markdown.contains("## Blocked Tickets\n\n## Canceled Tickets") {
+			markdown = markdown.replacingOccurrences(
+				of: "## Blocked Tickets\n\n## Canceled Tickets",
+				with: "## Blocked Tickets\nNo blocked tickets.\n\n## Canceled Tickets"
+			)
+		}
+		if markdown.contains("## Canceled Tickets\n\n## Suggested Actions") {
+			markdown = markdown.replacingOccurrences(
+				of: "## Canceled Tickets\n\n## Suggested Actions",
+				with: "## Canceled Tickets\nNo canceled tickets.\n\n## Suggested Actions"
+			)
 		}
 		return markdown
 	}
@@ -86,48 +117,84 @@ struct ReportGenerator {
 		return url
 	}
 
-	private func completedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?, pullRequest: PullRequestRecord?) -> String {
-		"""
+	private func completedSection(
+		ticketRun: TicketRunRecord,
+		ticket: TicketRecord?,
+		pullRequest: PullRequestRecord?,
+		events: [RuntimeEventRecord]
+	) -> String {
+		let ticketEvents = eventsForTicketRun(ticketRun, events: events)
+		return """
 
-		### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
-		Status: \(ticketRun.status.title)
-		Branch: \(ticketRun.branchName)
-		Pull Request: \(ticketRun.pullRequestURL ?? "None")
-		PR Status: \(pullRequest?.status.title ?? "None")
-		Checks: \(pullRequest?.checksStatus.title ?? "None")
-		Duration: \(formatDuration((ticketRun.endedAt ?? .now).timeIntervalSince(ticketRun.startedAt ?? .now)))
-		Confidence: \(Int(ticketRun.confidence * 100))%
-		#### What changed
-		- Implemented the focused change requested by the issue.
-		- Preserved unrelated behavior.
-		#### Files touched
-		- Mocked file list unavailable in demo mode.
-		#### Validation
-		- Relevant tests simulated.
-		- Checks passed.
-		#### Notes
-		\(ticketRun.summary)
-		"""
+			### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
+			Status: \(ticketRun.status.title)
+			Summary: \(valueOrNone(ticketRun.summary))
+			Branch: \(valueOrNone(ticketRun.branchName))
+			Workspace: \(valueOrNone(ticketRun.workspacePath))
+			Log: \(valueOrNone(ticketRun.logPath))
+			Pull Request: \(ticketRun.pullRequestURL ?? "None")
+			PR Status: \(pullRequest?.status.title ?? "None")
+			Checks: \(pullRequest?.checksStatus.title ?? "None")
+			Retry Count: \(ticketRun.retryCount)
+			Duration: \(formatDuration((ticketRun.endedAt ?? .now).timeIntervalSince(ticketRun.startedAt ?? .now)))
+			Confidence: \(Int(ticketRun.confidence * 100))%
+			#### Evidence
+			- Workspace: \(valueOrNone(ticketRun.workspacePath))
+			- Log: \(valueOrNone(ticketRun.logPath))
+			- Recorded Events: \(ticketEvents.count)
+			- Last Event: \(lastEventSummary(ticketEvents))
+			#### Validation
+			- Pull Request Checks: \(pullRequest?.checksStatus.title ?? "Not recorded")
+			- Ticket Run Status: \(ticketRun.status.title)
+			#### Notes
+			\(valueOrNone(ticketRun.summary))
+			"""
 	}
 
-	private func failedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?) -> String {
-		"""
+	private func failedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?, events: [RuntimeEventRecord]) -> String {
+		let ticketEvents = eventsForTicketRun(ticketRun, events: events)
+		return """
 
-		### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
-		Failure reason: \(ticketRun.failureReason ?? "Unknown failure")
-		Where it failed: Validation
-		Retry count: \(ticketRun.retryCount)
-		Suggested next action: Inspect the failure and retry after addressing the blocker.
-		"""
+			### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
+			Failure reason: \(ticketRun.failureReason ?? "Unknown failure")
+			Where it failed: \(lastEventSummary(ticketEvents))
+			Workspace: \(valueOrNone(ticketRun.workspacePath))
+			Log: \(valueOrNone(ticketRun.logPath))
+			Branch: \(valueOrNone(ticketRun.branchName))
+			Summary: \(valueOrNone(ticketRun.summary))
+			Retry count: \(ticketRun.retryCount)
+			Recorded Events: \(ticketEvents.count)
+			Suggested next action: Inspect the failure and retry after addressing the blocker.
+			"""
 	}
 
-	private func blockedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?) -> String {
-		"""
+	private func blockedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?, events: [RuntimeEventRecord]) -> String {
+		let ticketEvents = eventsForTicketRun(ticketRun, events: events)
+		return """
 
-		### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
-		Blocked because: \(ticketRun.failureReason ?? "The agent needs more information.")
-		Suggested next action: Resolve the missing decision, then retry this ticket.
-		"""
+			### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
+			Blocked because: \(ticketRun.failureReason ?? "The agent needs more information.")
+			Workspace: \(valueOrNone(ticketRun.workspacePath))
+			Log: \(valueOrNone(ticketRun.logPath))
+			Branch: \(valueOrNone(ticketRun.branchName))
+			Summary: \(valueOrNone(ticketRun.summary))
+			Recorded Events: \(ticketEvents.count)
+			Suggested next action: Resolve the missing decision, then retry this ticket.
+			"""
+	}
+
+	private func canceledSection(ticketRun: TicketRunRecord, ticket: TicketRecord?, events: [RuntimeEventRecord]) -> String {
+		let ticketEvents = eventsForTicketRun(ticketRun, events: events)
+		return """
+
+			### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
+			Canceled because: \(ticketRun.failureReason ?? "Canceled by user.")
+			Workspace: \(valueOrNone(ticketRun.workspacePath))
+			Log: \(valueOrNone(ticketRun.logPath))
+			Branch: \(valueOrNone(ticketRun.branchName))
+			Recorded Events: \(ticketEvents.count)
+			Suggested next action: Review any partial workspace changes before retrying.
+			"""
 	}
 
 	private func suggestedActionsSection(ticketRuns: [TicketRunRecord], tickets: [TicketRecord], pullRequests: [PullRequestRecord]) -> String {
@@ -137,13 +204,19 @@ struct ReportGenerator {
 			let label = "\(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")"
 			switch ticketRun.status {
 			case .failed:
-				actions.append("- \(label): inspect failure reason `\(ticketRun.failureReason ?? "Unknown failure")`, fix the underlying issue, then retry.")
+				actions.append(
+					"- \(label): inspect failure reason `\(ticketRun.failureReason ?? "Unknown failure")`, fix the underlying issue, then retry."
+				)
 			case .blocked:
-				actions.append("- \(label): resolve the blocker `\(ticketRun.failureReason ?? "Needs more information")`, then retry.")
+				actions.append(
+					"- \(label): resolve the blocker `\(ticketRun.failureReason ?? "Needs more information")`, then retry."
+				)
 			case .completed where ticketRun.pullRequestURL == nil:
 				actions.append("- \(label): review the run summary because the agent completed without opening a pull request.")
 			case .needsReview:
-				if let pullRequest = pullRequests.first(where: { $0.ticketRunID == ticketRun.id }), pullRequest.checksStatus == .failed {
+				if let pullRequest = pullRequests.first(where: { $0.ticketRunID == ticketRun.id }),
+					pullRequest.checksStatus == .failed
+				{
 					actions.append("- \(label): review failed checks on \(pullRequest.url) before merging.")
 				}
 			default:
@@ -161,5 +234,23 @@ struct ReportGenerator {
 		let minutes = whole / 60
 		let remaining = whole % 60
 		return "\(minutes)m \(remaining)s"
+	}
+
+	private func valueOrNone(_ value: String) -> String {
+		let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+		return trimmed.isEmpty ? "None" : trimmed
+	}
+
+	private func eventsForTicketRun(_ ticketRun: TicketRunRecord, events: [RuntimeEventRecord]) -> [RuntimeEventRecord] {
+		events
+			.filter { $0.ticketRunID == ticketRun.id }
+			.sorted { $0.timestamp < $1.timestamp }
+	}
+
+	private func lastEventSummary(_ events: [RuntimeEventRecord]) -> String {
+		guard let event = events.last else {
+			return "No ticket events recorded"
+		}
+		return "[\(event.category.rawValue)] \(event.message)"
 	}
 }
