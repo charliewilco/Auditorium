@@ -15,8 +15,8 @@ enum ProjectCreationError: LocalizedError {
 	}
 }
 
-@MainActor
 struct ProjectCreationService {
+	@MainActor
 	func createProject(
 		from draft: ProjectDraft,
 		context: ModelContext,
@@ -106,6 +106,7 @@ struct ProjectCreationService {
 		return project.id
 	}
 
+	@MainActor
 	private func storeCredentialIfNeeded(
 		_ credential: String,
 		providerKind: String,
@@ -132,6 +133,7 @@ struct ProjectCreationService {
 		return accountID
 	}
 
+	@MainActor
 	private func insertDemoTickets(projectID: UUID, context: ModelContext) {
 		for demoTicket in DemoTickets.all {
 			let descriptor = demoTicket.descriptor
