@@ -9,7 +9,7 @@ struct AuditoriumApp: App {
 
 	init() {
 		do {
-			modelContainer = try AppSchema.makeModelContainer()
+			modelContainer = try AppSchema.makeModelContainer(inMemory: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
 		} catch {
 			fatalError("Could not create ModelContainer: \(error)")
 		}
