@@ -335,6 +335,91 @@ struct AuditoriumTests {
 		#expect(GitHubRepositoryProvider.pushArguments(branchName: branch).contains("--force") == false)
 	}
 
+	@Test func githubRepositoryProviderFetchesOpenPullRequestCheckStatus() async throws {
+		let pullRequestPayload = """
+		{
+			"number": 12,
+			"title": "ISSUE-12: Ship work",
+			"html_url": "https://github.com/charliewilco/Auditorium/pull/12",
+			"state": "open",
+			"draft": false,
+			"merged": false,
+			"head": { "ref": "auditorium/issue-12", "sha": "abc123" },
+			"base": { "ref": "main", "sha": "def456" }
+		}
+		"""
+		let statusPayload = """
+		{
+			"state": "success"
+		}
+		"""
+		let checkRunsPayload = """
+		{
+			"check_runs": [
+				{ "status": "completed", "conclusion": "success" }
+			]
+		}
+		"""
+		let transport = RecordingGitHubTransport(responses: [
+			MockGitHubResponse(payload: pullRequestPayload),
+			MockGitHubResponse(payload: statusPayload),
+			MockGitHubResponse(payload: checkRunsPayload)
+		])
+		let provider = GitHubRepositoryProvider(client: GitHubAPIClient(token: "test", transport: transport))
+
+		let pullRequest = try await provider.fetchPullRequest(repositoryFullName: "charliewilco/Auditorium", number: 12)
+		let requestURLs = await transport.requestedURLs()
+
+		#expect(pullRequest.status == .open)
+		#expect(pullRequest.checksStatus == .passed)
+		#expect(pullRequest.branchName == "auditorium/issue-12")
+		#expect(pullRequest.targetBranch == "main")
+		#expect(requestURLs.map(\.path) == [
+			"/repos/charliewilco/Auditorium/pulls/12",
+			"/repos/charliewilco/Auditorium/commits/abc123/status",
+			"/repos/charliewilco/Auditorium/commits/abc123/check-runs"
+		])
+		#expect(requestURLs.last?.query == "per_page=100")
+	}
+
+	@Test func githubRepositoryProviderMapsClosedPullRequestAndFailedCheckRuns() async throws {
+		let pullRequestPayload = """
+		{
+			"number": 13,
+			"title": "ISSUE-13: Failed work",
+			"html_url": "https://github.com/charliewilco/Auditorium/pull/13",
+			"state": "closed",
+			"draft": false,
+			"merged": false,
+			"head": { "ref": "auditorium/issue-13", "sha": "badcafe" },
+			"base": { "ref": "main", "sha": "def456" }
+		}
+		"""
+		let statusPayload = """
+		{
+			"state": "success"
+		}
+		"""
+		let checkRunsPayload = """
+		{
+			"check_runs": [
+				{ "status": "completed", "conclusion": "failure" }
+			]
+		}
+		"""
+		let transport = RecordingGitHubTransport(responses: [
+			MockGitHubResponse(payload: pullRequestPayload),
+			MockGitHubResponse(payload: statusPayload),
+			MockGitHubResponse(payload: checkRunsPayload)
+		])
+		let provider = GitHubRepositoryProvider(client: GitHubAPIClient(token: "test", transport: transport))
+
+		let pullRequest = try await provider.fetchPullRequest(repositoryFullName: "charliewilco/Auditorium", number: 13)
+
+		#expect(pullRequest.status == .closed)
+		#expect(pullRequest.checksStatus == .failed)
+	}
+
 	@Test func githubIssueProviderNormalizesIssuesAndSkipsPullRequests() async throws {
 		let payload = """
 		[

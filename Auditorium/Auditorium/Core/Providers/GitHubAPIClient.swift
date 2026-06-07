@@ -85,14 +85,18 @@ struct GitHubAPIClient: Sendable {
 			"base": request.targetBranch
 		]
 		let response: GitHubPullRequestPayload = try await send(path: "/repos/\(request.repository.fullName)/pulls", method: "POST", body: payload)
-		return PullRequestDescriptor(
-			title: response.title,
-			url: response.htmlURL,
-			branchName: request.branchName,
-			targetBranch: request.targetBranch,
-			status: .open,
-			checksStatus: .pending
-		)
+		return response.descriptor(fallbackBranchName: request.branchName, fallbackTargetBranch: request.targetBranch, checksStatus: .pending)
+	}
+
+	func pullRequest(repositoryFullName: String, number: Int) async throws -> PullRequestDescriptor {
+		let response: GitHubPullRequestPayload = try await get(path: "/repos/\(repositoryFullName)/pulls/\(number)")
+		let checksStatus: ChecksStatus
+		if let sha = response.head?.sha, sha.isEmpty == false {
+			checksStatus = try await pullRequestChecksStatus(repositoryFullName: repositoryFullName, ref: sha)
+		} else {
+			checksStatus = .pending
+		}
+		return response.descriptor(fallbackBranchName: "", fallbackTargetBranch: "", checksStatus: checksStatus)
 	}
 
 	func validateScopes(requiredScopes: Set<String> = ["repo", "read:user"]) async throws -> Set<String> {
@@ -105,6 +109,33 @@ struct GitHubAPIClient: Sendable {
 			throw ProviderError.unavailable("GitHub credentials are missing required scopes: \(requiredScopes.subtracting(granted).sorted().joined(separator: ", ")).")
 		}
 		return granted
+	}
+
+	private func commitStatus(repositoryFullName: String, ref: String) async throws -> ChecksStatus {
+		let response: GitHubCommitStatusPayload = try await get(path: "/repos/\(repositoryFullName)/commits/\(ref)/status")
+		return response.checksStatus
+	}
+
+	private func commitCheckRuns(repositoryFullName: String, ref: String) async throws -> ChecksStatus {
+		let response: GitHubCheckRunsPayload = try await get(path: "/repos/\(repositoryFullName)/commits/\(ref)/check-runs", queryItems: [
+			URLQueryItem(name: "per_page", value: "100")
+		])
+		return response.checksStatus
+	}
+
+	private func pullRequestChecksStatus(repositoryFullName: String, ref: String) async throws -> ChecksStatus {
+		let statuses = try await commitStatus(repositoryFullName: repositoryFullName, ref: ref)
+		let checkRuns = try await commitCheckRuns(repositoryFullName: repositoryFullName, ref: ref)
+		if statuses == .failed || checkRuns == .failed {
+			return .failed
+		}
+		if statuses == .pending || checkRuns == .pending {
+			return .pending
+		}
+		if statuses == .passed || checkRuns == .passed {
+			return .passed
+		}
+		return .skipped
 	}
 
 	private func get<Value: Decodable>(path: String, queryItems: [URLQueryItem] = []) async throws -> Value {
@@ -295,11 +326,115 @@ struct GitHubLabelsRequest: Encodable {
 }
 
 struct GitHubPullRequestPayload: Decodable {
+	let number: Int?
 	let title: String
 	let htmlURL: URL
+	let state: String?
+	let draft: Bool?
+	let merged: Bool?
+	let head: GitHubPullRequestRefPayload?
+	let base: GitHubPullRequestRefPayload?
 
 	enum CodingKeys: String, CodingKey {
+		case number
 		case title
 		case htmlURL = "html_url"
+		case state
+		case draft
+		case merged
+		case head
+		case base
+	}
+
+	func descriptor(fallbackBranchName: String, fallbackTargetBranch: String, checksStatus: ChecksStatus) -> PullRequestDescriptor {
+		PullRequestDescriptor(
+			title: title,
+			url: htmlURL,
+			branchName: head?.ref ?? fallbackBranchName,
+			targetBranch: base?.ref ?? fallbackTargetBranch,
+			status: pullRequestStatus,
+			checksStatus: checksStatus
+		)
+	}
+
+	private var pullRequestStatus: PullRequestStatus {
+		if merged == true {
+			return .merged
+		}
+		if state == "closed" {
+			return .closed
+		}
+		if draft == true {
+			return .draft
+		}
+		return .open
+	}
+}
+
+struct GitHubPullRequestRefPayload: Decodable {
+	let ref: String
+	let sha: String?
+}
+
+struct GitHubCommitStatusPayload: Decodable {
+	let state: String
+
+	var checksStatus: ChecksStatus {
+		switch state {
+		case "success":
+			return .passed
+		case "failure", "error":
+			return .failed
+		case "pending":
+			return .pending
+		default:
+			return .skipped
+		}
+	}
+}
+
+struct GitHubCheckRunsPayload: Decodable {
+	let checkRuns: [GitHubCheckRunPayload]
+
+	enum CodingKeys: String, CodingKey {
+		case checkRuns = "check_runs"
+	}
+
+	var checksStatus: ChecksStatus {
+		guard checkRuns.isEmpty == false else {
+			return .skipped
+		}
+		let statuses = checkRuns.map(\.checksStatus)
+		if statuses.contains(.failed) {
+			return .failed
+		}
+		if statuses.contains(.pending) {
+			return .pending
+		}
+		if statuses.contains(.passed) {
+			return .passed
+		}
+		return .skipped
+	}
+}
+
+struct GitHubCheckRunPayload: Decodable {
+	let status: String
+	let conclusion: String?
+
+	var checksStatus: ChecksStatus {
+		guard status == "completed" else {
+			return .pending
+		}
+		switch conclusion {
+		case "success":
+			return .passed
+		case "failure", "cancelled", "timed_out", "action_required":
+			return .failed
+		case "skipped", "neutral":
+			return .skipped
+		default:
+			return .pending
+		}
 	}
 }

@@ -90,7 +90,7 @@ Acceptance gate:
 - [x] Commit agent changes.
 - [x] Push ticket branch.
 - [x] Open pull request.
-- [ ] Fetch PR/check status.
+- [x] Fetch PR/check status.
 - [x] Add tests with mocked GitHub API responses.
 
 Acceptance gate:

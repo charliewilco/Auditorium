@@ -77,6 +77,10 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 		try await requireClient().createPullRequest(request)
 	}
 
+	func fetchPullRequest(repositoryFullName: String, number: Int) async throws -> PullRequestDescriptor {
+		try await requireClient().pullRequest(repositoryFullName: repositoryFullName, number: number)
+	}
+
 	nonisolated static func pushArguments(branchName: String) -> [String] {
 		["push", "-u", "origin", branchName]
 	}

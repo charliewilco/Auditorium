@@ -24,6 +24,7 @@ protocol SourceCodeProvider {
 	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool
 	func pushBranch(named branchName: String, from repositoryPath: URL) async throws
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor
+	func fetchPullRequest(repositoryFullName: String, number: Int) async throws -> PullRequestDescriptor
 }
 
 extension SourceCodeProvider {
@@ -45,6 +46,10 @@ extension SourceCodeProvider {
 
 	func pushBranch(named branchName: String, from repositoryPath: URL) async throws {
 		throw ProviderError.notImplemented("\(kind.title) branch push")
+	}
+
+	func fetchPullRequest(repositoryFullName: String, number: Int) async throws -> PullRequestDescriptor {
+		throw ProviderError.notImplemented("\(kind.title) pull request status")
 	}
 }
 
