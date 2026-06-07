@@ -412,6 +412,17 @@ struct AuditoriumCoreTests {
 		#expect(FileManager.default.fileExists(atPath: report.filePath))
 	}
 
+	@Test func processCommandReturnsWhenDescendantKeepsOutputPipeOpen() async throws {
+		let startedAt = Date()
+		let result = try await ProcessCommand.runStreaming(
+			executable: "/bin/sh",
+			arguments: ["-lc", "(sleep 5) & printf 'done\\n'"]
+		)
+
+		#expect(result.standardOutput == "done\n")
+		#expect(Date().timeIntervalSince(startedAt) < 2)
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(

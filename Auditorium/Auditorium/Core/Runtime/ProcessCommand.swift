@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct ProcessResult: Sendable {
@@ -87,6 +88,8 @@ private final class ProcessExitBox: @unchecked Sendable {
 }
 
 enum ProcessCommand {
+	private static let outputDrainNanoseconds: UInt64 = 500_000_000
+
 	static func run(executable: String, arguments: [String], workingDirectory: URL? = nil) async throws -> ProcessResult {
 		try await runStreaming(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
 	}
@@ -123,15 +126,23 @@ enum ProcessCommand {
 			exitBox.observe(process)
 			do {
 				try process.run()
+				stdout.fileHandleForWriting.closeFile()
+				stderr.fileHandleForWriting.closeFile()
 				cancellationBox.setProcess(process)
 			}
 			catch {
 				throw ProcessCommandError.launchFailed(error.localizedDescription)
 			}
 
-			async let output = readLines(from: stdout.fileHandleForReading, onLine: onStandardOutputLine)
-			async let errorOutput = readLines(from: stderr.fileHandleForReading, onLine: onStandardErrorLine)
+			let outputTask = Task {
+				try await readLines(from: stdout.fileHandleForReading, onLine: onStandardOutputLine)
+			}
+			let errorOutputTask = Task {
+				try await readLines(from: stderr.fileHandleForReading, onLine: onStandardErrorLine)
+			}
 			let exitCode = await exitBox.value()
+			async let output = collectOutput(from: outputTask, closing: stdout.fileHandleForReading)
+			async let errorOutput = collectOutput(from: errorOutputTask, closing: stderr.fileHandleForReading)
 			let result = try await ProcessResult(exitCode: exitCode, standardOutput: output, standardError: errorOutput)
 
 			if cancellationBox.isCanceled {
@@ -154,20 +165,44 @@ enum ProcessCommand {
 	private static func readLines(from fileHandle: FileHandle, onLine: (@MainActor (String) async -> Void)?) async throws -> String {
 		var output = Data()
 		var lineBuffer = Data()
-		for try await byte in fileHandle.bytes {
-			output.append(byte)
-			if byte == 10 {
-				try await emitLine(lineBuffer, onLine: onLine)
-				lineBuffer.removeAll(keepingCapacity: true)
+		var buffer = [UInt8](repeating: 0, count: 4096)
+		let fileDescriptor = fileHandle.fileDescriptor
+		while Task.isCancelled == false {
+			let byteCount = buffer.withUnsafeMutableBytes { rawBuffer in
+				Darwin.read(fileDescriptor, rawBuffer.baseAddress, rawBuffer.count)
 			}
-			else {
-				lineBuffer.append(byte)
+			if byteCount > 0 {
+				for byte in buffer.prefix(byteCount) {
+					output.append(byte)
+					if byte == 10 {
+						try await emitLine(lineBuffer, onLine: onLine)
+						lineBuffer.removeAll(keepingCapacity: true)
+					}
+					else {
+						lineBuffer.append(byte)
+					}
+				}
+			}
+			else if byteCount == 0 {
+				break
+			}
+			else if errno != EINTR {
+				break
 			}
 		}
 		if lineBuffer.isEmpty == false {
 			try await emitLine(lineBuffer, onLine: onLine)
 		}
 		return String(data: output, encoding: .utf8) ?? ""
+	}
+
+	private static func collectOutput(from task: Task<String, Error>, closing fileHandle: FileHandle) async throws -> String {
+		let closer = Task {
+			try? await Task.sleep(nanoseconds: outputDrainNanoseconds)
+			fileHandle.closeFile()
+		}
+		defer { closer.cancel() }
+		return try await task.value
 	}
 
 	private static func emitLine(_ data: Data, onLine: (@MainActor (String) async -> Void)?) async throws {

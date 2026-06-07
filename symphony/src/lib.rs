@@ -12,7 +12,9 @@ use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+
+const CODEX_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 const DEFAULT_WORKFLOW: &str = r#"---
 tracker:
@@ -1538,12 +1540,10 @@ async fn run_codex(
         Ok::<Vec<String>, std::io::Error>(collected)
     });
     let status = child.wait().await?;
-    let stdout_lines = stdout_task.await.map_err(|error| {
-        SymphonyError::InvalidConfig(format!("codex stdout task failed: {error}"))
-    })??;
-    let stderr_lines = stderr_task.await.map_err(|error| {
-        SymphonyError::InvalidConfig(format!("codex stderr task failed: {error}"))
-    })??;
+    let (stdout_lines, stdout_drain_timed_out) =
+        collect_child_output("stdout", stdout_task).await?;
+    let (stderr_lines, stderr_drain_timed_out) =
+        collect_child_output("stderr", stderr_task).await?;
     for line in stdout_lines {
         emit(
             json_output,
@@ -1562,6 +1562,18 @@ async fn run_codex(
             json!({ "line": line }),
         )?;
     }
+    if stdout_drain_timed_out || stderr_drain_timed_out {
+        emit(
+            json_output,
+            "warning",
+            "agent",
+            "codex_output_drain_timed_out",
+            json!({
+                "stdout": stdout_drain_timed_out,
+                "stderr": stderr_drain_timed_out
+            }),
+        )?;
+    }
     if !status.success() {
         return Err(SymphonyError::CommandFailed {
             program: program.clone(),
@@ -1578,6 +1590,26 @@ async fn run_codex(
         json!({}),
     )?;
     Ok(())
+}
+
+async fn collect_child_output(
+    stream_name: &str,
+    mut task: tokio::task::JoinHandle<Result<Vec<String>, std::io::Error>>,
+) -> Result<(Vec<String>, bool), SymphonyError> {
+    match timeout(CODEX_OUTPUT_DRAIN_TIMEOUT, &mut task).await {
+        Ok(output) => output
+            .map_err(|error| {
+                SymphonyError::InvalidConfig(format!("codex {stream_name} task failed: {error}"))
+            })?
+            .map(|lines| (lines, false))
+            .map_err(|error| {
+                SymphonyError::InvalidConfig(format!("codex {stream_name} read failed: {error}"))
+            }),
+        Err(_) => {
+            task.abort();
+            Ok((Vec::new(), true))
+        }
+    }
 }
 
 fn render_prompt(template: &str, issue: &NormalizedIssue, config: &WorkflowConfig) -> String {
@@ -2503,6 +2535,40 @@ Body
                 "Prompt body"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn codex_runner_does_not_hang_when_descendant_keeps_output_pipe_open() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let script = tempdir.path().join("fake-codex-leaky-pipe");
+        let pid_path = tempdir.path().join("descendant.pid");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" > '{}'\nprintf 'codex finished\\n'\nexit 0\n",
+                pid_path.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        let workflow = parse_workflow("Body").unwrap();
+        let mut config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        config.codex_command = script.display().to_string();
+
+        let result = timeout(
+            Duration::from_secs(3),
+            run_codex(&config, tempdir.path(), "Prompt body", true),
+        )
+        .await;
+        if let Ok(pid) = std::fs::read_to_string(&pid_path) {
+            let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        }
+
+        result
+            .expect("run_codex should not hang on inherited output pipe")
+            .unwrap();
     }
 
     #[test]
