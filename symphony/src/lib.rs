@@ -1988,7 +1988,11 @@ async fn run_validation(command: &str, repo_path: &Path) -> Result<String, Symph
         (false, false) => format!("{stdout}\n{stderr}"),
     };
     if output.status.success() {
-        Ok(combined)
+        if combined.is_empty() {
+            Ok(format!("Command passed with no output: {command}"))
+        } else {
+            Ok(combined)
+        }
     } else {
         Err(SymphonyError::CommandFailed {
             program: "/bin/sh".to_string(),
@@ -3244,6 +3248,15 @@ Body
         .unwrap();
 
         assert_eq!(output, "stdout-line\nstderr-line");
+    }
+
+    #[tokio::test]
+    async fn run_validation_records_silent_success_for_reports() {
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let output = run_validation("true", tempdir.path()).await.unwrap();
+
+        assert_eq!(output, "Command passed with no output: true");
     }
 
     #[tokio::test]

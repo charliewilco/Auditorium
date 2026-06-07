@@ -237,7 +237,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] A real issue run has a deterministic, inspectable workspace containing the repository at the expected branch.
+- [x] A real issue run has a deterministic, inspectable workspace containing the repository at the expected branch.
 
 ## 13. Git And Pull Requests
 
