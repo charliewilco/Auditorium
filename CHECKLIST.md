@@ -166,7 +166,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] User can select real GitHub issues, queue them, reorder them, and run only enabled items.
+- [x] User can select real GitHub issues, queue them, reorder them, and run only enabled items.
 
 ## 9. Runtime Detection And Runtime Providers
 

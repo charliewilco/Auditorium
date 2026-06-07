@@ -421,6 +421,58 @@ struct AuditoriumCoreTests {
 		#expect(plan.batches.map(\.count) == [2])
 	}
 
+	@Test func importedGitHubIssuesCanBeQueuedReorderedAndRunOnlyWhenEnabled() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let project = Project(
+			name: "Auditorium",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		context.insert(project)
+		try context.save()
+		let provider = StaticCoreIssueTrackerProvider(tickets: [
+			ticket(number: 101, labels: ["agent", "ui"], assignee: "charliewilco"),
+			ticket(number: 102, labels: ["agent", "backend"], assignee: nil),
+			ticket(number: 103, labels: ["agent", "tests"], assignee: "codex"),
+		])
+
+		let imported = try await ProjectIssueImportService().importTickets(for: project, context: context, provider: provider)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>()).sorted { $0.externalID < $1.externalID }
+		let queue = QueueService()
+		try queue.addTickets([tickets[0].id], projectID: project.id, context: context)
+		try queue.addTickets([tickets[1].id], projectID: project.id, context: context)
+		try queue.addTickets([tickets[2].id], projectID: project.id, context: context)
+		try queue.addTickets([tickets[1].id], projectID: project.id, context: context)
+		try queue.moveQueueItems(from: IndexSet(integer: 2), to: 0, projectID: project.id, context: context)
+		var queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>()).sorted { $0.position < $1.position }
+		let disabledItem = try #require(queueItems.first { $0.ticketID == tickets[1].id })
+		try queue.setQueueItem(disabledItem, isEnabled: false, context: context)
+		queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>()).sorted { $0.position < $1.position }
+
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: 2,
+			workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown
+		)
+
+		#expect(imported == 3)
+		#expect(tickets.map(\.externalID) == ["101", "102", "103"])
+		#expect(tickets.allSatisfy { $0.provider == .githubIssues && $0.sourceProjectID == project.id })
+		#expect(queueItems.count == 3)
+		#expect(queueItems.map(\.ticketID) == [tickets[2].id, tickets[0].id, tickets[1].id])
+		#expect(queueItems.map(\.position) == [0, 1, 2])
+		#expect(queueItems.first { $0.ticketID == tickets[1].id }?.isEnabled == false)
+		#expect(tickets.allSatisfy { $0.status == .queued })
+		#expect(plan.queueSnapshot.map(\.ticketID) == [tickets[2].id, tickets[0].id])
+		#expect(plan.batches.map(\.count) == [2])
+	}
+
 	@Test func runRecordPersistsQueueSnapshotJSON() {
 		let first = QueueRunSnapshot(id: UUID(), ticketID: UUID(), position: 0, priority: .high, concurrencyGroup: "ui")
 		let second = QueueRunSnapshot(id: UUID(), ticketID: UUID(), position: 1, priority: .low, concurrencyGroup: "backend")
@@ -936,4 +988,21 @@ private struct MockGitHubTransport: GitHubAPITransport {
 		let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: headers)!
 		return (Data(payload.utf8), response)
 	}
+}
+
+private struct StaticCoreIssueTrackerProvider: IssueTrackerProvider {
+	let tickets: [TicketDescriptor]
+
+	var kind: IssueProviderKind { .githubIssues }
+	var authentication: ProviderAuthenticationDescriptor {
+		ProviderAuthenticationDescriptor(method: .oauth, displayName: "Test GitHub", oauth: GitHubOAuth.descriptor)
+	}
+
+	func listTickets(projectID: String) async throws -> [TicketDescriptor] {
+		tickets
+	}
+
+	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {}
+
+	func addComment(ticketID: String, body: String) async throws {}
 }
