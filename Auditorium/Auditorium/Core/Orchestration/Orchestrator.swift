@@ -7,8 +7,11 @@ final class Orchestrator {
 	private let runtimeDetection: RuntimeDetectionService
 	private let reportGenerator: ReportGenerator
 	private let symphonyRunner: SymphonyCLIProcessRunner
+	private let providerRegistry: ProviderRegistry?
 	private let mockSourceProvider: any SourceCodeProvider
 	private let mockAgentProvider: any AgentProvider
+	private let localWorkspaceSourceProvider: (any SourceCodeProvider)?
+	private let codexAgentProvider: any AgentProvider
 	private var activeTask: Task<Void, Never>?
 
 	init(
@@ -16,15 +19,21 @@ final class Orchestrator {
 		runtimeDetection: RuntimeDetectionService,
 		reportGenerator: ReportGenerator,
 		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner(),
+		providerRegistry: ProviderRegistry? = nil,
 		mockSourceProvider: (any SourceCodeProvider)? = nil,
-		mockAgentProvider: (any AgentProvider)? = nil
+		mockAgentProvider: (any AgentProvider)? = nil,
+		localWorkspaceSourceProvider: (any SourceCodeProvider)? = nil,
+		codexAgentProvider: (any AgentProvider)? = nil
 	) {
 		self.workspaceService = workspaceService
 		self.runtimeDetection = runtimeDetection
 		self.reportGenerator = reportGenerator
 		self.symphonyRunner = symphonyRunner
+		self.providerRegistry = providerRegistry
 		self.mockSourceProvider = mockSourceProvider ?? MockGitHubRepositoryProvider()
 		self.mockAgentProvider = mockAgentProvider ?? MockCodexAgentProvider()
+		self.localWorkspaceSourceProvider = localWorkspaceSourceProvider
+		self.codexAgentProvider = codexAgentProvider ?? CodexCLIProcessAgentProvider()
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
@@ -57,6 +66,10 @@ final class Orchestrator {
 		try await runtimeDetection.requireAvailableRuntime(for: project.runtimeProviderKind)
 		try await runtimeDetection.requireAvailableAgent(for: project.agentProviderKind)
 		if project.runtimeProviderKind == .localWorkspace, project.agentProviderKind == .codex {
+			if providerRegistry != nil || localWorkspaceSourceProvider != nil {
+				try await executeWithLocalWorkspaceCodex(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
+				return
+			}
 			try await executeWithSymphony(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
 			return
 		}
@@ -125,6 +138,78 @@ final class Orchestrator {
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: projectID, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
 		context.insert(ReportRecord(projectID: projectID, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		try ModelIntegrityValidator.save(context: context)
+	}
+
+	private func executeWithLocalWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
+		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
+		try workspaceService.ensureProjectLayout(projectID: project.id)
+		let sourceProvider = try resolveLocalWorkspaceSourceProvider(project: project, context: context)
+		let repository = repositoryDescriptor(for: project)
+		let policy = try WorkflowPolicyParser().parse(plan.workflowPolicyMarkdown)
+		let runtime = LocalProcessRuntimeProvider(
+			workspaceService: workspaceService,
+			projectID: project.id,
+			sourceProvider: sourceProvider,
+			branchPrefix: policy.branchPrefix
+		)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex.")
+		context.insert(run)
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Local Workspace Codex run started with bounded concurrency \(plan.concurrency)."))
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
+		var ticketRuns: [TicketRunRecord] = []
+		for item in plan.queueSnapshot {
+			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
+			context.insert(ticketRun)
+			ticketRuns.append(ticketRun)
+		}
+		try ModelIntegrityValidator.save(context: context)
+
+		for batch in plan.batches {
+			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) local ticket runs."))
+			try ModelIntegrityValidator.save(context: context)
+			for item in batch {
+				try Task.checkCancellation()
+				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
+					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+					continue
+				}
+				try await processTicket(
+					project: project,
+					repository: repository,
+					ticket: ticket,
+					ticketRun: ticketRun,
+					run: run,
+					runtime: runtime,
+					agent: codexAgentProvider,
+					sourceProvider: sourceProvider,
+					context: context,
+					workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
+					commitAndPush: true
+				)
+			}
+		}
+
+		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
+		let failed = ticketRuns.filter { $0.status == .failed }.count
+		let blocked = ticketRuns.filter { $0.status == .blocked }.count
+		run.completedTickets = completed
+		run.failedTickets = failed
+		run.blockedTickets = blocked
+		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
+		run.endedAt = .now
+		run.status = failed == 0 && blocked == 0 ? .completed : .completedWithFailures
+		run.summary = "Completed \(completed), failed \(failed), blocked \(blocked)."
+		context.insert(RuntimeEventRecord(runID: run.id, level: .success, category: .report, message: "Generating markdown report."))
+
+		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
+		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
+		let markdown = reportGenerator.generate(project: project, run: run, ticketRuns: ticketRuns, tickets: finalTickets, pullRequests: prs, events: events)
+		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
+		run.reportMarkdown = markdown
+		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
 		try ModelIntegrityValidator.save(context: context)
 	}
 
@@ -281,17 +366,40 @@ final class Orchestrator {
 		return issueNumber
 	}
 
+	private func resolveLocalWorkspaceSourceProvider(project: Project, context: ModelContext) throws -> any SourceCodeProvider {
+		if let localWorkspaceSourceProvider {
+			return localWorkspaceSourceProvider
+		}
+		guard let providerRegistry else {
+			throw ProviderError.unavailable("A source-code provider is required for Local Workspace runs.")
+		}
+		return try providerRegistry.sourceCodeProvider(for: project, context: context)
+	}
+
+	private func repositoryDescriptor(for project: Project) -> RepositoryDescriptor {
+		RepositoryDescriptor(
+			provider: project.repositoryProviderKind,
+			owner: String(project.repositoryName.split(separator: "/").first ?? "charlie"),
+			name: String(project.repositoryName.split(separator: "/").last ?? project.repositoryName[...]),
+			fullName: project.repositoryName,
+			cloneURL: URL(string: project.repositoryURL.hasSuffix(".git") ? project.repositoryURL : "\(project.repositoryURL).git") ?? URL(fileURLWithPath: project.repositoryURL),
+			webURL: URL(string: project.repositoryURL) ?? URL(fileURLWithPath: project.repositoryURL),
+			defaultBranch: project.defaultBranch
+		)
+	}
+
 	private func processTicket(
 		project: Project,
 		repository: RepositoryDescriptor,
 		ticket: TicketRecord,
 		ticketRun: TicketRunRecord,
 		run: RunRecord,
-		runtime: MockRuntimeProvider,
+		runtime: any RuntimeProvider,
 		agent: any AgentProvider,
 		sourceProvider: any SourceCodeProvider,
 		context: ModelContext,
-		workflowPolicyMarkdown: String
+		workflowPolicyMarkdown: String,
+		commitAndPush: Bool = false
 	) async throws {
 		ticket.status = .running
 		ticket.updatedAt = .now
@@ -347,6 +455,20 @@ final class Orchestrator {
 
 		switch finalOutcome ?? .completed {
 		case .completed:
+			if commitAndPush {
+				let didCommit = try await sourceProvider.commitChanges(in: workspace.path, message: "\(ticket.externalID): \(ticket.title)")
+				if didCommit == false {
+					ticket.status = .completed
+					ticketRun.status = .completed
+					ticketRun.summary = finalSummary.isEmpty ? "Agent completed without file changes." : finalSummary
+					ticketRun.confidence = 0.72
+					context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .warning, category: .git, message: "Agent completed without file changes; no pull request was opened."))
+					break
+				}
+				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .git, message: "Committed agent changes on \(workspace.branchName)."))
+				try await sourceProvider.pushBranch(named: workspace.branchName, from: workspace.path)
+				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .git, message: "Pushed \(workspace.branchName)."))
+			}
 			let pr = try await sourceProvider.createPullRequest(PullRequestRequest(
 				title: "\(ticket.externalID): \(ticket.title)",
 				body: finalSummary,

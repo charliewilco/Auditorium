@@ -81,7 +81,7 @@ struct RootView: View {
 		}
 		.task(id: appState.selectedProjectID) {
 			if orchestrator == nil {
-				orchestrator = Orchestrator(workspaceService: services.workspace, runtimeDetection: services.runtimeDetection, reportGenerator: services.reportGenerator)
+				orchestrator = Orchestrator(workspaceService: services.workspace, runtimeDetection: services.runtimeDetection, reportGenerator: services.reportGenerator, providerRegistry: services.providerRegistry)
 			}
 			let activeProject = selectedProject ?? projects.first
 			runtimeHealth = await services.runtimeDetection.detect()

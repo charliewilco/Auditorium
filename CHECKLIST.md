@@ -189,7 +189,7 @@ Acceptance gate:
 Acceptance gate:
 
 - [ ] Runtime preflight blocks unsafe runs.
-- [ ] At least one non-mock runtime can run a ticket workspace end-to-end.
+- [x] At least one non-mock runtime can run a ticket workspace end-to-end.
 
 ## 10. Agent Providers
 
@@ -256,7 +256,7 @@ Acceptance gate:
 - [x] Commit changes with deterministic message.
 - [x] Push branch.
 - [x] Open GitHub pull request.
-- [ ] Store `PullRequestRecord`.
+- [x] Store `PullRequestRecord`.
 - [ ] Surface PR in run detail and ticket inspector.
 - [x] Add PR to markdown report.
 - [ ] Never auto-merge in v0.
@@ -429,6 +429,7 @@ Acceptance gate:
 - [x] Swift tests for injected agent event metadata and log path persistence.
 - [x] Swift tests for Generic CLI agent command parsing and process execution.
 - [x] Swift tests for Local Workspace runtime clone, branch, start, and stop behavior.
+- [x] Swift tests for Local Workspace Codex orchestration commit, push, PR, and no-change behavior.
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.

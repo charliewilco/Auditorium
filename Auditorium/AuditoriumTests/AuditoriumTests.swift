@@ -1516,6 +1516,152 @@ struct AuditoriumTests {
 		#expect(reports.contains { $0.filePath == reportPath })
 	}
 
+	@Test func localWorkspaceCodexOrchestratorCommitsPushesAndStoresPullRequest() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(level: .info, category: .agent, message: "codex_started"),
+			AgentEvent(level: .success, category: .agent, message: "codex_completed", summary: "Implemented the requested change.", outcome: .completed)
+		])
+		let project = Project(
+			name: "Local Codex",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "101",
+			title: "Wire Local Codex",
+			body: "Run through the Swift provider path.",
+			status: .ready,
+			labels: ["runtime"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .high))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let pullRequest = try #require(context.fetch(FetchDescriptor<PullRequestRecord>()).first)
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let workspacePath = workspace.workspacePath(projectID: project.id, ticketExternalID: "101")
+
+		#expect(sourceProvider.clonePaths == [workspacePath])
+		#expect(sourceProvider.createdBranches.map { $0.name } == ["auditorium/101-wire-local-codex"])
+		#expect(sourceProvider.commitPaths == [workspacePath])
+		#expect(sourceProvider.pushedBranches == ["auditorium/101-wire-local-codex"])
+		#expect(sourceProvider.createdPullRequestTitles == ["101: Wire Local Codex"])
+		#expect(ticket.status == .needsReview)
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.workspacePath == workspacePath.path())
+		#expect(ticketRun.branchName == "auditorium/101-wire-local-codex")
+		#expect(ticketRun.pullRequestURL == pullRequest.url)
+		#expect(run.status == .completed)
+		#expect(run.pullRequestsCreated == 1)
+		#expect(reports.count == 1)
+		#expect(events.contains { $0.message == "Committed agent changes on auditorium/101-wire-local-codex." })
+		#expect(events.contains { $0.message == "Pushed auditorium/101-wire-local-codex." })
+		#expect(FileManager.default.fileExists(atPath: workspace.workspaceManifestPath(workspace: workspacePath).path()))
+	}
+
+	@Test func localWorkspaceCodexRunWithoutFileChangesCompletesWithoutPullRequest() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github, commitsChanges: false)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(level: .success, category: .agent, message: "codex_completed", summary: "No source changes were needed.", outcome: .completed)
+		])
+		let project = Project(
+			name: "No Changes",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "102",
+			title: "Inspect Without Changes",
+			body: "Complete safely when the agent has no diff.",
+			status: .ready,
+			labels: ["runtime"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/102",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+
+		#expect(ticket.status == .completed)
+		#expect(ticketRun.status == .completed)
+		#expect(ticketRun.pullRequestURL == nil)
+		#expect(run.status == .completed)
+		#expect(run.pullRequestsCreated == 0)
+		#expect(sourceProvider.commitPaths.count == 1)
+		#expect(sourceProvider.pushedBranches.isEmpty)
+		#expect(sourceProvider.createdPullRequestTitles.isEmpty)
+		#expect(try context.fetch(FetchDescriptor<PullRequestRecord>()).isEmpty)
+		#expect(events.contains { $0.message == "Agent completed without file changes; no pull request was opened." })
+	}
+
 	@Test func mockOrchestratorWritesWorkspaceManifestPerTicketRun() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -2106,12 +2252,16 @@ private struct MockGitHubResponse: Sendable {
 private final class StaticSourceCodeProvider: SourceCodeProvider {
 	let kind: RepositoryProviderKind
 	let authentication = ProviderAuthenticationDescriptor(method: .none, displayName: "Static Source", oauth: nil)
+	let commitsChanges: Bool
 	private(set) var createdPullRequestTitles: [String] = []
 	private(set) var clonePaths: [URL] = []
 	private(set) var createdBranches: [(name: String, repositoryPath: URL)] = []
+	private(set) var commitPaths: [URL] = []
+	private(set) var pushedBranches: [String] = []
 
-	init(kind: RepositoryProviderKind) {
+	init(kind: RepositoryProviderKind, commitsChanges: Bool = true) {
 		self.kind = kind
+		self.commitsChanges = commitsChanges
 	}
 
 	func listRepositories() async throws -> [RepositoryDescriptor] {
@@ -2125,6 +2275,15 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 
 	func createBranch(named branchName: String, in repositoryPath: URL) async throws {
 		createdBranches.append((branchName, repositoryPath))
+	}
+
+	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool {
+		commitPaths.append(repositoryPath)
+		return commitsChanges
+	}
+
+	func pushBranch(named branchName: String, from repositoryPath: URL) async throws {
+		pushedBranches.append(branchName)
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
