@@ -9,6 +9,8 @@ struct ProjectDashboardView: View {
 	let pullRequests: [PullRequestRecord]
 	let runtimeHealth: [RuntimeHealthCheck]
 	let symphonyDoctorStatus: SymphonyDoctorStatus?
+	let workspaceLocations: WorkspaceLocationState?
+	let revealLocation: (URL) -> Void
 
 	var body: some View {
 		ScrollView {
@@ -27,6 +29,7 @@ struct ProjectDashboardView: View {
 						("Queued", "\(queueItems.count)")
 					])
 				}
+				workspaceLocationsPanel
 				HStack(alignment: .top, spacing: 16) {
 					runtimePanel
 					recentRunsPanel
@@ -72,6 +75,41 @@ struct ProjectDashboardView: View {
 				.font(.headline)
 			ForEach(rows, id: \.0) { row in
 				LabeledContent(row.0, value: row.1)
+			}
+		}
+		.padding()
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+	}
+
+	private var workspaceLocationsPanel: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			Label("Local Paths", systemImage: "folder")
+				.font(.headline)
+			if let workspaceLocations {
+				ForEach(workspaceLocations.items) { item in
+					HStack(alignment: .firstTextBaseline, spacing: 12) {
+						VStack(alignment: .leading, spacing: 4) {
+							Text(item.title)
+								.font(.callout.weight(.medium))
+							Text(item.path)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+								.lineLimit(1)
+								.truncationMode(.middle)
+								.textSelection(.enabled)
+						}
+						Spacer()
+						Button {
+							revealLocation(item.url)
+						} label: {
+							Label("Reveal", systemImage: "folder")
+						}
+					}
+				}
+			} else {
+				Text("No project selected.")
+					.foregroundStyle(.secondary)
 			}
 		}
 		.padding()

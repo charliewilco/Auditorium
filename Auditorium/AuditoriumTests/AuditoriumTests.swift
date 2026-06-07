@@ -15,6 +15,61 @@ struct AuditoriumTests {
 		#expect(first.path().contains("bur-101-fix-oauth"))
 	}
 
+	@Test func workspaceLocationStateUsesDeterministicProjectPaths() {
+		let root = URL(fileURLWithPath: "/tmp/AuditoriumLocations")
+		let service = ApplicationWorkspaceService(rootDirectory: root)
+		let project = Project(
+			id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+			name: "Locations",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+
+		let state = WorkspaceLocationState(project: project, repository: nil, workspaceService: service)
+
+		#expect(state.items.map(\.id) == ["project", "repository", "workspaces"])
+		#expect(state.items[0].url == service.projectDirectory(projectID: project.id))
+		#expect(state.items[1].url == service.repositoryDirectory(projectID: project.id))
+		#expect(state.items[2].url == service.workspacesDirectory(projectID: project.id))
+	}
+
+	@Test func workspaceLocationStateUsesPersistedRepositoryLocalPath() {
+		let root = URL(fileURLWithPath: "/tmp/AuditoriumLocations")
+		let service = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+		let project = Project(
+			id: projectID,
+			name: "Locations",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let repository = RepositoryRecord(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: "https://github.com/charliewilco/Auditorium.git",
+			webURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			localPath: "/tmp/custom-repository",
+			projectID: projectID
+		)
+
+		let state = WorkspaceLocationState(project: project, repository: repository, workspaceService: service)
+
+		#expect(state.items[1].url == URL(fileURLWithPath: "/tmp/custom-repository"))
+	}
+
 	@Test func workspaceManifestPersistsInspectableJSON() throws {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }

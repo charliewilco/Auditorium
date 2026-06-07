@@ -7,6 +7,7 @@ struct RootView: View {
 	@Environment(\.appServices) private var services
 	@Environment(AppState.self) private var appState
 	@Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
+	@Query(sort: \RepositoryRecord.fullName) private var repositories: [RepositoryRecord]
 	@Query(sort: \TicketRecord.updatedAt, order: .reverse) private var tickets: [TicketRecord]
 	@Query(sort: \QueueItemRecord.position) private var queueItems: [QueueItemRecord]
 	@Query(sort: \RunRecord.startedAt, order: .reverse) private var runs: [RunRecord]
@@ -41,6 +42,16 @@ struct RootView: View {
 	var projectRuns: [RunRecord] {
 		guard let id = appState.selectedProjectID else { return [] }
 		return runs.filter { $0.projectID == id }
+	}
+
+	var selectedRepository: RepositoryRecord? {
+		guard let id = appState.selectedProjectID else { return nil }
+		return repositories.first { $0.projectID == id }
+	}
+
+	var workspaceLocations: WorkspaceLocationState? {
+		guard let project = selectedProject else { return nil }
+		return WorkspaceLocationState(project: project, repository: selectedRepository, workspaceService: services.workspace)
 	}
 
 	var body: some View {
@@ -112,7 +123,7 @@ struct RootView: View {
 	private var detailView: some View {
 		switch appState.selectedDestination {
 		case .dashboard:
-			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
+			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus, workspaceLocations: workspaceLocations, revealLocation: revealLocation)
 		case .tickets:
 			TicketBrowserView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, addToQueue: addTicketsToQueue)
 		case .queue:
@@ -266,6 +277,11 @@ struct RootView: View {
 
 	private func revealReport(_ report: ReportRecord) {
 		NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: report.filePath)])
+	}
+
+	private func revealLocation(_ url: URL) {
+		try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+		NSWorkspace.shared.activateFileViewerSelecting([url])
 	}
 
 	private func confirm(title: String, message: String) -> Bool {
