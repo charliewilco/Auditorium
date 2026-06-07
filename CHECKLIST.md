@@ -127,7 +127,7 @@ Acceptance gate:
 - [ ] Select GitHub account.
 - [x] Select repository from real GitHub data.
 - [ ] Select issue filter/query from real GitHub Issues data.
-- [ ] Validate required fields before advancing each step.
+- [x] Validate required fields before advancing each step.
 - [ ] Add clearer error handling for failed creation.
 
 Acceptance gate:

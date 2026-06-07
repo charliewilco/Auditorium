@@ -1,8 +1,10 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import Auditorium
 
+@Suite(.serialized)
 @MainActor
 struct AuditoriumTests {
 	@Test func workspacePathsAreDeterministicAndSanitized() {
@@ -81,7 +83,7 @@ struct AuditoriumTests {
 		try FileManager.default.createDirectory(at: completedWorkspace, withIntermediateDirectories: true)
 		let ticketRuns = [
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: canceledWorkspace.path(), status: .canceled),
-			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: completedWorkspace.path(), status: .completed)
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: completedWorkspace.path(), status: .completed),
 		]
 
 		let result = try service.cleanupTicketWorkspaces(projectID: projectID, ticketRuns: ticketRuns, policy: .preserveAll)
@@ -111,12 +113,22 @@ struct AuditoriumTests {
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: failedWorkspace.path(), status: .failed),
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: blockedWorkspace.path(), status: .blocked),
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: completedWorkspace.path(), status: .completed),
-			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: reviewWorkspace.path(), status: .needsReview, pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/205"),
+			TicketRunRecord(
+				runID: UUID(),
+				ticketID: UUID(),
+				workspacePath: reviewWorkspace.path(),
+				status: .needsReview,
+				pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/205"
+			),
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: runningWorkspace.path(), status: .running),
-			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: unsafePath, status: .canceled)
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: unsafePath, status: .canceled),
 		]
 
-		let result = try service.cleanupTicketWorkspaces(projectID: projectID, ticketRuns: ticketRuns, policy: .removeCanceledAndTerminalWithoutReview)
+		let result = try service.cleanupTicketWorkspaces(
+			projectID: projectID,
+			ticketRuns: ticketRuns,
+			policy: .removeCanceledAndTerminalWithoutReview
+		)
 
 		#expect(result == WorkspaceCleanupResult(scanned: 7, removed: 4, preserved: 3, skippedUnsafePaths: [unsafePath]))
 		#expect(FileManager.default.fileExists(atPath: canceledWorkspace.path()) == false)
@@ -295,13 +307,37 @@ struct AuditoriumTests {
 		try "stale".write(to: sentinel, atomically: true, encoding: .utf8)
 		let ticket = try #require(context.fetch(FetchDescriptor<TicketRecord>()).first { $0.sourceProjectID == originalProjectID })
 		let run = RunRecord(projectID: originalProjectID, status: .completed, totalTickets: 1, completedTickets: 1)
-		let ticketRun = TicketRunRecord(runID: run.id, ticketID: ticket.id, status: .needsReview, pullRequestURL: "https://example.com/demo/pull/1")
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			status: .needsReview,
+			pullRequestURL: "https://example.com/demo/pull/1"
+		)
 		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: originalProjectID, position: 0, priority: .medium))
 		context.insert(run)
 		context.insert(ticketRun)
 		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .agent, message: "stale event"))
-		context.insert(PullRequestRecord(provider: .github, ticketRunID: ticketRun.id, title: "Demo PR", url: "https://example.com/demo/pull/1", branchName: "auditorium/demo", targetBranch: "next", status: .open, checksStatus: .passed))
-		context.insert(ReportRecord(projectID: originalProjectID, runID: run.id, title: "Demo Report", markdown: "stale", filePath: root.appending(path: "stale-report.md").path()))
+		context.insert(
+			PullRequestRecord(
+				provider: .github,
+				ticketRunID: ticketRun.id,
+				title: "Demo PR",
+				url: "https://example.com/demo/pull/1",
+				branchName: "auditorium/demo",
+				targetBranch: "next",
+				status: .open,
+				checksStatus: .passed
+			)
+		)
+		context.insert(
+			ReportRecord(
+				projectID: originalProjectID,
+				runID: run.id,
+				title: "Demo Report",
+				markdown: "stale",
+				filePath: root.appending(path: "stale-report.md").path()
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 
 		let resetProjectID = try seeder.resetDemoProject(in: context)
@@ -309,7 +345,10 @@ struct AuditoriumTests {
 		#expect(resetProjectID != originalProjectID)
 		#expect(FileManager.default.fileExists(atPath: originalProjectDirectory.path()) == false)
 		#expect(try context.fetch(FetchDescriptor<Project>()).map(\.id) == [resetProjectID])
-		#expect(try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == resetProjectID }.count == DemoTickets.all.count)
+		#expect(
+			try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == resetProjectID }.count
+				== DemoTickets.all.count
+		)
 		#expect(try context.fetch(FetchDescriptor<QueueItemRecord>()).isEmpty)
 		#expect(try context.fetch(FetchDescriptor<RunRecord>()).isEmpty)
 		#expect(try context.fetch(FetchDescriptor<TicketRunRecord>()).isEmpty)
@@ -330,7 +369,13 @@ struct AuditoriumTests {
 		try QueueService().addTickets(Set(tickets.map(\.id)), projectID: projectID, context: context)
 		let sourceProvider = StaticSourceCodeProvider(kind: .github)
 		let agentProvider = StaticAgentProvider(events: [
-			AgentEvent(level: .success, category: .pullRequest, message: "offline demo complete", summary: "Offline demo ticket completed.", outcome: .completed)
+			AgentEvent(
+				level: .success,
+				category: .pullRequest,
+				message: "offline demo complete",
+				summary: "Offline demo ticket completed.",
+				outcome: .completed
+			)
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: workspace,
@@ -367,8 +412,13 @@ struct AuditoriumTests {
 		var didThrow = false
 
 		do {
-			_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
-		} catch ProjectCreationError.invalidDraft {
+			_ = try ProjectCreationService().createProject(
+				from: draft,
+				context: context,
+				workspaceService: ApplicationWorkspaceService(rootDirectory: root)
+			)
+		}
+		catch ProjectCreationError.invalidDraft {
 			didThrow = true
 		}
 
@@ -392,7 +442,11 @@ struct AuditoriumTests {
 		draft.issueSourceIdentifier = "charliewilco/Auditorium"
 		draft.importDemoTickets = false
 
-		_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
+		_ = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root)
+		)
 
 		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
 	}
@@ -519,8 +573,13 @@ struct AuditoriumTests {
 		var rejectedFields: Set<String> = []
 
 		do {
-			_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
-		} catch ModelIntegrityError.invalidRows(let issues) {
+			_ = try ProjectCreationService().createProject(
+				from: draft,
+				context: context,
+				workspaceService: ApplicationWorkspaceService(rootDirectory: root)
+			)
+		}
+		catch ModelIntegrityError.invalidRows(let issues) {
 			rejectedFields = Set(issues.map { "\($0.model).\($0.field)" })
 		}
 
@@ -541,7 +600,11 @@ struct AuditoriumTests {
 		draft.issueSourceName = "charliewilco/Auditorium"
 		draft.issueSourceIdentifier = "charliewilco/Auditorium"
 		draft.importDemoTickets = false
-		let projectID = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
+		let projectID = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root)
+		)
 		let project = try #require(try context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
 		let provider = StaticIssueTrackerProvider(tickets: [
 			TicketDescriptor(
@@ -564,7 +627,8 @@ struct AuditoriumTests {
 
 		do {
 			_ = try await ProjectIssueImportService().importTickets(for: project, context: context, provider: provider)
-		} catch ModelIntegrityError.invalidRows(let issues) {
+		}
+		catch ModelIntegrityError.invalidRows(let issues) {
 			rejectedFields = Set(issues.map { "\($0.model).\($0.field)" })
 		}
 
@@ -634,17 +698,17 @@ struct AuditoriumTests {
 
 	@Test func githubRepositoryProviderListsRepositoriesFromAPI() async throws {
 		let payload = """
-		[
-			{
-				"name": "Auditorium",
-				"full_name": "charliewilco/Auditorium",
-				"clone_url": "https://github.com/charliewilco/Auditorium.git",
-				"html_url": "https://github.com/charliewilco/Auditorium",
-				"default_branch": "main",
-				"owner": { "login": "charliewilco" }
-			}
-		]
-		"""
+			[
+				{
+					"name": "Auditorium",
+					"full_name": "charliewilco/Auditorium",
+					"clone_url": "https://github.com/charliewilco/Auditorium.git",
+					"html_url": "https://github.com/charliewilco/Auditorium",
+					"default_branch": "main",
+					"owner": { "login": "charliewilco" }
+				}
+			]
+			"""
 		let transport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: payload)])
 		let client = GitHubAPIClient(token: "test", transport: transport)
 		let provider = GitHubRepositoryProvider(client: client)
@@ -661,15 +725,15 @@ struct AuditoriumTests {
 
 	@Test func githubRepositoryProviderFetchesRepositoryMetadata() async throws {
 		let payload = """
-		{
-			"name": "Auditorium",
-			"full_name": "charliewilco/Auditorium",
-			"clone_url": "https://github.com/charliewilco/Auditorium.git",
-			"html_url": "https://github.com/charliewilco/Auditorium",
-			"default_branch": "main",
-			"owner": { "login": "charliewilco" }
-		}
-		"""
+			{
+				"name": "Auditorium",
+				"full_name": "charliewilco/Auditorium",
+				"clone_url": "https://github.com/charliewilco/Auditorium.git",
+				"html_url": "https://github.com/charliewilco/Auditorium",
+				"default_branch": "main",
+				"owner": { "login": "charliewilco" }
+			}
+			"""
 		let transport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: payload)])
 		let client = GitHubAPIClient(token: "test", transport: transport)
 		let provider = GitHubRepositoryProvider(client: client)
@@ -737,33 +801,33 @@ struct AuditoriumTests {
 
 	@Test func githubRepositoryProviderFetchesOpenPullRequestCheckStatus() async throws {
 		let pullRequestPayload = """
-		{
-			"number": 12,
-			"title": "ISSUE-12: Ship work",
-			"html_url": "https://github.com/charliewilco/Auditorium/pull/12",
-			"state": "open",
-			"draft": false,
-			"merged": false,
-			"head": { "ref": "auditorium/issue-12", "sha": "abc123" },
-			"base": { "ref": "main", "sha": "def456" }
-		}
-		"""
+			{
+				"number": 12,
+				"title": "ISSUE-12: Ship work",
+				"html_url": "https://github.com/charliewilco/Auditorium/pull/12",
+				"state": "open",
+				"draft": false,
+				"merged": false,
+				"head": { "ref": "auditorium/issue-12", "sha": "abc123" },
+				"base": { "ref": "main", "sha": "def456" }
+			}
+			"""
 		let statusPayload = """
-		{
-			"state": "success"
-		}
-		"""
+			{
+				"state": "success"
+			}
+			"""
 		let checkRunsPayload = """
-		{
-			"check_runs": [
-				{ "status": "completed", "conclusion": "success" }
-			]
-		}
-		"""
+			{
+				"check_runs": [
+					{ "status": "completed", "conclusion": "success" }
+				]
+			}
+			"""
 		let transport = RecordingGitHubTransport(responses: [
 			MockGitHubResponse(payload: pullRequestPayload),
 			MockGitHubResponse(payload: statusPayload),
-			MockGitHubResponse(payload: checkRunsPayload)
+			MockGitHubResponse(payload: checkRunsPayload),
 		])
 		let provider = GitHubRepositoryProvider(client: GitHubAPIClient(token: "test", transport: transport))
 
@@ -774,43 +838,45 @@ struct AuditoriumTests {
 		#expect(pullRequest.checksStatus == .passed)
 		#expect(pullRequest.branchName == "auditorium/issue-12")
 		#expect(pullRequest.targetBranch == "main")
-		#expect(requestURLs.map(\.path) == [
-			"/repos/charliewilco/Auditorium/pulls/12",
-			"/repos/charliewilco/Auditorium/commits/abc123/status",
-			"/repos/charliewilco/Auditorium/commits/abc123/check-runs"
-		])
+		#expect(
+			requestURLs.map(\.path) == [
+				"/repos/charliewilco/Auditorium/pulls/12",
+				"/repos/charliewilco/Auditorium/commits/abc123/status",
+				"/repos/charliewilco/Auditorium/commits/abc123/check-runs",
+			]
+		)
 		#expect(requestURLs.last?.query == "per_page=100")
 	}
 
 	@Test func githubRepositoryProviderMapsClosedPullRequestAndFailedCheckRuns() async throws {
 		let pullRequestPayload = """
-		{
-			"number": 13,
-			"title": "ISSUE-13: Failed work",
-			"html_url": "https://github.com/charliewilco/Auditorium/pull/13",
-			"state": "closed",
-			"draft": false,
-			"merged": false,
-			"head": { "ref": "auditorium/issue-13", "sha": "badcafe" },
-			"base": { "ref": "main", "sha": "def456" }
-		}
-		"""
+			{
+				"number": 13,
+				"title": "ISSUE-13: Failed work",
+				"html_url": "https://github.com/charliewilco/Auditorium/pull/13",
+				"state": "closed",
+				"draft": false,
+				"merged": false,
+				"head": { "ref": "auditorium/issue-13", "sha": "badcafe" },
+				"base": { "ref": "main", "sha": "def456" }
+			}
+			"""
 		let statusPayload = """
-		{
-			"state": "success"
-		}
-		"""
+			{
+				"state": "success"
+			}
+			"""
 		let checkRunsPayload = """
-		{
-			"check_runs": [
-				{ "status": "completed", "conclusion": "failure" }
-			]
-		}
-		"""
+			{
+				"check_runs": [
+					{ "status": "completed", "conclusion": "failure" }
+				]
+			}
+			"""
 		let transport = RecordingGitHubTransport(responses: [
 			MockGitHubResponse(payload: pullRequestPayload),
 			MockGitHubResponse(payload: statusPayload),
-			MockGitHubResponse(payload: checkRunsPayload)
+			MockGitHubResponse(payload: checkRunsPayload),
 		])
 		let provider = GitHubRepositoryProvider(client: GitHubAPIClient(token: "test", transport: transport))
 
@@ -822,35 +888,35 @@ struct AuditoriumTests {
 
 	@Test func githubIssueProviderNormalizesIssuesAndSkipsPullRequests() async throws {
 		let payload = """
-		[
-			{
-				"id": 123,
-				"node_id": "I_kwDO",
-				"number": 42,
-				"title": "Implement runner",
-				"body": "Ship the flow",
-				"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
-				"state": "open",
-				"labels": [{ "name": "agent" }],
-				"assignees": [{ "login": "charliewilco" }],
-				"created_at": "2026-06-06T12:00:00Z",
-				"updated_at": "2026-06-06T13:00:00Z"
-			},
-			{
-				"id": 124,
-				"number": 43,
-				"title": "A pull request",
-				"body": "",
-				"html_url": "https://github.com/charliewilco/Auditorium/pull/43",
-				"state": "open",
-				"labels": [],
-				"assignees": [],
-				"created_at": "2026-06-06T12:00:00Z",
-				"updated_at": "2026-06-06T13:00:00Z",
-				"pull_request": {}
-			}
-		]
-		"""
+			[
+				{
+					"id": 123,
+					"node_id": "I_kwDO",
+					"number": 42,
+					"title": "Implement runner",
+					"body": "Ship the flow",
+					"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+					"state": "open",
+					"labels": [{ "name": "agent" }],
+					"assignees": [{ "login": "charliewilco" }],
+					"created_at": "2026-06-06T12:00:00Z",
+					"updated_at": "2026-06-06T13:00:00Z"
+				},
+				{
+					"id": 124,
+					"number": 43,
+					"title": "A pull request",
+					"body": "",
+					"html_url": "https://github.com/charliewilco/Auditorium/pull/43",
+					"state": "open",
+					"labels": [],
+					"assignees": [],
+					"created_at": "2026-06-06T12:00:00Z",
+					"updated_at": "2026-06-06T13:00:00Z",
+					"pull_request": {}
+				}
+			]
+			"""
 		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
 		let provider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: client)
 
@@ -864,53 +930,56 @@ struct AuditoriumTests {
 
 	@Test func githubIssueProviderAppliesFilterAndPaginatesIssues() async throws {
 		let pageOne = """
-		[
-			{
-				"id": 123,
-				"number": 42,
-				"title": "Implement runner",
-				"body": "Ship the flow",
-				"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
-				"state": "open",
-				"labels": [{ "name": "ready for agent" }],
-				"assignees": [{ "login": "octo" }],
-				"created_at": "2026-06-06T12:00:00Z",
-				"updated_at": "2026-06-06T13:00:00Z"
-			}
-		]
-		"""
+			[
+				{
+					"id": 123,
+					"number": 42,
+					"title": "Implement runner",
+					"body": "Ship the flow",
+					"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+					"state": "open",
+					"labels": [{ "name": "ready for agent" }],
+					"assignees": [{ "login": "octo" }],
+					"created_at": "2026-06-06T12:00:00Z",
+					"updated_at": "2026-06-06T13:00:00Z"
+				}
+			]
+			"""
 		let pageTwo = """
-		[
-			{
-				"id": 124,
-				"number": 43,
-				"title": "Second issue",
-				"body": "Continue the flow",
-				"html_url": "https://github.com/charliewilco/Auditorium/issues/43",
-				"state": "closed",
-				"labels": [{ "name": "ready for agent" }],
-				"assignees": [],
-				"created_at": "2026-06-06T12:00:00Z",
-				"updated_at": "2026-06-06T13:00:00Z"
-			},
-			{
-				"id": 125,
-				"number": 44,
-				"title": "Pull request",
-				"body": "",
-				"html_url": "https://github.com/charliewilco/Auditorium/pull/44",
-				"state": "open",
-				"labels": [],
-				"assignees": [],
-				"created_at": "2026-06-06T12:00:00Z",
-				"updated_at": "2026-06-06T13:00:00Z",
-				"pull_request": {}
-			}
-		]
-		"""
+			[
+				{
+					"id": 124,
+					"number": 43,
+					"title": "Second issue",
+					"body": "Continue the flow",
+					"html_url": "https://github.com/charliewilco/Auditorium/issues/43",
+					"state": "closed",
+					"labels": [{ "name": "ready for agent" }],
+					"assignees": [],
+					"created_at": "2026-06-06T12:00:00Z",
+					"updated_at": "2026-06-06T13:00:00Z"
+				},
+				{
+					"id": 125,
+					"number": 44,
+					"title": "Pull request",
+					"body": "",
+					"html_url": "https://github.com/charliewilco/Auditorium/pull/44",
+					"state": "open",
+					"labels": [],
+					"assignees": [],
+					"created_at": "2026-06-06T12:00:00Z",
+					"updated_at": "2026-06-06T13:00:00Z",
+					"pull_request": {}
+				}
+			]
+			"""
 		let transport = RecordingGitHubTransport(responses: [
-			MockGitHubResponse(payload: pageOne, headers: ["Link": "<https://api.github.com/repos/charliewilco/Auditorium/issues?page=2>; rel=\"next\""]),
-			MockGitHubResponse(payload: pageTwo)
+			MockGitHubResponse(
+				payload: pageOne,
+				headers: ["Link": "<https://api.github.com/repos/charliewilco/Auditorium/issues?page=2>; rel=\"next\""]
+			),
+			MockGitHubResponse(payload: pageTwo),
 		])
 		let client = GitHubAPIClient(token: "test", transport: transport)
 		let provider = GitHubIssueTrackerProvider(
@@ -935,19 +1004,19 @@ struct AuditoriumTests {
 
 	@Test func githubIssueProviderFetchesIssueDetails() async throws {
 		let payload = """
-		{
-			"id": 123,
-			"number": 42,
-			"title": "Implement runner",
-			"body": "Ship the flow",
-			"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
-			"state": "open",
-			"labels": [{ "name": "agent" }],
-			"assignees": [{ "login": "charliewilco" }],
-			"created_at": "2026-06-06T12:00:00Z",
-			"updated_at": "2026-06-06T13:00:00Z"
-		}
-		"""
+			{
+				"id": 123,
+				"number": 42,
+				"title": "Implement runner",
+				"body": "Ship the flow",
+				"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+				"state": "open",
+				"labels": [{ "name": "agent" }],
+				"assignees": [{ "login": "charliewilco" }],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z"
+			}
+			"""
 		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
 		let provider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: client)
 
@@ -962,13 +1031,18 @@ struct AuditoriumTests {
 		let reset = String(Int(Date(timeIntervalSince1970: 1_780_000_000).timeIntervalSince1970))
 		let client = GitHubAPIClient(
 			token: "test",
-			transport: MockGitHubTransport(payload: "{}", statusCode: 403, headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": reset])
+			transport: MockGitHubTransport(
+				payload: "{}",
+				statusCode: 403,
+				headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": reset]
+			)
 		)
 		var message = ""
 
 		do {
 			_ = try await client.listIssues(repositoryFullName: "charliewilco/Auditorium")
-		} catch {
+		}
+		catch {
 			message = error.localizedDescription
 		}
 
@@ -977,29 +1051,39 @@ struct AuditoriumTests {
 	}
 
 	@Test func githubIssueProviderAppliesWorkflowHandoffLabelOnlyWhenEnabled() async throws {
-		let disabledPolicy = try WorkflowPolicyParser().parse("""
-		---
-		handoff_status: "Needs Review"
-		update_issue_labels: false
-		---
-		Prompt
-		""")
+		let disabledPolicy = try WorkflowPolicyParser().parse(
+			"""
+			---
+			handoff_status: "Needs Review"
+			update_issue_labels: false
+			---
+			Prompt
+			"""
+		)
 		let disabledTransport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: "[]")])
-		let disabledProvider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: GitHubAPIClient(token: "test", transport: disabledTransport))
+		let disabledProvider = GitHubIssueTrackerProvider(
+			repositoryFullName: "charliewilco/Auditorium",
+			client: GitHubAPIClient(token: "test", transport: disabledTransport)
+		)
 
 		try await disabledProvider.applyWorkflowHandoffLabel(ticketID: "42", policy: disabledPolicy)
 
 		#expect(await disabledTransport.requestedURLs().isEmpty)
 
-		let enabledPolicy = try WorkflowPolicyParser().parse("""
-		---
-		handoff_status: "Needs Review"
-		update_issue_labels: true
-		---
-		Prompt
-		""")
+		let enabledPolicy = try WorkflowPolicyParser().parse(
+			"""
+			---
+			handoff_status: "Needs Review"
+			update_issue_labels: true
+			---
+			Prompt
+			"""
+		)
 		let enabledTransport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: #"[{ "name": "Needs Review" }]"#)])
-		let enabledProvider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: GitHubAPIClient(token: "test", transport: enabledTransport))
+		let enabledProvider = GitHubIssueTrackerProvider(
+			repositoryFullName: "charliewilco/Auditorium",
+			client: GitHubAPIClient(token: "test", transport: enabledTransport)
+		)
 
 		try await enabledProvider.applyWorkflowHandoffLabel(ticketID: "42", policy: enabledPolicy)
 		let requestURLs = await enabledTransport.requestedURLs()
@@ -1095,7 +1179,12 @@ struct AuditoriumTests {
 		draft.issueCredential = "test-token"
 		draft.importDemoTickets = false
 
-		_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root), keychainService: keychain)
+		_ = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root),
+			keychainService: keychain
+		)
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
 		let keychainAccount = try #require(accounts.first?.keychainAccount)
 
@@ -1123,28 +1212,36 @@ struct AuditoriumTests {
 			agentProviderKind: .codex
 		)
 		context.insert(project)
-		context.insert(RepositoryRecord(
-			provider: .github,
-			owner: "charliewilco",
-			name: "Auditorium",
-			fullName: "charliewilco/Auditorium",
-			cloneURL: "https://github.com/charliewilco/Auditorium.git",
-			webURL: "https://github.com/charliewilco/Auditorium",
-			defaultBranch: "main",
-			projectID: project.id
-		))
-		context.insert(IssueTrackerRecord(
-			provider: .githubIssues,
-			displayName: "GitHub Issues",
-			sourceIdentifier: "charliewilco/Auditorium",
-			filterName: "open",
-			webURL: "https://github.com/charliewilco/Auditorium/issues",
-			projectID: project.id
-		))
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: "https://github.com/charliewilco/Auditorium.git",
+				webURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				projectID: project.id
+			)
+		)
+		context.insert(
+			IssueTrackerRecord(
+				provider: .githubIssues,
+				displayName: "GitHub Issues",
+				sourceIdentifier: "charliewilco/Auditorium",
+				filterName: "open",
+				webURL: "https://github.com/charliewilco/Auditorium/issues",
+				projectID: project.id
+			)
+		)
 		try context.save()
 
 		await #expect(throws: ProviderCredentialError.missingGitHubCredentials("importing GitHub issues")) {
-			try await ProjectIssueImportService().importTickets(projectID: project.id, context: context, providerRegistry: ProviderRegistry(keychainService: keychain))
+			try await ProjectIssueImportService().importTickets(
+				projectID: project.id,
+				context: context,
+				providerRegistry: ProviderRegistry(keychainService: keychain)
+			)
 		}
 		#expect(try context.fetch(FetchDescriptor<TicketRecord>()).isEmpty)
 	}
@@ -1183,21 +1280,23 @@ struct AuditoriumTests {
 		)
 		context.insert(project)
 		context.insert(ticket)
-		context.insert(RepositoryRecord(
-			provider: .github,
-			owner: "charliewilco",
-			name: "Auditorium",
-			fullName: "charliewilco/Auditorium",
-			cloneURL: "https://github.com/charliewilco/Auditorium.git",
-			webURL: "https://github.com/charliewilco/Auditorium",
-			defaultBranch: "main",
-			projectID: project.id
-		))
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: "https://github.com/charliewilco/Auditorium.git",
+				webURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				projectID: project.id
+			)
+		)
 		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .high))
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
-			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: workspace,
@@ -1216,15 +1315,15 @@ struct AuditoriumTests {
 
 	@Test func githubDeviceFlowRequestsUserCode() async throws {
 		let payload = """
-		{
-			"device_code": "device-123",
-			"user_code": "ABCD-EFGH",
-			"verification_uri": "https://github.com/login/device",
-			"verification_uri_complete": "https://github.com/login/device?user_code=ABCD-EFGH",
-			"expires_in": 900,
-			"interval": 5
-		}
-		"""
+			{
+				"device_code": "device-123",
+				"user_code": "ABCD-EFGH",
+				"verification_uri": "https://github.com/login/device",
+				"verification_uri_complete": "https://github.com/login/device?user_code=ABCD-EFGH",
+				"expires_in": 900,
+				"interval": 5
+			}
+			"""
 		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
 
 		let code = try await service.requestDeviceCode(clientID: "client-123")
@@ -1237,12 +1336,12 @@ struct AuditoriumTests {
 
 	@Test func githubDeviceFlowExchangesDeviceCodeForToken() async throws {
 		let payload = """
-		{
-			"access_token": "gho_test",
-			"scope": "repo,read:user",
-			"token_type": "bearer"
-		}
-		"""
+			{
+				"access_token": "gho_test",
+				"scope": "repo,read:user",
+				"token_type": "bearer"
+			}
+			"""
 		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
 
 		let token = try await service.requestToken(clientID: "client-123", deviceCode: "device-123")
@@ -1254,17 +1353,18 @@ struct AuditoriumTests {
 
 	@Test func githubDeviceFlowReportsPendingAuthorization() async throws {
 		let payload = """
-		{
-			"error": "authorization_pending",
-			"error_description": "The authorization request is still pending."
-		}
-		"""
+			{
+				"error": "authorization_pending",
+				"error_description": "The authorization request is still pending."
+			}
+			"""
 		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
 		var isPending = false
 
 		do {
 			_ = try await service.requestToken(clientID: "client-123", deviceCode: "device-123")
-		} catch GitHubOAuthDeviceFlowError.unsupportedResponse(let response) where response == "authorization_pending" {
+		}
+		catch GitHubOAuthDeviceFlowError.unsupportedResponse(let response) where response == "authorization_pending" {
 			isPending = true
 		}
 
@@ -1307,7 +1407,15 @@ struct AuditoriumTests {
 			estimatedComplexity: 8,
 			sourceProjectID: project.id
 		)
-		let ticketRun = TicketRunRecord(runID: run.id, ticketID: ticket.id, branchName: "auditorium/bur-101", status: .needsReview, pullRequestURL: "https://example.com/pr/101", summary: "Done", confidence: 0.9)
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			branchName: "auditorium/bur-101",
+			status: .needsReview,
+			pullRequestURL: "https://example.com/pr/101",
+			summary: "Done",
+			confidence: 0.9
+		)
 		let pullRequest = PullRequestRecord(
 			provider: .github,
 			ticketRunID: ticketRun.id,
@@ -1318,7 +1426,14 @@ struct AuditoriumTests {
 			status: .open,
 			checksStatus: .passed
 		)
-		let markdown = ReportGenerator().generate(project: project, run: run, ticketRuns: [ticketRun], tickets: [ticket], pullRequests: [pullRequest], events: [])
+		let markdown = ReportGenerator().generate(
+			project: project,
+			run: run,
+			ticketRuns: [ticketRun],
+			tickets: [ticket],
+			pullRequests: [pullRequest],
+			events: []
+		)
 
 		#expect(markdown.contains("# Auditorium Run Report"))
 		#expect(markdown.contains("## Pull Requests"))
@@ -1340,7 +1455,14 @@ struct AuditoriumTests {
 			runtimeProviderKind: .localWorkspace,
 			agentProviderKind: .codex
 		)
-		let run = RunRecord(projectID: project.id, status: .completedWithFailures, totalTickets: 3, completedTickets: 2, failedTickets: 1, pullRequestsCreated: 1)
+		let run = RunRecord(
+			projectID: project.id,
+			status: .completedWithFailures,
+			totalTickets: 3,
+			completedTickets: 2,
+			failedTickets: 1,
+			pullRequestsCreated: 1
+		)
 		run.endedAt = .now
 		let reviewTicket = TicketRecord(
 			provider: .githubIssues,
@@ -1387,9 +1509,30 @@ struct AuditoriumTests {
 			estimatedComplexity: 1,
 			sourceProjectID: project.id
 		)
-		let reviewRun = TicketRunRecord(runID: run.id, ticketID: reviewTicket.id, branchName: "auditorium/201", status: .needsReview, pullRequestURL: "https://example.com/pr/201", summary: "Needs CI review.", confidence: 0.8)
-		let failedRun = TicketRunRecord(runID: run.id, ticketID: failedTicket.id, status: .failed, retryCount: 1, failureReason: "Unit tests failed", confidence: 0.2)
-		let noChangeRun = TicketRunRecord(runID: run.id, ticketID: noChangeTicket.id, status: .completed, summary: "No code change was needed.", confidence: 0.7)
+		let reviewRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: reviewTicket.id,
+			branchName: "auditorium/201",
+			status: .needsReview,
+			pullRequestURL: "https://example.com/pr/201",
+			summary: "Needs CI review.",
+			confidence: 0.8
+		)
+		let failedRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: failedTicket.id,
+			status: .failed,
+			retryCount: 1,
+			failureReason: "Unit tests failed",
+			confidence: 0.2
+		)
+		let noChangeRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: noChangeTicket.id,
+			status: .completed,
+			summary: "No code change was needed.",
+			confidence: 0.7
+		)
 		let pullRequest = PullRequestRecord(
 			provider: .github,
 			ticketRunID: reviewRun.id,
@@ -1450,8 +1593,22 @@ struct AuditoriumTests {
 			confidence: 0.91
 		)
 		let events = [
-			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 2), level: .info, category: .agent, message: "Second"),
-			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 1), level: .info, category: .agent, message: "First")
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				timestamp: Date(timeIntervalSince1970: 2),
+				level: .info,
+				category: .agent,
+				message: "Second"
+			),
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				timestamp: Date(timeIntervalSince1970: 1),
+				level: .info,
+				category: .agent,
+				message: "First"
+			),
 		]
 
 		let state = TicketInspectorState(ticket: ticket, queueItem: queueItem, latestRun: ticketRun, events: events)
@@ -1551,11 +1708,31 @@ struct AuditoriumTests {
 			status: .running
 		)
 		let events = [
-			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 10), level: .info, category: .agent, message: "Started agent"),
-			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 20), level: .success, category: .agent, message: "Wrote patch")
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				timestamp: Date(timeIntervalSince1970: 10),
+				level: .info,
+				category: .agent,
+				message: "Started agent"
+			),
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				timestamp: Date(timeIntervalSince1970: 20),
+				level: .success,
+				category: .agent,
+				message: "Wrote patch"
+			),
 		]
 
-		let markdown = TicketStatusFormatter.markdownStatus(ticket: ticket, project: project, queueItem: nil, ticketRun: ticketRun, events: events)
+		let markdown = TicketStatusFormatter.markdownStatus(
+			ticket: ticket,
+			project: project,
+			queueItem: nil,
+			ticketRun: ticketRun,
+			events: events
+		)
 
 		#expect(markdown.contains("# Ticket Status"))
 		#expect(markdown.contains("Repository: charliewilco/Auditorium"))
@@ -1621,7 +1798,11 @@ struct AuditoriumTests {
 			checksStatus: .failed
 		)
 
-		let state = RunDetailState(ticketRuns: [firstTicketRun, secondTicketRun], tickets: [firstTicket, secondTicket], pullRequests: [pullRequest])
+		let state = RunDetailState(
+			ticketRuns: [firstTicketRun, secondTicketRun],
+			tickets: [firstTicket, secondTicket],
+			pullRequests: [pullRequest]
+		)
 
 		#expect(state.pullRequestRows.count == 1)
 		let row = state.pullRequestRows[0]
@@ -1735,7 +1916,11 @@ struct AuditoriumTests {
 		#expect(pendingTicketRun.failureReason == "Run was interrupted during a previous app session.")
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
 		#expect(events.count == 3)
-		#expect(events.contains { $0.runID == run.id && $0.ticketRunID == nil && $0.message == "Run reconciled as failed after app relaunch." })
+		#expect(
+			events.contains {
+				$0.runID == run.id && $0.ticketRunID == nil && $0.message == "Run reconciled as failed after app relaunch."
+			}
+		)
 		#expect(events.filter { $0.ticketRunID != nil && $0.message == "Ticket run reconciled as failed after app relaunch." }.count == 2)
 	}
 
@@ -1754,14 +1939,16 @@ struct AuditoriumTests {
 	}
 
 	@Test func workflowPolicyParserReadsRetryBackoff() throws {
-		let policy = try WorkflowPolicyParser().parse("""
-		---
-		concurrency: 4
-		max_retries: 3
-		max_retry_backoff_ms: 8000
-		---
-		Prompt
-		""")
+		let policy = try WorkflowPolicyParser().parse(
+			"""
+			---
+			concurrency: 4
+			max_retries: 3
+			max_retry_backoff_ms: 8000
+			---
+			Prompt
+			"""
+		)
 
 		#expect(policy.concurrency == 4)
 		#expect(policy.maxRetries == 3)
@@ -1778,7 +1965,7 @@ struct AuditoriumTests {
 			QueueItemRecord(ticketID: thirdTicketID, projectID: projectID, position: 30, priority: .low),
 			QueueItemRecord(ticketID: disabledTicketID, projectID: projectID, position: 5, priority: .high, isEnabled: false),
 			QueueItemRecord(ticketID: firstTicketID, projectID: projectID, position: 10, priority: .high, concurrencyGroup: "ui"),
-			QueueItemRecord(ticketID: secondTicketID, projectID: projectID, position: 20, priority: .medium, concurrencyGroup: "backend")
+			QueueItemRecord(ticketID: secondTicketID, projectID: projectID, position: 20, priority: .medium, concurrencyGroup: "backend"),
 		]
 
 		let plan = OrchestrationRunPlan.make(
@@ -1799,16 +1986,16 @@ struct AuditoriumTests {
 		let queueItems = [
 			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 0, priority: .medium),
 			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 1, priority: .medium),
-			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 2, priority: .medium)
+			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 2, priority: .medium),
 		]
 		let policy = """
-		---
-		concurrency: 3
-		max_retries: 1
-		max_retry_backoff_ms: 16000
-		---
-		Prompt
-		"""
+			---
+			concurrency: 3
+			max_retries: 1
+			max_retry_backoff_ms: 16000
+			---
+			Prompt
+			"""
 
 		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: 0, workflowPolicyMarkdown: policy)
 
@@ -1833,9 +2020,9 @@ struct AuditoriumTests {
 
 	@Test func symphonyRunnerDecodesEventsAndSummary() throws {
 		let output = """
-		{"level":"info","category":"orchestration","message":"run_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#42"}}
-		{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"/tmp/work","branch_name":"auditorium/issue-42","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/1","report_path":"/tmp/report.md"}
-		"""
+			{"level":"info","category":"orchestration","message":"run_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#42"}}
+			{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"/tmp/work","branch_name":"auditorium/issue-42","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/1","report_path":"/tmp/report.md"}
+			"""
 
 		let result = try SymphonyCLIProcessRunner().decode(output: output)
 
@@ -1847,8 +2034,8 @@ struct AuditoriumTests {
 
 	@Test func symphonyRunnerDecodesStreamingEventLine() throws {
 		let line = """
-		{"level":"success","category":"agent","message":"agent_finished","timestamp":"2026-06-06T12:00:01Z","metadata":{"ticket":"42"}}
-		"""
+			{"level":"success","category":"agent","message":"agent_finished","timestamp":"2026-06-06T12:00:01Z","metadata":{"ticket":"42"}}
+			"""
 
 		let event = try SymphonyCLIProcessRunner().decodeEvent(line: line)
 
@@ -1860,20 +2047,20 @@ struct AuditoriumTests {
 
 	@Test func symphonyRunnerDecodesDoctorStatus() {
 		let output = """
-		{
-		  "ok": true,
-		  "workflow": {
-		    "ok": true,
-		    "workspaceRoot": "/tmp/auditorium",
-		    "trackerKind": "github",
-		    "maxConcurrentAgents": 3
-		  },
-		  "checks": [
-		    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
-		    { "name": "codex --version", "ok": true, "detail": "codex 0.1.0" }
-		  ]
-		}
-		"""
+			{
+			  "ok": true,
+			  "workflow": {
+			    "ok": true,
+			    "workspaceRoot": "/tmp/auditorium",
+			    "trackerKind": "github",
+			    "maxConcurrentAgents": 3
+			  },
+			  "checks": [
+			    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
+			    { "name": "codex --version", "ok": true, "detail": "codex 0.1.0" }
+			  ]
+			}
+			"""
 
 		let status = SymphonyCLIProcessRunner().decodeDoctor(output: output, exitCode: 0, stderr: "")
 
@@ -1887,19 +2074,19 @@ struct AuditoriumTests {
 
 	@Test func symphonyRunnerDecodesFailingDoctorStatus() {
 		let output = """
-		{
-		  "ok": false,
-		  "workflow": {
-		    "ok": false,
-		    "code": "missing_workflow_file",
-		    "message": "workflow file was not found"
-		  },
-		  "checks": [
-		    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
-		    { "name": "codex --version", "ok": false, "code": "command_failed", "detail": "codex was not found" }
-		  ]
-		}
-		"""
+			{
+			  "ok": false,
+			  "workflow": {
+			    "ok": false,
+			    "code": "missing_workflow_file",
+			    "message": "workflow file was not found"
+			  },
+			  "checks": [
+			    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
+			    { "name": "codex --version", "ok": false, "code": "command_failed", "detail": "codex was not found" }
+			  ]
+			}
+			"""
 
 		let status = SymphonyCLIProcessRunner().decodeDoctor(output: output, exitCode: 22, stderr: "invalid_config")
 
@@ -1941,7 +2128,10 @@ struct AuditoriumTests {
 		defer { try? FileManager.default.removeItem(at: root) }
 		let provider = CodexCLIProcessAgentProvider(
 			executablePath: "/bin/sh",
-			arguments: ["-lc", "case \"$0\" in *\"Stream Codex output\"*) printf 'prompt-ok\\n' ;; *) printf 'missing prompt\\n' >&2; exit 9 ;; esac; printf 'stderr-line\\n' >&2"]
+			arguments: [
+				"-lc",
+				"case \"$0\" in *\"Stream Codex output\"*) printf 'prompt-ok\\n' ;; *) printf 'missing prompt\\n' >&2; exit 9 ;; esac; printf 'stderr-line\\n' >&2",
+			]
 		)
 		let stream = try await provider.runAgent(makeAgentRunRequest(workspace: root, title: "Stream Codex output"))
 		var events: [AgentEvent] = []
@@ -2093,7 +2283,9 @@ struct AuditoriumTests {
 		)
 
 		let workspace = try await runtime.prepareWorkspace(for: ticket, repository: repository)
-		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: ticket, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown))
+		let handle = try await runtime.startExecution(
+			RuntimeExecutionRequest(ticket: ticket, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown)
+		)
 		try await runtime.stopExecution(handle: handle)
 		let handleData = try Data(contentsOf: runtime.runtimeHandlePath(for: workspace.path))
 		let handleJSON = try #require(String(data: handleData, encoding: .utf8))
@@ -2121,15 +2313,15 @@ struct AuditoriumTests {
 		let workspacePath = root.appending(path: "workspace").path()
 		let releasePath = root.appending(path: "release-symphony").path()
 		let script = """
-		#!/bin/sh
-		printf '%s\\n' '{"level":"info","category":"agent","message":"streamed_before_exit","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"7"}}'
-		while [ ! -f '\(releasePath)' ]; do
-			sleep 0.05
-		done
-		mkdir -p '\(workspacePath)'
-		printf '# Fake Report\\n' > '\(reportPath)'
-		printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
-		"""
+			#!/bin/sh
+			printf '%s\\n' '{"level":"info","category":"agent","message":"streamed_before_exit","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"7"}}'
+			while [ ! -f '\(releasePath)' ]; do
+				sleep 0.05
+			done
+			mkdir -p '\(workspacePath)'
+			printf '# Fake Report\\n' > '\(reportPath)'
+			printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
+			"""
 		try script.write(to: fakeSymphony, atomically: true, encoding: .utf8)
 		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path())
 		let project = Project(
@@ -2163,7 +2355,7 @@ struct AuditoriumTests {
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
-			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: ApplicationWorkspaceService(rootDirectory: root.appending(path: "app")),
@@ -2213,7 +2405,13 @@ struct AuditoriumTests {
 		let sourceProvider = StaticSourceCodeProvider(kind: .github)
 		let agentProvider = StaticAgentProvider(events: [
 			AgentEvent(level: .info, category: .agent, message: "codex_started"),
-			AgentEvent(level: .success, category: .agent, message: "codex_completed", summary: "Implemented the requested change.", outcome: .completed)
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "codex_completed",
+				summary: "Implemented the requested change.",
+				outcome: .completed
+			),
 		])
 		let project = Project(
 			name: "Local Codex",
@@ -2246,7 +2444,7 @@ struct AuditoriumTests {
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
-			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: workspace,
@@ -2305,7 +2503,8 @@ struct AuditoriumTests {
 
 		do {
 			try PullRequestReviewPolicy().validate(request)
-		} catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
+		}
+		catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
 			didReject = true
 		}
 
@@ -2337,7 +2536,8 @@ struct AuditoriumTests {
 
 		do {
 			_ = try await client.createPullRequest(request)
-		} catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
+		}
+		catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
 			didReject = true
 		}
 
@@ -2353,7 +2553,13 @@ struct AuditoriumTests {
 		let workspace = ApplicationWorkspaceService(rootDirectory: root)
 		let sourceProvider = StaticSourceCodeProvider(kind: .github, commitsChanges: false)
 		let agentProvider = StaticAgentProvider(events: [
-			AgentEvent(level: .success, category: .agent, message: "codex_completed", summary: "No source changes were needed.", outcome: .completed)
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "codex_completed",
+				summary: "No source changes were needed.",
+				outcome: .completed
+			)
 		])
 		let project = Project(
 			name: "No Changes",
@@ -2386,7 +2592,7 @@ struct AuditoriumTests {
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
-			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: workspace,
@@ -2471,7 +2677,7 @@ struct AuditoriumTests {
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
-			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
 		])
 		let orchestrator = Orchestrator(
 			workspaceService: workspace,
@@ -2539,7 +2745,11 @@ struct AuditoriumTests {
 		context.insert(ticket)
 		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
 		try context.save()
-		let orchestrator = Orchestrator(workspaceService: workspace, runtimeDetection: RuntimeDetectionService(staticChecks: []), reportGenerator: ReportGenerator())
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator()
+		)
 
 		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
 		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
@@ -2620,7 +2830,14 @@ struct AuditoriumTests {
 		let logPath = root.appending(path: "codex.log").path()
 		let agentProvider = StaticAgentProvider(events: [
 			AgentEvent(level: .info, category: .agent, message: "agent streamed output", metadataJSON: #"{"stream":"stdout"}"#),
-			AgentEvent(level: .success, category: .agent, message: "agent completed", summary: "Agent finished through injected provider.", outcome: .completed, logPath: logPath)
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "agent completed",
+				summary: "Agent finished through injected provider.",
+				outcome: .completed,
+				logPath: logPath
+			),
 		])
 		let project = Project(
 			name: "Injected Agent",
@@ -2669,29 +2886,31 @@ struct AuditoriumTests {
 	}
 
 	@Test func processCommandCancelsRunningProcess() async {
-		var lines: [String] = []
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		let readyFile = root.appending(path: "ready")
+		try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: root) }
 		let task = Task {
 			try await ProcessCommand.runStreaming(
 				executable: "/bin/sh",
-				arguments: ["-lc", "printf 'ready\\n'; sleep 30"],
-				onStandardOutputLine: { line in
-					lines.append(line)
-				}
+				arguments: ["-lc", "printf ready > \"$1\"; sleep 30", "cancel-test", readyFile.path()]
 			)
 		}
 		let deadline = Date().addingTimeInterval(5)
-		while lines.contains("ready") == false, Date() < deadline {
+		while FileManager.default.fileExists(atPath: readyFile.path()) == false, Date() < deadline {
 			try? await Task.sleep(nanoseconds: 50_000_000)
 		}
-		#expect(lines.contains("ready"))
+		#expect(FileManager.default.fileExists(atPath: readyFile.path()))
 		task.cancel()
 		var didCancel = false
 
 		do {
 			_ = try await task.value
-		} catch ProcessCommandError.canceled {
+		}
+		catch ProcessCommandError.canceled {
 			didCancel = true
-		} catch {}
+		}
+		catch {}
 
 		#expect(didCancel)
 	}
@@ -2776,21 +2995,21 @@ struct AuditoriumTests {
 
 	@Test func appleContainerVersionParsingUsesCLIComponent() {
 		let json = """
-		[
-			{
-				"appName": "container",
-				"buildType": "release",
-				"commit": "abcdef1",
-				"version": "0.12.3"
-			},
-			{
-				"appName": "container-apiserver",
-				"buildType": "release",
-				"commit": "1234abc",
-				"version": "container-apiserver version 0.12.3"
-			}
-		]
-		"""
+			[
+				{
+					"appName": "container",
+					"buildType": "release",
+					"commit": "abcdef1",
+					"version": "0.12.3"
+				},
+				{
+					"appName": "container-apiserver",
+					"buildType": "release",
+					"commit": "1234abc",
+					"version": "container-apiserver version 0.12.3"
+				}
+			]
+			"""
 
 		#expect(RuntimeDetectionService.containerCLIVersion(from: json) == "0.12.3")
 	}
@@ -2839,14 +3058,21 @@ struct AuditoriumTests {
 		try context.save()
 
 		let detection = RuntimeDetectionService(staticChecks: [
-			RuntimeHealthCheck(id: "apple-container", name: "Apple Container", state: .needsSetup, detail: "container CLI was not found.", version: nil)
+			RuntimeHealthCheck(
+				id: "apple-container",
+				name: "Apple Container",
+				state: .needsSetup,
+				detail: "container CLI was not found.",
+				version: nil
+			)
 		])
 		let orchestrator = Orchestrator(workspaceService: workspace, runtimeDetection: detection, reportGenerator: ReportGenerator())
 		var didThrow = false
 
 		do {
 			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
-		} catch {
+		}
+		catch {
 			didThrow = true
 		}
 
@@ -2901,7 +3127,8 @@ struct AuditoriumTests {
 
 		do {
 			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
-		} catch {
+		}
+		catch {
 			didThrow = true
 		}
 
@@ -2920,14 +3147,14 @@ private struct MigrationFixtureIDs {
 }
 
 @MainActor
-private extension AuditoriumTests {
-	func makeAgentWorkspace() throws -> URL {
+extension AuditoriumTests {
+	fileprivate func makeAgentWorkspace() throws -> URL {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
 		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 		return root
 	}
 
-	func makeAgentRunRequest(workspace: URL, title: String) -> AgentRunRequest {
+	fileprivate func makeAgentRunRequest(workspace: URL, title: String) -> AgentRunRequest {
 		let ticket = TicketDescriptor(
 			provider: .githubIssues,
 			externalID: "COD-101",
@@ -2956,7 +3183,7 @@ private extension AuditoriumTests {
 		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown)
 	}
 
-	func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {
+	fileprivate func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {
 		let schema = Schema(AppSchema.modelTypes, version: AppSchema.V1.versionIdentifier)
 		let configuration = ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none)
 		let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -3014,7 +3241,14 @@ private extension AuditoriumTests {
 			sourceProjectID: projectID
 		)
 		let queueItem = QueueItemRecord(ticketID: ticketID, projectID: projectID, position: 0, priority: .high)
-		let run = RunRecord(id: runID, projectID: projectID, status: .completed, totalTickets: 1, completedTickets: 1, summary: "Migrated run")
+		let run = RunRecord(
+			id: runID,
+			projectID: projectID,
+			status: .completed,
+			totalTickets: 1,
+			completedTickets: 1,
+			summary: "Migrated run"
+		)
 		let ticketRun = TicketRunRecord(
 			id: ticketRunID,
 			runID: runID,
@@ -3039,7 +3273,13 @@ private extension AuditoriumTests {
 			status: .open,
 			checksStatus: .passed
 		)
-		let event = RuntimeEventRecord(runID: runID, ticketRunID: ticketRunID, level: .info, category: .orchestration, message: "Migration fixture created")
+		let event = RuntimeEventRecord(
+			runID: runID,
+			ticketRunID: ticketRunID,
+			level: .info,
+			category: .orchestration,
+			message: "Migration fixture created"
+		)
 		let report = ReportRecord(
 			projectID: projectID,
 			runID: runID,
@@ -3216,8 +3456,8 @@ private func git(_ arguments: [String], in workingDirectory: URL? = nil) async t
 	try await ProcessCommand.run(executable: "/usr/bin/git", arguments: arguments, workingDirectory: workingDirectory)
 }
 
-private extension [URLQueryItem] {
-	func first(named name: String) -> URLQueryItem? {
+extension [URLQueryItem] {
+	fileprivate func first(named name: String) -> URLQueryItem? {
 		first { $0.name == name }
 	}
 }

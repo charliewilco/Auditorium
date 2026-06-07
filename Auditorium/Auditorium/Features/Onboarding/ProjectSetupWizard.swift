@@ -32,6 +32,13 @@ struct ProjectSetupWizard: View {
 			}
 			.padding()
 			Divider()
+			if let currentValidationMessage {
+				Label(currentValidationMessage, systemImage: "exclamationmark.triangle")
+					.foregroundStyle(.orange)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.padding(.horizontal)
+					.padding(.top, 10)
+			}
 			content
 				.padding()
 				.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -44,12 +51,13 @@ struct ProjectSetupWizard: View {
 				Button(step == steps.count - 1 ? "Create Project" : "Next") {
 					if step == steps.count - 1 {
 						Task { await createProject() }
-					} else {
+					}
+					else {
 						step += 1
 					}
 				}
 				.buttonStyle(.borderedProminent)
-				.disabled((step == steps.count - 1 && !draft.canCreate) || isCreating)
+				.disabled(currentValidationMessage != nil || isCreating)
 			}
 			.padding()
 		}
@@ -57,19 +65,19 @@ struct ProjectSetupWizard: View {
 
 	@ViewBuilder
 	private var content: some View {
-		switch step {
-		case 0:
+		switch currentStep {
+		case .repositoryProvider:
 			providerGrid([RepositoryProviderKind.github], selected: draft.repositoryProviderKind) { kind in
 				draft.repositoryProviderKind = kind
 			}
-		case 1:
+		case .repositoryCredentials:
 			oauthForm(
 				title: "\(draft.repositoryProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
 				text: Binding(get: { draft.repositoryCredential }, set: { draft.repositoryCredential = $0 }),
 				connect: { Task { await connectGitHub() } }
 			)
-		case 2:
+		case .repository:
 			VStack(alignment: .leading, spacing: 14) {
 				Text("Select Repository")
 					.font(.headline)
@@ -77,7 +85,10 @@ struct ProjectSetupWizard: View {
 					Button("Load Repositories") {
 						Task { await loadRepositories() }
 					}
-					.disabled(draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoadingRepositories)
+					.disabled(
+						draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+							|| isLoadingRepositories
+					)
 					if isLoadingRepositories {
 						ProgressView()
 							.controlSize(.small)
@@ -113,49 +124,65 @@ struct ProjectSetupWizard: View {
 				TextField("Clone/Web URL", text: Binding(get: { draft.repositoryURL }, set: { draft.repositoryURL = $0 }))
 				TextField("Default Branch", text: Binding(get: { draft.defaultBranch }, set: { draft.defaultBranch = $0 }))
 			}
-		case 3:
+		case .issueProvider:
 			providerGrid([IssueProviderKind.githubIssues], selected: draft.issueProviderKind) { kind in
 				draft.issueProviderKind = kind
 			}
-		case 4:
+		case .issueCredentials:
 			oauthForm(
 				title: "\(draft.issueProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
 				text: Binding(get: { draft.issueCredential }, set: { draft.issueCredential = $0 }),
 				connect: { Task { await connectGitHub() } }
 			)
-		case 5:
+		case .issueSource:
 			VStack(alignment: .leading, spacing: 14) {
 				Text("Issue Source")
 					.font(.headline)
 				TextField("Team / Project", text: Binding(get: { draft.issueSourceName }, set: { draft.issueSourceName = $0 }))
-				TextField("Source Identifier", text: Binding(get: { draft.issueSourceIdentifier }, set: { draft.issueSourceIdentifier = $0 }))
+				TextField(
+					"Source Identifier",
+					text: Binding(get: { draft.issueSourceIdentifier }, set: { draft.issueSourceIdentifier = $0 })
+				)
 				TextField("Filter", text: Binding(get: { draft.issueFilterName }, set: { draft.issueFilterName = $0 }))
 				TextField("Issue Tracker URL", text: Binding(get: { draft.issueTrackerURL }, set: { draft.issueTrackerURL = $0 }))
-				Toggle("Import open GitHub issues", isOn: Binding(get: { draft.importGitHubIssues }, set: { draft.importGitHubIssues = $0 }))
+				Toggle(
+					"Import open GitHub issues",
+					isOn: Binding(get: { draft.importGitHubIssues }, set: { draft.importGitHubIssues = $0 })
+				)
 				Toggle("Import demo tickets", isOn: Binding(get: { draft.importDemoTickets }, set: { draft.importDemoTickets = $0 }))
 			}
-		case 6:
+		case .runtime:
 			providerGrid(RuntimeProviderKind.allCases, selected: draft.runtimeProviderKind) { kind in
 				draft.runtimeProviderKind = kind
 			}
-		case 7:
+		case .agent:
 			providerGrid(AgentProviderKind.allCases, selected: draft.agentProviderKind) { kind in
 				draft.agentProviderKind = kind
 			}
-		case 8:
+		case .runDefaults:
 			VStack(alignment: .leading, spacing: 14) {
 				Text("Run Defaults")
 					.font(.headline)
-				Stepper("Concurrency \(draft.concurrency)", value: Binding(get: { draft.concurrency }, set: { draft.concurrency = $0 }), in: 1...8)
-				Stepper("Max retries \(draft.maxRetries)", value: Binding(get: { draft.maxRetries }, set: { draft.maxRetries = $0 }), in: 0...5)
+				Stepper(
+					"Concurrency \(draft.concurrency)",
+					value: Binding(get: { draft.concurrency }, set: { draft.concurrency = $0 }),
+					in: 1...8
+				)
+				Stepper(
+					"Max retries \(draft.maxRetries)",
+					value: Binding(get: { draft.maxRetries }, set: { draft.maxRetries = $0 }),
+					in: 0...5
+				)
 				TextField("Branch Prefix", text: Binding(get: { draft.branchPrefix }, set: { draft.branchPrefix = $0 }))
 				Toggle("Run tests", isOn: Binding(get: { draft.runTests }, set: { draft.runTests = $0 }))
 				Toggle("Open pull requests", isOn: Binding(get: { draft.openPullRequest }, set: { draft.openPullRequest = $0 }))
-				Text("Runs are not created during setup. These defaults are stored in the project workflow policy and used when Play starts a run.")
-					.foregroundStyle(.secondary)
+				Text(
+					"Runs are not created during setup. These defaults are stored in the project workflow policy and used when Play starts a run."
+				)
+				.foregroundStyle(.secondary)
 			}
-		default:
+		case .review:
 			VStack(alignment: .leading, spacing: 12) {
 				Text("Review Project")
 					.font(.headline)
@@ -172,12 +199,20 @@ struct ProjectSetupWizard: View {
 		}
 	}
 
-	private var steps: [String] {
-		["Repository Provider", "Repository Credentials", "Repository", "Issue Source", "Issue Credentials", "Issue Filter", "Runtime", "Agent", "Run Defaults", "Review"]
+	private var steps: [ProjectSetupStep] {
+		ProjectSetupStep.allCases
+	}
+
+	private var currentStep: ProjectSetupStep {
+		steps[step]
 	}
 
 	private var stepTitle: String {
-		steps[step]
+		currentStep.title
+	}
+
+	private var currentValidationMessage: String? {
+		currentStep.validationMessage(for: draft)
 	}
 
 	private func providerGrid<T: Identifiable & Hashable>(_ values: [T], selected: T, choose: @escaping (T) -> Void) -> some View {
@@ -266,7 +301,8 @@ struct ProjectSetupWizard: View {
 			draft.repositoryCredential = token.accessToken
 			draft.issueCredential = token.accessToken
 			oauthMessage = "GitHub connected with scopes: \(token.scope)"
-		} catch {
+		}
+		catch {
 			oauthMessage = error.localizedDescription
 		}
 	}
@@ -284,7 +320,8 @@ struct ProjectSetupWizard: View {
 			let provider = GitHubRepositoryProvider(token: token)
 			availableRepositories = try await provider.listRepositories()
 			repositoryLoadMessage = "\(availableRepositories.count) repositories"
-		} catch {
+		}
+		catch {
 			repositoryLoadMessage = error.localizedDescription
 		}
 	}
@@ -305,6 +342,10 @@ struct ProjectSetupWizard: View {
 	}
 
 	private func createProject() async {
+		if let message = ProjectSetupStep.review.validationMessage(for: draft) {
+			NSAlert(error: ProjectCreationError.validation(message)).runModal()
+			return
+		}
 		isCreating = true
 		defer { isCreating = false }
 		do {
@@ -315,11 +356,16 @@ struct ProjectSetupWizard: View {
 				keychainService: services.keychain
 			)
 			if draft.importGitHubIssues {
-				_ = try await ProjectIssueImportService().importTickets(projectID: projectID, context: modelContext, providerRegistry: services.providerRegistry)
+				_ = try await ProjectIssueImportService().importTickets(
+					projectID: projectID,
+					context: modelContext,
+					providerRegistry: services.providerRegistry
+				)
 			}
 			onCreate(projectID)
 			dismiss()
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}

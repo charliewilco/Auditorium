@@ -1,6 +1,93 @@
 import Foundation
 import Observation
 
+enum ProjectSetupStep: Int, CaseIterable, Identifiable {
+	case repositoryProvider
+	case repositoryCredentials
+	case repository
+	case issueProvider
+	case issueCredentials
+	case issueSource
+	case runtime
+	case agent
+	case runDefaults
+	case review
+
+	var id: Int { rawValue }
+
+	var title: String {
+		switch self {
+		case .repositoryProvider: "Repository Provider"
+		case .repositoryCredentials: "Repository Credentials"
+		case .repository: "Repository"
+		case .issueProvider: "Issue Source"
+		case .issueCredentials: "Issue Credentials"
+		case .issueSource: "Issue Filter"
+		case .runtime: "Runtime"
+		case .agent: "Agent"
+		case .runDefaults: "Run Defaults"
+		case .review: "Review"
+		}
+	}
+
+	@MainActor
+	func validationMessage(for draft: ProjectDraft) -> String? {
+		switch self {
+		case .repositoryProvider:
+			return nil
+		case .repositoryCredentials:
+			return draft.trimmedRepositoryCredential.isEmpty
+				? "Connect GitHub or paste an access token before selecting a repository." : nil
+		case .repository:
+			if draft.trimmedName.isEmpty {
+				return "Project name is required."
+			}
+			if draft.trimmedRepositoryName.isEmpty {
+				return "Repository is required."
+			}
+			if draft.trimmedRepositoryURL.isEmpty {
+				return "Repository URL is required."
+			}
+			if draft.trimmedDefaultBranch.isEmpty {
+				return "Default branch is required."
+			}
+			return nil
+		case .issueProvider:
+			return nil
+		case .issueCredentials:
+			return draft.hasGitHubCredential ? nil : "Connect GitHub or paste an access token before selecting issues."
+		case .issueSource:
+			if draft.trimmedIssueSourceName.isEmpty {
+				return "Issue source name is required."
+			}
+			if draft.trimmedIssueSourceIdentifier.isEmpty {
+				return "Issue source identifier is required."
+			}
+			if draft.importGitHubIssues && draft.trimmedIssueTrackerURL.isEmpty {
+				return "Issue tracker URL is required when importing GitHub issues."
+			}
+			return nil
+		case .runtime:
+			return nil
+		case .agent:
+			return nil
+		case .runDefaults:
+			if draft.concurrency < 1 {
+				return "Concurrency must be at least 1."
+			}
+			if draft.maxRetries < 0 {
+				return "Max retries cannot be negative."
+			}
+			if draft.trimmedBranchPrefix.isEmpty {
+				return "Branch prefix is required."
+			}
+			return nil
+		case .review:
+			return draft.canCreate ? nil : "Project name, repository, default branch, and issue source are required."
+		}
+	}
+}
+
 @Observable
 @MainActor
 final class ProjectDraft {
@@ -43,12 +130,37 @@ final class ProjectDraft {
 		defaultBranch.trimmingCharacters(in: .whitespacesAndNewlines)
 	}
 
+	var trimmedRepositoryCredential: String {
+		repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
+	var trimmedIssueCredential: String {
+		issueCredential.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
+	var hasGitHubCredential: Bool {
+		!trimmedRepositoryCredential.isEmpty || !trimmedIssueCredential.isEmpty
+	}
+
+	var trimmedIssueSourceName: String {
+		issueSourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
+	var trimmedIssueSourceIdentifier: String {
+		issueSourceIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
+	var trimmedIssueTrackerURL: String {
+		issueTrackerURL.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
+	var trimmedBranchPrefix: String {
+		branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
 	var canCreate: Bool {
-		!trimmedName.isEmpty &&
-		!trimmedRepositoryName.isEmpty &&
-		!trimmedRepositoryURL.isEmpty &&
-		!trimmedDefaultBranch.isEmpty &&
-		!issueSourceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+		!trimmedName.isEmpty && !trimmedRepositoryName.isEmpty && !trimmedRepositoryURL.isEmpty && !trimmedDefaultBranch.isEmpty
+			&& !trimmedIssueSourceName.isEmpty
 	}
 
 	var resolvedWorkflowPolicyMarkdown: String {
@@ -58,7 +170,7 @@ final class ProjectDraft {
 		max_retries: \(maxRetries)
 		handoff_status: "Needs Review"
 		update_issue_labels: false
-		branch_prefix: "\(branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "auditorium" : branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines))"
+		branch_prefix: "\(trimmedBranchPrefix.isEmpty ? "auditorium" : trimmedBranchPrefix)"
 		run_tests: \(runTests)
 		open_pull_request: \(openPullRequest)
 		---

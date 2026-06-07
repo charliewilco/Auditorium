@@ -3,12 +3,15 @@ import SwiftData
 
 enum ProjectCreationError: LocalizedError {
 	case invalidDraft
+	case validation(String)
 	case projectNotFound(UUID)
 
 	var errorDescription: String? {
 		switch self {
 		case .invalidDraft:
 			"Project name, repository, default branch, and issue source are required."
+		case .validation(let message):
+			message
 		case .projectNotFound(let id):
 			"Project \(id.uuidString) could not be found."
 		}
@@ -41,7 +44,9 @@ struct ProjectCreationService {
 		let repositoryAccountID: UUID?
 		let issueAccountID: UUID?
 		if draft.repositoryProviderKind == .github, draft.issueProviderKind == .githubIssues {
-			let sharedCredential = draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? draft.issueCredential : draft.repositoryCredential
+			let sharedCredential =
+				draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+				? draft.issueCredential : draft.repositoryCredential
 			let sharedAccountID = try storeCredentialIfNeeded(
 				sharedCredential,
 				providerKind: draft.repositoryProviderKind.rawValue,
@@ -53,7 +58,8 @@ struct ProjectCreationService {
 			)
 			repositoryAccountID = sharedAccountID
 			issueAccountID = sharedAccountID
-		} else {
+		}
+		else {
 			repositoryAccountID = try storeCredentialIfNeeded(
 				draft.repositoryCredential,
 				providerKind: draft.repositoryProviderKind.rawValue,
@@ -75,27 +81,31 @@ struct ProjectCreationService {
 		}
 
 		context.insert(project)
-		context.insert(RepositoryRecord(
-			provider: draft.repositoryProviderKind,
-			owner: repositoryOwner(from: draft.trimmedRepositoryName),
-			name: repositoryShortName(from: draft.trimmedRepositoryName),
-			fullName: draft.trimmedRepositoryName,
-			cloneURL: cloneURL(from: draft.trimmedRepositoryURL),
-			webURL: draft.trimmedRepositoryURL,
-			defaultBranch: draft.trimmedDefaultBranch,
-			localPath: workspaceService.repositoryDirectory(projectID: project.id).path(),
-			providerAccountID: repositoryAccountID,
-			projectID: project.id
-		))
-		context.insert(IssueTrackerRecord(
-			provider: draft.issueProviderKind,
-			displayName: draft.issueSourceName.trimmingCharacters(in: .whitespacesAndNewlines),
-			sourceIdentifier: draft.issueSourceIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
-			filterName: draft.issueFilterName.trimmingCharacters(in: .whitespacesAndNewlines),
-			webURL: draft.issueTrackerURL.trimmingCharacters(in: .whitespacesAndNewlines),
-			projectID: project.id,
-			providerAccountID: issueAccountID
-		))
+		context.insert(
+			RepositoryRecord(
+				provider: draft.repositoryProviderKind,
+				owner: repositoryOwner(from: draft.trimmedRepositoryName),
+				name: repositoryShortName(from: draft.trimmedRepositoryName),
+				fullName: draft.trimmedRepositoryName,
+				cloneURL: cloneURL(from: draft.trimmedRepositoryURL),
+				webURL: draft.trimmedRepositoryURL,
+				defaultBranch: draft.trimmedDefaultBranch,
+				localPath: workspaceService.repositoryDirectory(projectID: project.id).path(),
+				providerAccountID: repositoryAccountID,
+				projectID: project.id
+			)
+		)
+		context.insert(
+			IssueTrackerRecord(
+				provider: draft.issueProviderKind,
+				displayName: draft.issueSourceName.trimmingCharacters(in: .whitespacesAndNewlines),
+				sourceIdentifier: draft.issueSourceIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
+				filterName: draft.issueFilterName.trimmingCharacters(in: .whitespacesAndNewlines),
+				webURL: draft.issueTrackerURL.trimmingCharacters(in: .whitespacesAndNewlines),
+				projectID: project.id,
+				providerAccountID: issueAccountID
+			)
+		)
 
 		if draft.importDemoTickets {
 			insertDemoTickets(projectID: project.id, context: context)
@@ -124,12 +134,14 @@ struct ProjectCreationService {
 		let accountID = UUID()
 		let keychainAccount = "\(projectID.uuidString)-\(credentialRole)-\(providerKind)"
 		try keychainService.storeSecret(trimmed, account: keychainAccount)
-		context.insert(ProviderAccountRecord(
-			id: accountID,
-			providerKindRaw: providerKind,
-			displayName: displayName,
-			keychainAccount: keychainAccount
-		))
+		context.insert(
+			ProviderAccountRecord(
+				id: accountID,
+				providerKindRaw: providerKind,
+				displayName: displayName,
+				keychainAccount: keychainAccount
+			)
+		)
 		return accountID
 	}
 
@@ -137,22 +149,24 @@ struct ProjectCreationService {
 	private func insertDemoTickets(projectID: UUID, context: ModelContext) {
 		for demoTicket in DemoTickets.all {
 			let descriptor = demoTicket.descriptor
-			context.insert(TicketRecord(
-				provider: descriptor.provider,
-				externalID: descriptor.externalID,
-				title: descriptor.title,
-				body: descriptor.body,
-				status: descriptor.status,
-				labels: descriptor.labels,
-				assignee: descriptor.assignee,
-				priority: descriptor.priority,
-				webURL: descriptor.webURL?.absoluteString ?? "",
-				createdAt: descriptor.createdAt,
-				updatedAt: descriptor.updatedAt,
-				estimatedComplexity: descriptor.estimatedComplexity,
-				blockedBy: descriptor.blockedBy,
-				sourceProjectID: projectID
-			))
+			context.insert(
+				TicketRecord(
+					provider: descriptor.provider,
+					externalID: descriptor.externalID,
+					title: descriptor.title,
+					body: descriptor.body,
+					status: descriptor.status,
+					labels: descriptor.labels,
+					assignee: descriptor.assignee,
+					priority: descriptor.priority,
+					webURL: descriptor.webURL?.absoluteString ?? "",
+					createdAt: descriptor.createdAt,
+					updatedAt: descriptor.updatedAt,
+					estimatedComplexity: descriptor.estimatedComplexity,
+					blockedBy: descriptor.blockedBy,
+					sourceProjectID: projectID
+				)
+			)
 		}
 	}
 

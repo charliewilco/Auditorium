@@ -144,4 +144,77 @@ struct AuditoriumCoreTests {
 
 		#expect(issues.contains { $0.model == "Project" && $0.field == "repositoryURL" })
 	}
+
+	@Test func projectSetupStepValidationBlocksMissingCredentialsAndRequiredFields() {
+		let draft = ProjectDraft()
+
+		#expect(ProjectSetupStep.repositoryProvider.validationMessage(for: draft) == nil)
+		#expect(ProjectSetupStep.repositoryCredentials.validationMessage(for: draft)?.contains("Connect GitHub") == true)
+
+		draft.repositoryCredential = "gho_example"
+		#expect(ProjectSetupStep.issueCredentials.validationMessage(for: draft) == nil)
+
+		draft.name = " "
+		#expect(ProjectSetupStep.repository.validationMessage(for: draft) == "Project name is required.")
+
+		draft.name = "Auditorium"
+		draft.repositoryName = " "
+		#expect(ProjectSetupStep.repository.validationMessage(for: draft) == "Repository is required.")
+
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = " "
+		#expect(ProjectSetupStep.repository.validationMessage(for: draft) == "Repository URL is required.")
+
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = " "
+		#expect(ProjectSetupStep.repository.validationMessage(for: draft) == "Default branch is required.")
+	}
+
+	@Test func projectSetupStepValidationAcceptsCompleteRealGitHubDraft() {
+		let draft = ProjectDraft()
+		draft.name = "Auditorium"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.repositoryCredential = "gho_example"
+		draft.issueCredential = "gho_example"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.issueTrackerURL = "https://github.com/charliewilco/Auditorium/issues"
+		draft.importGitHubIssues = true
+		draft.branchPrefix = "codex"
+
+		for step in ProjectSetupStep.allCases {
+			#expect(step.validationMessage(for: draft) == nil)
+		}
+	}
+
+	@Test func projectSetupStepValidationChecksIssueSourceAndRunDefaults() {
+		let draft = ProjectDraft()
+		draft.issueCredential = "gho_example"
+		draft.issueSourceName = " "
+
+		#expect(ProjectSetupStep.issueSource.validationMessage(for: draft) == "Issue source name is required.")
+
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = " "
+		#expect(ProjectSetupStep.issueSource.validationMessage(for: draft) == "Issue source identifier is required.")
+
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.issueTrackerURL = " "
+		draft.importGitHubIssues = true
+		#expect(ProjectSetupStep.issueSource.validationMessage(for: draft) == "Issue tracker URL is required when importing GitHub issues.")
+
+		draft.issueTrackerURL = "https://github.com/charliewilco/Auditorium/issues"
+		draft.concurrency = 0
+		#expect(ProjectSetupStep.runDefaults.validationMessage(for: draft) == "Concurrency must be at least 1.")
+
+		draft.concurrency = 1
+		draft.maxRetries = -1
+		#expect(ProjectSetupStep.runDefaults.validationMessage(for: draft) == "Max retries cannot be negative.")
+
+		draft.maxRetries = 0
+		draft.branchPrefix = " "
+		#expect(ProjectSetupStep.runDefaults.validationMessage(for: draft) == "Branch prefix is required.")
+	}
 }
