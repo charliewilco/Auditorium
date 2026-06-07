@@ -9,6 +9,17 @@ enum ProviderImplementationState: String, Sendable {
 	case unavailable
 }
 
+enum ProviderCredentialError: LocalizedError, Equatable {
+	case missingGitHubCredentials(String)
+
+	var errorDescription: String? {
+		switch self {
+		case .missingGitHubCredentials(let operation):
+			"GitHub credentials are required before \(operation). Connect GitHub in Settings or project setup."
+		}
+	}
+}
+
 struct ProviderCapability: Sendable, Identifiable {
 	let id: String
 	let title: String
@@ -22,7 +33,7 @@ struct ProviderRegistry {
 	func sourceCodeProvider(for project: Project, context: ModelContext) throws -> any SourceCodeProvider {
 		switch project.repositoryProviderKind {
 		case .github:
-			return GitHubRepositoryProvider(token: try githubToken(for: project, context: context))
+			return GitHubRepositoryProvider(token: try requireGitHubToken(for: project, context: context, operation: "running GitHub source-code operations"))
 		case .gitlab:
 			return GitLabRepositoryProvider()
 		case .bitbucket:
@@ -39,7 +50,7 @@ struct ProviderRegistry {
 		case .githubIssues:
 			let issueTracker = try context.fetch(FetchDescriptor<IssueTrackerRecord>())
 				.first { $0.projectID == project.id && $0.provider == .githubIssues }
-			return GitHubIssueTrackerProvider(repositoryFullName: project.repositoryName, issueFilter: GitHubIssueFilter(rawValue: issueTracker?.filterName), token: try githubToken(for: project, context: context))
+			return GitHubIssueTrackerProvider(repositoryFullName: project.repositoryName, issueFilter: GitHubIssueFilter(rawValue: issueTracker?.filterName), token: try requireGitHubToken(for: project, context: context, operation: "importing GitHub issues"))
 		case .linear:
 			return LinearIssueTrackerProvider()
 		case .asana:
@@ -51,6 +62,14 @@ struct ProviderRegistry {
 		case .imported:
 			return MockGitHubIssueTrackerProvider()
 		}
+	}
+
+	func requireGitHubToken(for project: Project, context: ModelContext, operation: String) throws -> String {
+		guard let token = try githubToken(for: project, context: context)?.trimmingCharacters(in: .whitespacesAndNewlines),
+			  token.isEmpty == false else {
+			throw ProviderCredentialError.missingGitHubCredentials(operation)
+		}
+		return token
 	}
 
 	func githubToken(for project: Project, context: ModelContext) throws -> String? {

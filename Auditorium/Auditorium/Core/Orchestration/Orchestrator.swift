@@ -143,10 +143,10 @@ final class Orchestrator {
 
 	private func executeWithLocalWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
 		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
-		try workspaceService.ensureProjectLayout(projectID: project.id)
 		let sourceProvider = try resolveLocalWorkspaceSourceProvider(project: project, context: context)
 		let repository = repositoryDescriptor(for: project)
 		let policy = try WorkflowPolicyParser().parse(plan.workflowPolicyMarkdown)
+		try workspaceService.ensureProjectLayout(projectID: project.id)
 		let runtime = LocalProcessRuntimeProvider(
 			workspaceService: workspaceService,
 			projectID: project.id,

@@ -69,7 +69,7 @@ Acceptance gate:
 - [x] Implement GitHub OAuth device flow or native callback flow.
 - [ ] Store and refresh OAuth token metadata safely.
 - [x] Validate granted scopes.
-- [~] Detect missing or insufficient GitHub credentials before import/run.
+- [x] Detect missing or insufficient GitHub credentials before import/run.
 - [x] Add Settings UI for connected GitHub account.
 - [x] Add clear credentials action.
 - [x] Add tests for Keychain-backed account lifecycle.
@@ -188,7 +188,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Runtime preflight blocks unsafe runs.
+- [x] Runtime preflight blocks unsafe runs.
 - [x] At least one non-mock runtime can run a ticket workspace end-to-end.
 
 ## 10. Agent Providers
@@ -430,6 +430,7 @@ Acceptance gate:
 - [x] Swift tests for Generic CLI agent command parsing and process execution.
 - [x] Swift tests for Local Workspace runtime clone, branch, start, and stop behavior.
 - [x] Swift tests for Local Workspace Codex orchestration commit, push, PR, and no-change behavior.
+- [x] Swift tests for GitHub credential preflight before import/run side effects.
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.

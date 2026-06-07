@@ -901,6 +901,112 @@ struct AuditoriumTests {
 		#expect(try keychain.readSecret(account: keychainAccount) == nil)
 	}
 
+	@Test func githubIssueImportRequiresCredentialsBeforeProviderCall() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let project = Project(
+			name: "Missing Credentials",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		context.insert(project)
+		context.insert(RepositoryRecord(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: "https://github.com/charliewilco/Auditorium.git",
+			webURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			projectID: project.id
+		))
+		context.insert(IssueTrackerRecord(
+			provider: .githubIssues,
+			displayName: "GitHub Issues",
+			sourceIdentifier: "charliewilco/Auditorium",
+			filterName: "open",
+			webURL: "https://github.com/charliewilco/Auditorium/issues",
+			projectID: project.id
+		))
+		try context.save()
+
+		await #expect(throws: ProviderCredentialError.missingGitHubCredentials("importing GitHub issues")) {
+			try await ProjectIssueImportService().importTickets(projectID: project.id, context: context, providerRegistry: ProviderRegistry(keychainService: keychain))
+		}
+		#expect(try context.fetch(FetchDescriptor<TicketRecord>()).isEmpty)
+	}
+
+	@Test func localWorkspaceRunRequiresGitHubCredentialsBeforeCreatingRunRecords() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let project = Project(
+			name: "Credential Preflight",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "201",
+			title: "Block Without Credentials",
+			body: "Do not create workspaces before GitHub auth is ready.",
+			status: .ready,
+			labels: ["auth"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/201",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(RepositoryRecord(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: "https://github.com/charliewilco/Auditorium.git",
+			webURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			projectID: project.id
+		))
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .high))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			providerRegistry: ProviderRegistry(keychainService: keychain)
+		)
+
+		await #expect(throws: ProviderCredentialError.missingGitHubCredentials("running GitHub source-code operations")) {
+			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		}
+		#expect(try context.fetch(FetchDescriptor<RunRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<TicketRunRecord>()).isEmpty)
+		#expect(!FileManager.default.fileExists(atPath: workspace.workspacesDirectory(projectID: project.id).path()))
+	}
+
 	@Test func githubDeviceFlowRequestsUserCode() async throws {
 		let payload = """
 		{
