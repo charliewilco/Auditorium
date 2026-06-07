@@ -129,3 +129,15 @@ struct RuntimeHealthCheck: Identifiable, Sendable {
 	let detail: String
 	let version: String?
 }
+
+struct RuntimeProviderStatus: Identifiable, Sendable {
+	let id: String
+	let kind: RuntimeProviderKind
+	let detection: RuntimeHealthCheck
+	let implementationState: ProviderImplementationState
+	let implementationDetail: String
+
+	var isRunnable: Bool {
+		detection.state == .available && implementationState == .implemented
+	}
+}

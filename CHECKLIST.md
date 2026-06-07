@@ -183,8 +183,8 @@ Acceptance gate:
 - [ ] Implement Apple Container runtime execution.
 - [ ] Implement Docker runtime execution.
 - [x] Implement Local Workspace runtime execution.
-- [ ] Expose runtime provider implementation status separately from detection status.
-- [ ] Add "start container service" guidance without auto-starting it.
+- [x] Expose runtime provider implementation status separately from detection status.
+- [x] Add "start container service" guidance without auto-starting it.
 
 Acceptance gate:
 

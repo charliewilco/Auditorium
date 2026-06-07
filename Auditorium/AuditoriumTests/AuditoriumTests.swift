@@ -414,8 +414,20 @@ struct AuditoriumTests {
 			.sorted { $0.externalID < $1.externalID }
 		let firstTicket = try #require(tickets.first)
 		let secondTicket = try #require(tickets.dropFirst().first)
-		let firstQueueItem = QueueItemRecord(ticketID: firstTicket.id, projectID: projectID, position: 10, priority: .high, concurrencyGroup: "ui")
-		let secondQueueItem = QueueItemRecord(ticketID: secondTicket.id, projectID: projectID, position: 20, priority: .low, concurrencyGroup: "backend")
+		let firstQueueItem = QueueItemRecord(
+			ticketID: firstTicket.id,
+			projectID: projectID,
+			position: 10,
+			priority: .high,
+			concurrencyGroup: "ui"
+		)
+		let secondQueueItem = QueueItemRecord(
+			ticketID: secondTicket.id,
+			projectID: projectID,
+			position: 20,
+			priority: .low,
+			concurrencyGroup: "backend"
+		)
 		context.insert(firstQueueItem)
 		context.insert(secondQueueItem)
 		try context.save()
@@ -3062,6 +3074,49 @@ struct AuditoriumTests {
 			"""
 
 		#expect(RuntimeDetectionService.containerCLIVersion(from: json) == "0.12.3")
+	}
+
+	@Test func appleContainerServiceGuidanceDoesNotAutoStart() {
+		let detail = RuntimeDetectionService.appleContainerServiceUnavailableDetail(path: "/usr/local/bin/container")
+
+		#expect(detail.contains("container system start"))
+		#expect(detail.contains("will not start it automatically"))
+	}
+
+	@Test func runtimeProviderStatusesSeparateDetectionFromImplementation() {
+		let statuses = RuntimeDetectionService.runtimeProviderStatuses(from: [
+			RuntimeHealthCheck(
+				id: "apple-container",
+				name: "Apple Container",
+				state: .available,
+				detail: "container system service is running.",
+				version: "0.12.3"
+			),
+			RuntimeHealthCheck(
+				id: "docker",
+				name: "Docker",
+				state: .available,
+				detail: "/usr/local/bin/docker",
+				version: "Docker version 27.0.0"
+			),
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+		])
+
+		let appleContainer = statuses.first { $0.kind == .appleContainer }
+		let docker = statuses.first { $0.kind == .docker }
+		let localWorkspace = statuses.first { $0.kind == .localWorkspace }
+		let mockRuntime = statuses.first { $0.kind == .mockRuntime }
+
+		#expect(appleContainer?.detection.state == .available)
+		#expect(appleContainer?.implementationState == .unavailable)
+		#expect(appleContainer?.isRunnable == false)
+		#expect(docker?.detection.state == .available)
+		#expect(docker?.implementationState == .unavailable)
+		#expect(docker?.isRunnable == false)
+		#expect(localWorkspace?.implementationState == .implemented)
+		#expect(localWorkspace?.isRunnable == true)
+		#expect(mockRuntime?.implementationState == .implemented)
+		#expect(mockRuntime?.isRunnable == true)
 	}
 
 	@Test func mockAgentHealthIsAvailableOffline() async {

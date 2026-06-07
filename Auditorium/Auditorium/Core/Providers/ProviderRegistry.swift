@@ -7,6 +7,16 @@ enum ProviderImplementationState: String, Sendable {
 	case authorized
 	case implemented
 	case unavailable
+
+	var title: String {
+		switch self {
+		case .detected: "Detected"
+		case .authenticated: "Authenticated"
+		case .authorized: "Authorized"
+		case .implemented: "Implemented"
+		case .unavailable: "Not Implemented"
+		}
+	}
 }
 
 enum ProviderCredentialError: LocalizedError, Equatable {

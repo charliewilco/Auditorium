@@ -38,14 +38,17 @@ struct SettingsContentView: View {
 				Text("Settings")
 					.font(.largeTitle.weight(.semibold))
 				settingsSection("Accounts") {
-					Text("Credential metadata is stored in SwiftData. Secret values are stored in Keychain under co.charliewil.Auditorium.")
-						.foregroundStyle(.secondary)
+					Text(
+						"Credential metadata is stored in SwiftData. Secret values are stored in Keychain under co.charliewil.Auditorium."
+					)
+					.foregroundStyle(.secondary)
 					TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
 					githubAccountStateView
 					if providerAccounts.isEmpty {
 						Text("No connected provider accounts.")
 							.foregroundStyle(.secondary)
-					} else {
+					}
+					else {
 						ForEach(providerAccounts) { account in
 							LabeledContent(account.displayName, value: account.providerKindRaw)
 						}
@@ -66,16 +69,25 @@ struct SettingsContentView: View {
 				}
 				settingsSection("Runtime Providers") {
 					SymphonyDoctorStatusView(status: symphonyDoctorStatus)
-					ForEach(runtimeHealth) { health in
-						HStack {
-							VStack(alignment: .leading) {
-								Text(health.name)
-								Text(health.detail)
+					ForEach(runtimeProviderStatuses) { status in
+						HStack(alignment: .top) {
+							VStack(alignment: .leading, spacing: 4) {
+								Text(status.kind.title)
+								Text(status.detection.detail)
+									.font(.caption)
+									.foregroundStyle(.secondary)
+								Text(status.implementationDetail)
 									.font(.caption)
 									.foregroundStyle(.secondary)
 							}
 							Spacer()
-							StatusBadge(title: health.state.title, tint: health.state.tint)
+							HStack(spacing: 6) {
+								StatusBadge(title: status.detection.state.title, tint: status.detection.state.tint)
+								StatusBadge(
+									title: status.implementationState.title,
+									tint: implementationStatusTint(status.implementationState)
+								)
+							}
 						}
 					}
 				}
@@ -99,6 +111,10 @@ struct SettingsContentView: View {
 			}
 			.padding()
 		}
+	}
+
+	private var runtimeProviderStatuses: [RuntimeProviderStatus] {
+		RuntimeDetectionService.runtimeProviderStatuses(from: runtimeHealth)
 	}
 
 	private var githubAuthenticationState: GitHubAuthenticationState {
@@ -138,6 +154,16 @@ struct SettingsContentView: View {
 		}
 	}
 
+	private func implementationStatusTint(_ state: ProviderImplementationState) -> Color {
+		switch state {
+		case .detected: .blue
+		case .authenticated: .indigo
+		case .authorized: .purple
+		case .implemented: .green
+		case .unavailable: .secondary
+		}
+	}
+
 	private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
 		VStack(alignment: .leading, spacing: 10) {
 			Text(title)
@@ -164,7 +190,8 @@ struct SettingsContentView: View {
 	private func clearGitHubCredentials() {
 		do {
 			try services.providerRegistry.clearGitHubCredentials(context: modelContext)
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
