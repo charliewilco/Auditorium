@@ -18,18 +18,33 @@ struct GitHubAPIClient: Sendable {
 	let token: String
 	let baseURL: URL
 	let transport: any GitHubAPITransport
+	let retryPolicy: GitHubAPIRetryPolicy
+	let sleep: @Sendable (Duration) async throws -> Void
 
-	init(token: String, baseURL: URL = URL(string: "https://api.github.com")!, transport: any GitHubAPITransport = URLSession.shared) {
+	init(
+		token: String,
+		baseURL: URL = URL(string: "https://api.github.com")!,
+		transport: any GitHubAPITransport = URLSession.shared,
+		retryPolicy: GitHubAPIRetryPolicy = .default,
+		sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in
+			try await Task.sleep(for: duration)
+		}
+	) {
 		self.token = token
 		self.baseURL = baseURL
 		self.transport = transport
+		self.retryPolicy = retryPolicy
+		self.sleep = sleep
 	}
 
 	func listRepositories() async throws -> [RepositoryDescriptor] {
-		let repositories: [GitHubRepositoryPayload] = try await get(path: "/user/repos", queryItems: [
-			URLQueryItem(name: "per_page", value: "100"),
-			URLQueryItem(name: "sort", value: "pushed")
-		])
+		let repositories: [GitHubRepositoryPayload] = try await get(
+			path: "/user/repos",
+			queryItems: [
+				URLQueryItem(name: "per_page", value: "100"),
+				URLQueryItem(name: "sort", value: "pushed"),
+			]
+		)
 		return repositories.map(\.descriptor)
 	}
 
@@ -43,11 +58,15 @@ struct GitHubAPIClient: Sendable {
 		var issues: [GitHubIssuePayload] = []
 		var hasNextPage = true
 		while hasNextPage {
-			let pageItems = filter.queryItems + [
-				URLQueryItem(name: "per_page", value: "100"),
-				URLQueryItem(name: "page", value: String(page))
-			]
-			let response: ([GitHubIssuePayload], HTTPURLResponse) = try await getWithResponse(path: "/repos/\(repositoryFullName)/issues", queryItems: pageItems)
+			let pageItems =
+				filter.queryItems + [
+					URLQueryItem(name: "per_page", value: "100"),
+					URLQueryItem(name: "page", value: String(page)),
+				]
+			let response: ([GitHubIssuePayload], HTTPURLResponse) = try await getWithResponse(
+				path: "/repos/\(repositoryFullName)/issues",
+				queryItems: pageItems
+			)
 			issues.append(contentsOf: response.0)
 			hasNextPage = response.1.hasGitHubNextPage
 			page += 1
@@ -65,7 +84,9 @@ struct GitHubAPIClient: Sendable {
 
 	func addComment(repositoryFullName: String, issueNumber: String, body: String) async throws {
 		let payload = ["body": body]
-		_ = try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/comments", method: "POST", body: payload) as GitHubCommentPayload
+		_ =
+			try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/comments", method: "POST", body: payload)
+			as GitHubCommentPayload
 	}
 
 	func addLabels(repositoryFullName: String, issueNumber: String, labels: [String]) async throws {
@@ -74,7 +95,9 @@ struct GitHubAPIClient: Sendable {
 			return
 		}
 		let payload = GitHubLabelsRequest(labels: cleanedLabels)
-		_ = try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/labels", method: "POST", body: payload) as [GitHubLabelPayload]
+		_ =
+			try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/labels", method: "POST", body: payload)
+			as [GitHubLabelPayload]
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
@@ -83,9 +106,13 @@ struct GitHubAPIClient: Sendable {
 			"title": request.title,
 			"body": request.body,
 			"head": request.branchName,
-			"base": request.targetBranch
+			"base": request.targetBranch,
 		]
-		let response: GitHubPullRequestPayload = try await send(path: "/repos/\(request.repository.fullName)/pulls", method: "POST", body: payload)
+		let response: GitHubPullRequestPayload = try await send(
+			path: "/repos/\(request.repository.fullName)/pulls",
+			method: "POST",
+			body: payload
+		)
 		return response.descriptor(fallbackBranchName: request.branchName, fallbackTargetBranch: request.targetBranch, checksStatus: .pending)
 	}
 
@@ -94,7 +121,8 @@ struct GitHubAPIClient: Sendable {
 		let checksStatus: ChecksStatus
 		if let sha = response.head?.sha, sha.isEmpty == false {
 			checksStatus = try await pullRequestChecksStatus(repositoryFullName: repositoryFullName, ref: sha)
-		} else {
+		}
+		else {
 			checksStatus = .pending
 		}
 		return response.descriptor(fallbackBranchName: "", fallbackTargetBranch: "", checksStatus: checksStatus)
@@ -102,12 +130,14 @@ struct GitHubAPIClient: Sendable {
 
 	func validateScopes(requiredScopes: Set<String> = ["repo", "read:user"]) async throws -> Set<String> {
 		let request = try makeRequest(path: "/user", method: "GET")
-		let (_, response) = try await transport.send(request)
+		let (_, response) = try await sendWithRetry(request)
 		try validate(response: response)
 		let scopes = response.value(forHTTPHeaderField: "X-OAuth-Scopes") ?? ""
 		let granted = Set(scopes.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
 		guard requiredScopes.isSubset(of: granted) else {
-			throw ProviderError.unavailable("GitHub credentials are missing required scopes: \(requiredScopes.subtracting(granted).sorted().joined(separator: ", ")).")
+			throw ProviderError.unavailable(
+				"GitHub credentials are missing required scopes: \(requiredScopes.subtracting(granted).sorted().joined(separator: ", "))."
+			)
 		}
 		return granted
 	}
@@ -118,9 +148,12 @@ struct GitHubAPIClient: Sendable {
 	}
 
 	private func commitCheckRuns(repositoryFullName: String, ref: String) async throws -> ChecksStatus {
-		let response: GitHubCheckRunsPayload = try await get(path: "/repos/\(repositoryFullName)/commits/\(ref)/check-runs", queryItems: [
-			URLQueryItem(name: "per_page", value: "100")
-		])
+		let response: GitHubCheckRunsPayload = try await get(
+			path: "/repos/\(repositoryFullName)/commits/\(ref)/check-runs",
+			queryItems: [
+				URLQueryItem(name: "per_page", value: "100")
+			]
+		)
 		return response.checksStatus
 	}
 
@@ -151,20 +184,83 @@ struct GitHubAPIClient: Sendable {
 		try await send(path: path, queryItems: [], method: method, body: body)
 	}
 
-	private func send<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?) async throws -> Value {
+	private func send<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?) async throws
+		-> Value
+	{
 		let response: (Value, HTTPURLResponse) = try await sendWithResponse(path: path, queryItems: queryItems, method: method, body: body)
 		return response.0
 	}
 
-	private func sendWithResponse<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?) async throws -> (Value, HTTPURLResponse) {
+	private func sendWithResponse<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?)
+		async throws -> (Value, HTTPURLResponse)
+	{
 		var request = try makeRequest(path: path, queryItems: queryItems, method: method)
 		if let body {
 			request.httpBody = try JSONEncoder().encode(body)
 			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 		}
-		let (data, response) = try await transport.send(request)
+		let (data, response) = try await sendWithRetry(request)
 		try validate(response: response)
 		return (try JSONDecoder.github.decode(Value.self, from: data), response)
+	}
+
+	private func sendWithRetry(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		var attempt = 0
+		while true {
+			do {
+				let result = try await transport.send(request)
+				guard shouldRetry(response: result.1, attempt: attempt) else {
+					return result
+				}
+				try await sleep(delay(for: result.1, attempt: attempt))
+				attempt += 1
+			}
+			catch is CancellationError {
+				throw CancellationError()
+			}
+			catch {
+				guard shouldRetry(error: error, attempt: attempt) else {
+					throw error
+				}
+				try await sleep(delay(for: nil, attempt: attempt))
+				attempt += 1
+			}
+		}
+	}
+
+	private func shouldRetry(response: HTTPURLResponse, attempt: Int) -> Bool {
+		guard attempt < retryPolicy.maxRetries else {
+			return false
+		}
+		if (500..<600).contains(response.statusCode) || response.statusCode == 429 {
+			return true
+		}
+		return response.statusCode == 403 && response.isGitHubRateLimited
+	}
+
+	private func shouldRetry(error: Error, attempt: Int) -> Bool {
+		guard attempt < retryPolicy.maxRetries else {
+			return false
+		}
+		guard let urlError = error as? URLError else {
+			return false
+		}
+		return urlError.isTransientGitHubTransportError
+	}
+
+	private func delay(for response: HTTPURLResponse?, attempt: Int) -> Duration {
+		if let response,
+			let preferredDelay = response.gitHubRetryDelay(now: Date()),
+			preferredDelay > .zero
+		{
+			return min(preferredDelay, retryPolicy.maxDelay)
+		}
+		let cappedBackoff = min(retryPolicy.backoffDelay(for: attempt), retryPolicy.maxDelay)
+		let nanoseconds = cappedBackoff.clampedNanoseconds
+		guard nanoseconds > 0 else {
+			return .zero
+		}
+		return .nanoseconds(Int64.random(in: 0...Int64(nanoseconds)))
 	}
 
 	private func makeRequest(path: String, queryItems: [URLQueryItem] = [], method: String) throws -> URLRequest {
@@ -199,27 +295,100 @@ struct GitHubAPIClient: Sendable {
 	}
 }
 
-private extension HTTPURLResponse {
-	var hasGitHubNextPage: Bool {
+struct GitHubAPIRetryPolicy: Equatable, Sendable {
+	let maxRetries: Int
+	let baseDelay: Duration
+	let maxDelay: Duration
+
+	static let `default` = GitHubAPIRetryPolicy(maxRetries: 3, baseDelay: .milliseconds(250), maxDelay: .seconds(5))
+
+	init(maxRetries: Int, baseDelay: Duration, maxDelay: Duration) {
+		self.maxRetries = max(0, maxRetries)
+		self.baseDelay = max(.zero, baseDelay)
+		self.maxDelay = max(.zero, maxDelay)
+	}
+
+	func backoffDelay(for attempt: Int) -> Duration {
+		let multiplier = 1 << min(max(0, attempt), 10)
+		let nanoseconds = baseDelay.clampedNanoseconds
+		let scaled = nanoseconds.multipliedReportingOverflow(by: UInt64(multiplier))
+		return .nanoseconds(Int64(min(scaled.overflow ? UInt64(Int64.max) : scaled.partialValue, UInt64(Int64.max))))
+	}
+}
+
+extension HTTPURLResponse {
+	fileprivate var hasGitHubNextPage: Bool {
 		value(forHTTPHeaderField: "Link")?.contains("rel=\"next\"") == true
 	}
 
-	var isGitHubRateLimited: Bool {
+	fileprivate var isGitHubRateLimited: Bool {
 		(statusCode == 403 || statusCode == 429) && value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0"
 	}
 
-	var githubRateLimitResetDescription: String {
+	fileprivate var githubRateLimitResetDescription: String {
 		guard let reset = value(forHTTPHeaderField: "X-RateLimit-Reset"),
-			  let interval = TimeInterval(reset) else {
+			let interval = TimeInterval(reset)
+		else {
 			return "."
 		}
 		let date = Date(timeIntervalSince1970: interval)
 		return " until \(ISO8601DateFormatter().string(from: date))."
 	}
+
+	fileprivate func gitHubRetryDelay(now: Date) -> Duration? {
+		if let retryAfter = value(forHTTPHeaderField: "Retry-After"),
+			let interval = TimeInterval(retryAfter)
+		{
+			return .seconds(max(0, interval))
+		}
+		guard let reset = value(forHTTPHeaderField: "X-RateLimit-Reset"),
+			let interval = TimeInterval(reset)
+		else {
+			return nil
+		}
+		return .seconds(max(0, interval - now.timeIntervalSince1970))
+	}
 }
 
-private extension JSONDecoder {
-	static var github: JSONDecoder {
+extension Duration {
+	fileprivate var clampedNanoseconds: UInt64 {
+		let components = components
+		guard components.seconds > 0 || components.attoseconds > 0 else {
+			return 0
+		}
+		let seconds = UInt64(clamping: components.seconds)
+		let secondsNanoseconds = seconds.multipliedReportingOverflow(by: 1_000_000_000)
+		let attosecondNanoseconds = UInt64(clamping: components.attoseconds / 1_000_000_000)
+		let total = secondsNanoseconds.partialValue.addingReportingOverflow(attosecondNanoseconds)
+		if secondsNanoseconds.overflow || total.overflow {
+			return UInt64(Int64.max)
+		}
+		return min(total.partialValue, UInt64(Int64.max))
+	}
+}
+
+extension URLError {
+	fileprivate var isTransientGitHubTransportError: Bool {
+		switch code {
+		case .timedOut,
+			.cannotFindHost,
+			.cannotConnectToHost,
+			.networkConnectionLost,
+			.dnsLookupFailed,
+			.notConnectedToInternet,
+			.internationalRoamingOff,
+			.callIsActive,
+			.dataNotAllowed,
+			.secureConnectionFailed:
+			true
+		default:
+			false
+		}
+	}
+}
+
+extension JSONDecoder {
+	fileprivate static var github: JSONDecoder {
 		let decoder = JSONDecoder()
 		decoder.dateDecodingStrategy = .iso8601
 		return decoder

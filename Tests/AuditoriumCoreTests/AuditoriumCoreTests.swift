@@ -590,6 +590,144 @@ struct AuditoriumCoreTests {
 		#expect(options.first { $0.title == "@octo" }?.subtitle == "1 assigned issue")
 	}
 
+	@Test func githubAPIClientRetriesServerErrorThenSucceeds() async throws {
+		let transport = ScriptedGitHubTransport(results: [
+			.response(statusCode: 503, payload: "{}"),
+			.response(statusCode: 200, payload: Self.githubRepositoriesPayload),
+		])
+		let client = GitHubAPIClient(token: "test", transport: transport, retryPolicy: Self.fastGitHubRetryPolicy, sleep: { _ in })
+
+		let repositories = try await client.listRepositories()
+
+		#expect(repositories.map(\.fullName) == ["charliewilco/Auditorium"])
+		#expect(await transport.callCount() == 2)
+	}
+
+	@Test func githubAPIClientExhaustsServerErrorRetriesWithOriginalHTTPFailure() async {
+		let transport = ScriptedGitHubTransport(results: [
+			.response(statusCode: 503, payload: "{}"),
+			.response(statusCode: 503, payload: "{}"),
+			.response(statusCode: 503, payload: "{}"),
+		])
+		let client = GitHubAPIClient(
+			token: "test",
+			transport: transport,
+			retryPolicy: GitHubAPIRetryPolicy(maxRetries: 2, baseDelay: .milliseconds(1), maxDelay: .milliseconds(1)),
+			sleep: { _ in }
+		)
+		var message = ""
+
+		do {
+			_ = try await client.listRepositories()
+		}
+		catch {
+			message = error.localizedDescription
+		}
+
+		#expect(message == "GitHub API request failed with HTTP 503.")
+		#expect(await transport.callCount() == 3)
+	}
+
+	@Test func githubAPIClientDoesNotRetryAuthenticationFailure() async {
+		let transport = ScriptedGitHubTransport(results: [
+			.response(statusCode: 401, payload: "{}")
+		])
+		let client = GitHubAPIClient(token: "test", transport: transport, retryPolicy: Self.fastGitHubRetryPolicy, sleep: { _ in })
+		var message = ""
+
+		do {
+			_ = try await client.listRepositories()
+		}
+		catch {
+			message = error.localizedDescription
+		}
+
+		#expect(message == "GitHub credentials are missing, expired, or unauthorized.")
+		#expect(await transport.callCount() == 1)
+	}
+
+	@Test func githubAPIClientDoesNotRetryNonRateLimitClientFailures() async {
+		for statusCode in [404, 422] {
+			let transport = ScriptedGitHubTransport(results: [
+				.response(statusCode: statusCode, payload: "{}")
+			])
+			let client = GitHubAPIClient(token: "test", transport: transport, retryPolicy: Self.fastGitHubRetryPolicy, sleep: { _ in })
+			var message = ""
+
+			do {
+				_ = try await client.listRepositories()
+			}
+			catch {
+				message = error.localizedDescription
+			}
+
+			#expect(message == "GitHub API request failed with HTTP \(statusCode).")
+			#expect(await transport.callCount() == 1)
+		}
+	}
+
+	@Test func githubAPIClientRetriesRateLimitAndUsesClampedResetDelay() async throws {
+		let reset = String(Int(Date().addingTimeInterval(60).timeIntervalSince1970))
+		let transport = ScriptedGitHubTransport(results: [
+			.response(statusCode: 403, payload: "{}", headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": reset]),
+			.response(statusCode: 200, payload: "{}", headers: ["X-OAuth-Scopes": "repo, read:user"]),
+		])
+		let recorder = GitHubRetrySleepRecorder()
+		let client = GitHubAPIClient(
+			token: "test",
+			transport: transport,
+			retryPolicy: GitHubAPIRetryPolicy(maxRetries: 1, baseDelay: .milliseconds(1), maxDelay: .seconds(1)),
+			sleep: { duration in
+				await recorder.record(duration)
+			}
+		)
+
+		let scopes = try await client.validateScopes()
+
+		#expect(scopes == ["repo", "read:user"])
+		#expect(await transport.callCount() == 2)
+		#expect(await recorder.durations() == [.seconds(1)])
+	}
+
+	@Test func githubAPIClientRetriesTransientTransportErrorThenSucceeds() async throws {
+		let transport = ScriptedGitHubTransport(results: [
+			.urlError(URLError(.timedOut)),
+			.response(statusCode: 200, payload: Self.githubRepositoriesPayload),
+		])
+		let client = GitHubAPIClient(token: "test", transport: transport, retryPolicy: Self.fastGitHubRetryPolicy, sleep: { _ in })
+
+		let repositories = try await client.listRepositories()
+
+		#expect(repositories.map(\.fullName) == ["charliewilco/Auditorium"])
+		#expect(await transport.callCount() == 2)
+	}
+
+	@Test func githubAPIClientPropagatesCancellationDuringBackoff() async {
+		let transport = ScriptedGitHubTransport(results: [
+			.response(statusCode: 503, payload: "{}")
+		])
+		let client = GitHubAPIClient(
+			token: "test",
+			transport: transport,
+			retryPolicy: GitHubAPIRetryPolicy(maxRetries: 1, baseDelay: .seconds(1), maxDelay: .seconds(1)),
+			sleep: { _ in
+				throw CancellationError()
+			}
+		)
+		var didCancel = false
+
+		do {
+			_ = try await client.listRepositories()
+		}
+		catch is CancellationError {
+			didCancel = true
+		}
+		catch {}
+
+		#expect(didCancel)
+		#expect(await transport.callCount() == 1)
+	}
+
 	@Test func providerStateSummariesExposeV0ProviderAvailability() {
 		let repositoryProviders = ProviderStateSummaries.repositoryProviders()
 		let issueProviders = ProviderStateSummaries.issueProviders()
@@ -1005,6 +1143,21 @@ struct AuditoriumCoreTests {
 			blockedBy: []
 		)
 	}
+
+	private static let fastGitHubRetryPolicy = GitHubAPIRetryPolicy(maxRetries: 3, baseDelay: .milliseconds(1), maxDelay: .milliseconds(1))
+
+	private static let githubRepositoriesPayload = """
+		[
+			{
+				"name": "Auditorium",
+				"full_name": "charliewilco/Auditorium",
+				"clone_url": "https://github.com/charliewilco/Auditorium.git",
+				"html_url": "https://github.com/charliewilco/Auditorium",
+				"default_branch": "main",
+				"owner": { "login": "charliewilco" }
+			}
+		]
+		"""
 }
 
 private struct MockGitHubTransport: GitHubAPITransport {
@@ -1021,6 +1174,48 @@ private struct MockGitHubTransport: GitHubAPITransport {
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 		let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: headers)!
 		return (Data(payload.utf8), response)
+	}
+}
+
+private enum ScriptedGitHubTransportResult: Sendable {
+	case response(statusCode: Int, payload: String, headers: [String: String] = [:])
+	case urlError(URLError)
+}
+
+private actor ScriptedGitHubTransport: GitHubAPITransport {
+	private var results: [ScriptedGitHubTransportResult]
+	private var calls = 0
+
+	init(results: [ScriptedGitHubTransportResult]) {
+		self.results = results
+	}
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		calls += 1
+		let result = results.isEmpty ? .response(statusCode: 500, payload: "{}") : results.removeFirst()
+		switch result {
+		case .response(let statusCode, let payload, let headers):
+			let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: headers)!
+			return (Data(payload.utf8), response)
+		case .urlError(let error):
+			throw error
+		}
+	}
+
+	func callCount() -> Int {
+		calls
+	}
+}
+
+private actor GitHubRetrySleepRecorder {
+	private var recordedDurations: [Duration] = []
+
+	func record(_ duration: Duration) {
+		recordedDurations.append(duration)
+	}
+
+	func durations() -> [Duration] {
+		recordedDurations
 	}
 }
 
