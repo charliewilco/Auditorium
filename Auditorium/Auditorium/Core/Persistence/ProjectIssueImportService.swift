@@ -51,7 +51,7 @@ struct ProjectIssueImportService {
 			importedCount += 1
 		}
 
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 		return importedCount
 	}
 

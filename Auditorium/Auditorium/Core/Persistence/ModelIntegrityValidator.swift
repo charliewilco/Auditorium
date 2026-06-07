@@ -1,15 +1,34 @@
 import Foundation
 import SwiftData
 
-struct ModelIntegrityIssue: Equatable {
+nonisolated struct ModelIntegrityIssue: Equatable, Sendable {
 	let model: String
 	let id: String
 	let field: String
 	let reason: String
 }
 
+nonisolated enum ModelIntegrityError: LocalizedError, Equatable {
+	case invalidRows([ModelIntegrityIssue])
+
+	var errorDescription: String? {
+		switch self {
+		case .invalidRows(let issues):
+			"SwiftData integrity validation failed for \(issues.count) persisted field\(issues.count == 1 ? "" : "s")."
+		}
+	}
+}
+
 @MainActor
 enum ModelIntegrityValidator {
+	static func save(context: ModelContext) throws {
+		let issues = try validate(context: context)
+		if issues.isEmpty == false {
+			throw ModelIntegrityError.invalidRows(issues)
+		}
+		try context.save()
+	}
+
 	static func validate(context: ModelContext) throws -> [ModelIntegrityIssue] {
 		var issues: [ModelIntegrityIssue] = []
 		try validateProjects(context: context, issues: &issues)

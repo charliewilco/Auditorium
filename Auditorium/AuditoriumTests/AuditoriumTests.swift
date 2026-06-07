@@ -258,6 +258,74 @@ struct AuditoriumTests {
 		#expect(secretFields == Set(["TicketRecord.body", "ProviderAccountRecord.keychainAccount"]))
 	}
 
+	@Test func projectCreationRejectsPersistedSecretMaterial() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let draft = ProjectDraft()
+		draft.name = "Secret Project"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium?token=github_pat_1234567890abcdefghijklmnopqrst"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.importDemoTickets = false
+		var rejectedFields: Set<String> = []
+
+		do {
+			_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
+		} catch ModelIntegrityError.invalidRows(let issues) {
+			rejectedFields = Set(issues.map { "\($0.model).\($0.field)" })
+		}
+
+		#expect(rejectedFields.contains("Project.repositoryURL"))
+		#expect(rejectedFields.contains("RepositoryRecord.cloneURL"))
+	}
+
+	@Test func issueImportRejectsPersistedSecretMaterial() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let draft = ProjectDraft()
+		draft.name = "Import Secret Test"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.importDemoTickets = false
+		let projectID = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
+		let project = try #require(try context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
+		let provider = StaticIssueTrackerProvider(tickets: [
+			TicketDescriptor(
+				provider: .githubIssues,
+				externalID: "SEC-2",
+				title: "Import should reject secret",
+				body: "Leaked bearer Bearer abcdefghijklmnopqrstuvwx1234567890",
+				status: .ready,
+				labels: [],
+				assignee: nil,
+				priority: .high,
+				webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/2"),
+				createdAt: .now,
+				updatedAt: .now,
+				estimatedComplexity: 1,
+				blockedBy: []
+			)
+		])
+		var rejectedFields: Set<String> = []
+
+		do {
+			_ = try await ProjectIssueImportService().importTickets(for: project, context: context, provider: provider)
+		} catch ModelIntegrityError.invalidRows(let issues) {
+			rejectedFields = Set(issues.map { "\($0.model).\($0.field)" })
+		}
+
+		#expect(rejectedFields == Set(["TicketRecord.body"]))
+	}
+
 	@Test func ticketDescriptorNormalizesProviderFields() {
 		let ticket = TicketRecord(
 			provider: .githubIssues,

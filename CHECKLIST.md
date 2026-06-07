@@ -39,7 +39,7 @@ Acceptance gate:
 Acceptance gate:
 
 - [ ] Existing app data survives one intentional schema migration.
-- [~] No persisted record can contain OAuth tokens or PATs; integrity validation detects token-like leakage, save/import enforcement remains.
+- [x] No persisted record can contain OAuth tokens or PATs in app-owned SwiftData save paths.
 
 ## 2. Provider Architecture
 
@@ -416,6 +416,7 @@ Acceptance gate:
 - [x] Swift tests for project creation.
 - [x] Swift tests for invalid draft persistence.
 - [x] Swift tests for model integrity validation and persisted secret leakage detection.
+- [x] Swift tests for integrity-enforced saves blocking persisted secret material.
 - [x] Swift tests for report generation.
 - [x] Swift tests for workspace paths.
 - [x] Swift tests for provider normalization.

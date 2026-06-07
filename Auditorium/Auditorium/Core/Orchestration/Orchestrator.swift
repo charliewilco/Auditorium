@@ -74,7 +74,7 @@ final class Orchestrator {
 			context.insert(ticketRun)
 			ticketRuns.append(ticketRun)
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 
 		let repository = RepositoryDescriptor(
 			provider: project.repositoryProviderKind,
@@ -90,7 +90,7 @@ final class Orchestrator {
 
 		for batch in plan.batches {
 			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) ticket runs."))
-			try context.save()
+			try ModelIntegrityValidator.save(context: context)
 			for item in batch {
 				try Task.checkCancellation()
 				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
@@ -120,7 +120,7 @@ final class Orchestrator {
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: projectID, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
 		context.insert(ReportRecord(projectID: projectID, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	private func executeWithSymphony(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
@@ -139,7 +139,7 @@ final class Orchestrator {
 			context.insert(ticketRun)
 			ticketRuns.append(ticketRun)
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 
 		for ticketRun in ticketRuns {
 			if Task.isCancelled {
@@ -152,7 +152,7 @@ final class Orchestrator {
 			ticket.status = .running
 			ticketRun.status = .running
 			ticketRun.startedAt = .now
-			try context.save()
+			try ModelIntegrityValidator.save(context: context)
 
 			do {
 				let issueNumber = try githubIssueNumber(from: ticket.externalID)
@@ -171,7 +171,7 @@ final class Orchestrator {
 							message: event.message,
 							metadataJSON: event.metadataJSON
 						))
-						try? context.save()
+						try? ModelIntegrityValidator.save(context: context)
 					}
 				)
 				if result.events.isEmpty {
@@ -231,7 +231,7 @@ final class Orchestrator {
 			}
 			ticket.updatedAt = .now
 			ticketRun.endedAt = .now
-			try context.save()
+			try ModelIntegrityValidator.save(context: context)
 		}
 
 		run.completedTickets = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -248,7 +248,7 @@ final class Orchestrator {
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
 		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	private func cancelSymphonyRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {
@@ -265,7 +265,7 @@ final class Orchestrator {
 		run.endedAt = .now
 		run.summary = "Run canceled by user."
 		context.insert(RuntimeEventRecord(runID: run.id, level: .warning, category: .orchestration, message: "Run canceled by user."))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	private func githubIssueNumber(from externalID: String) throws -> Int {
@@ -292,7 +292,7 @@ final class Orchestrator {
 		ticketRun.status = .preparing
 		ticketRun.startedAt = .now
 		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .orchestration, message: "\(ticket.externalID) queued for execution."))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 
 		let descriptor = ticket.descriptor
 		let workspace = try await runtime.prepareWorkspace(for: descriptor, repository: repository)
@@ -320,7 +320,7 @@ final class Orchestrator {
 		ticketRun.status = .running
 		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
 		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Runtime handle \(handle.id) started."))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 
 		let stream = try await agent.runAgent(AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
 		var finalOutcome: MockTicketOutcome?
@@ -333,7 +333,7 @@ final class Orchestrator {
 			if let outcome = event.outcome {
 				finalOutcome = outcome
 			}
-			try context.save()
+			try ModelIntegrityValidator.save(context: context)
 		}
 
 		switch finalOutcome ?? .completed {
@@ -368,7 +368,7 @@ final class Orchestrator {
 		}
 		ticket.updatedAt = .now
 		ticketRun.endedAt = .now
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	private func insertRunFailure(projectID: UUID, message: String, context: ModelContext) throws {
@@ -376,7 +376,7 @@ final class Orchestrator {
 		run.endedAt = .now
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .error, category: .orchestration, message: message))
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 }
 

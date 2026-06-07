@@ -102,7 +102,7 @@ struct ProjectCreationService {
 		}
 
 		try workspaceService.ensureProjectLayout(projectID: project.id)
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 		return project.id
 	}
 

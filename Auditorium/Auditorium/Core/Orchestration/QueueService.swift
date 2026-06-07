@@ -17,7 +17,7 @@ struct QueueService {
 			}
 			nextPosition += 1
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	func moveQueueItems(from source: IndexSet, to destination: Int, projectID: UUID, context: ModelContext) throws {
@@ -36,7 +36,7 @@ struct QueueService {
 		for (index, item) in items.enumerated() {
 			item.position = index
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	func removeQueueItem(_ item: QueueItemRecord, context: ModelContext) throws {
@@ -46,12 +46,12 @@ struct QueueService {
 			ticket.status = .ready
 			ticket.updatedAt = .now
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	func setQueueItem(_ item: QueueItemRecord, isEnabled: Bool, context: ModelContext) throws {
 		item.isEnabled = isEnabled
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	func clearQueue(projectID: UUID, context: ModelContext) throws {
@@ -64,6 +64,6 @@ struct QueueService {
 			}
 			context.delete(item)
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 }

@@ -73,7 +73,7 @@ struct ProviderRegistry {
 			try keychainService.deleteSecret(account: account.keychainAccount)
 			context.delete(account)
 		}
-		try context.save()
+		try ModelIntegrityValidator.save(context: context)
 	}
 
 	func capabilities(for repositoryProviderKind: RepositoryProviderKind) -> [ProviderCapability] {
