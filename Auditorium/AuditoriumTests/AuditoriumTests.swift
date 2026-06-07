@@ -1248,6 +1248,73 @@ struct AuditoriumTests {
 		#expect(lines == ["one", "two"])
 	}
 
+	@Test func codexAgentProviderStreamsOutputAndWritesLog() async throws {
+		let root = try makeAgentWorkspace()
+		defer { try? FileManager.default.removeItem(at: root) }
+		let provider = CodexCLIProcessAgentProvider(
+			executablePath: "/bin/sh",
+			arguments: ["-lc", "case \"$0\" in *\"Stream Codex output\"*) printf 'prompt-ok\\n' ;; *) printf 'missing prompt\\n' >&2; exit 9 ;; esac; printf 'stderr-line\\n' >&2"]
+		)
+		let stream = try await provider.runAgent(makeAgentRunRequest(workspace: root, title: "Stream Codex output"))
+		var events: [AgentEvent] = []
+
+		for try await event in stream {
+			events.append(event)
+		}
+
+		let messages = events.map(\.message)
+		let log = try String(contentsOf: root.appending(path: ".auditorium/codex.log"), encoding: .utf8)
+		#expect(messages.contains("codex_started"))
+		#expect(messages.contains("codex_stdout: prompt-ok"))
+		#expect(messages.contains("codex_stderr: stderr-line"))
+		#expect(events.last?.outcome == .completed)
+		#expect(log.contains("Exit code: 0"))
+		#expect(log.contains("prompt-ok"))
+		#expect(log.contains("stderr-line"))
+	}
+
+	@Test func codexAgentProviderMapsNonZeroExitToFailedOutcome() async throws {
+		let root = try makeAgentWorkspace()
+		defer { try? FileManager.default.removeItem(at: root) }
+		let provider = CodexCLIProcessAgentProvider(
+			executablePath: "/bin/sh",
+			arguments: ["-lc", "printf 'partial-output\\n'; printf 'failure-detail\\n' >&2; exit 7"]
+		)
+		let stream = try await provider.runAgent(makeAgentRunRequest(workspace: root, title: "Fail Codex output"))
+		var events: [AgentEvent] = []
+
+		for try await event in stream {
+			events.append(event)
+		}
+
+		#expect(events.contains { $0.message == "codex_stdout: partial-output" })
+		#expect(events.contains { $0.message == "codex_stderr: failure-detail" })
+		#expect(events.last?.message == "codex_failed")
+		#expect(events.last?.summary == "Codex CLI exited with status 7.")
+		#expect(events.last?.outcome == .failed)
+	}
+
+	@Test func codexAgentProviderCancelsRunningProcessWhenStreamConsumerCancels() async throws {
+		let root = try makeAgentWorkspace()
+		defer { try? FileManager.default.removeItem(at: root) }
+		let donePath = root.appending(path: "finished")
+		let provider = CodexCLIProcessAgentProvider(
+			executablePath: "/bin/sh",
+			arguments: ["-lc", "printf 'started\\n'; sleep 5; touch '\(donePath.path())'"]
+		)
+		let stream = try await provider.runAgent(makeAgentRunRequest(workspace: root, title: "Cancel Codex output"))
+		let task = Task {
+			for try await _ in stream {}
+		}
+
+		try await Task.sleep(nanoseconds: 200_000_000)
+		task.cancel()
+		_ = try? await task.value
+		try await Task.sleep(nanoseconds: 300_000_000)
+
+		#expect(FileManager.default.fileExists(atPath: donePath.path()) == false)
+	}
+
 	@Test func orchestratorPersistsSymphonyEventsWhileProcessRuns() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -1690,6 +1757,41 @@ private struct MigrationFixtureIDs {
 
 @MainActor
 private extension AuditoriumTests {
+	func makeAgentWorkspace() throws -> URL {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		return root
+	}
+
+	func makeAgentRunRequest(workspace: URL, title: String) -> AgentRunRequest {
+		let ticket = TicketDescriptor(
+			provider: .githubIssues,
+			externalID: "COD-101",
+			title: title,
+			body: "Verify Codex CLI process provider behavior.",
+			status: .ready,
+			labels: ["agent"],
+			assignee: nil,
+			priority: .medium,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/101"),
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			blockedBy: []
+		)
+		let repository = RepositoryDescriptor(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: URL(string: "https://github.com/charliewilco/Auditorium.git")!,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
+			defaultBranch: "main"
+		)
+		let workspace = WorkspaceDescriptor(path: workspace, containerID: "local-test", branchName: "auditorium/cod-101")
+		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown)
+	}
+
 	func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {
 		let schema = Schema(AppSchema.modelTypes, version: AppSchema.V1.versionIdentifier)
 		let configuration = ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none)

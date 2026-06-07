@@ -238,10 +238,6 @@ struct AzureBoardsIssueTrackerProvider: IssueTrackerProvider {
 
 typealias AzureBoardsIssueProvider = AzureBoardsIssueTrackerProvider
 
-struct CodexAgentProvider: AgentProvider {
-	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> { throw ProviderError.notImplemented("Codex Agent Provider") }
-}
-
 struct GenericShellAgentProvider: AgentProvider {
 	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> { throw ProviderError.notImplemented("Generic Shell Agent Provider") }
 }

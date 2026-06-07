@@ -196,14 +196,14 @@ Acceptance gate:
 - [x] Add Mock Agent.
 - [x] Detect Codex CLI.
 - [x] Block Codex-backed run when Codex CLI is missing.
-- [ ] Implement `CodexCLIProcessAgentProvider`.
-- [ ] Launch Codex through `Process`.
-- [ ] Capture stdout.
-- [ ] Capture stderr.
+- [x] Implement `CodexCLIProcessAgentProvider`.
+- [x] Launch Codex through `Process`.
+- [x] Capture stdout.
+- [x] Capture stderr.
 - [ ] Persist log file path.
 - [ ] Stream agent output into `RuntimeEventRecord`.
-- [ ] Support cancellation.
-- [ ] Parse final result into ticket-run status.
+- [x] Support cancellation.
+- [~] Parse final result into ticket-run status.
 - [ ] Implement Generic CLI Agent configuration.
 
 Acceptance gate:
@@ -425,6 +425,7 @@ Acceptance gate:
 - [x] Swift tests for runtime detection.
 - [x] Swift tests for Apple Container preflight.
 - [x] Swift tests for Codex CLI preflight.
+- [x] Swift tests for Codex CLI process agent streaming, failure, and cancellation.
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.

@@ -286,7 +286,7 @@ final class Orchestrator {
 		ticketRun: TicketRunRecord,
 		run: RunRecord,
 		runtime: MockRuntimeProvider,
-		agent: MockCodexAgentProvider,
+		agent: any AgentProvider,
 		sourceProvider: any SourceCodeProvider,
 		context: ModelContext,
 		workflowPolicyMarkdown: String
