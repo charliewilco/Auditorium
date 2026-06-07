@@ -53,6 +53,7 @@ final class AppRunCoordinator {
 			projectID: project.id,
 			status: .completed,
 			totalTickets: enabledCount,
+			workflowPolicySnapshotMarkdown: project.workflowPolicyMarkdown,
 			summary: "Dry run completed. No workspaces or agents were started."
 		)
 		run.endedAt = .now

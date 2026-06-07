@@ -101,6 +101,7 @@ final class Orchestrator {
 			projectID: projectID,
 			status: .running,
 			totalTickets: plan.queueSnapshot.count,
+			workflowPolicySnapshotMarkdown: plan.workflowPolicyMarkdown,
 			summary: "Running \(plan.queueSnapshot.count) queued tickets."
 		)
 		run.queueSnapshot = plan.queueSnapshot
@@ -237,6 +238,7 @@ final class Orchestrator {
 			projectID: project.id,
 			status: .running,
 			totalTickets: plan.queueSnapshot.count,
+			workflowPolicySnapshotMarkdown: plan.workflowPolicyMarkdown,
 			summary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex."
 		)
 		run.queueSnapshot = plan.queueSnapshot
@@ -353,6 +355,7 @@ final class Orchestrator {
 			projectID: project.id,
 			status: .running,
 			totalTickets: plan.queueSnapshot.count,
+			workflowPolicySnapshotMarkdown: plan.workflowPolicyMarkdown,
 			summary: "Running \(plan.queueSnapshot.count) queued tickets with symphony."
 		)
 		run.queueSnapshot = plan.queueSnapshot

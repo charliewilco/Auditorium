@@ -339,7 +339,7 @@ Acceptance gate:
 - [x] Add workflow editor UI.
 - [x] Parse YAML front matter.
 - [x] Validate policy values.
-- [~] Snapshot policy per run.
+- [x] Snapshot policy per run.
 - [x] Read repository-owned `WORKFLOW.md`.
 - [x] Support live reload in `symphony` CLI.
 - [x] Add parser tests.

@@ -257,6 +257,7 @@ extension ModelIntegrityValidator {
 			scanSecrets(
 				[
 					("queueSnapshotJSON", record.queueSnapshotJSON),
+					("workflowPolicySnapshotMarkdown", record.workflowPolicySnapshotMarkdown),
 					("reportMarkdown", record.reportMarkdown),
 					("summary", record.summary),
 				],

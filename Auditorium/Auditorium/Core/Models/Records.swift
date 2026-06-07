@@ -275,6 +275,7 @@ final class RunRecord {
 	var blockedTickets: Int
 	var pullRequestsCreated: Int
 	var queueSnapshotJSON: String
+	var workflowPolicySnapshotMarkdown: String
 	var reportMarkdown: String
 	var summary: String
 
@@ -290,6 +291,7 @@ final class RunRecord {
 		blockedTickets: Int = 0,
 		pullRequestsCreated: Int = 0,
 		queueSnapshotJSON: String = "[]",
+		workflowPolicySnapshotMarkdown: String = WorkflowPolicy.defaultMarkdown,
 		reportMarkdown: String = "",
 		summary: String = ""
 	) {
@@ -304,6 +306,7 @@ final class RunRecord {
 		self.blockedTickets = blockedTickets
 		self.pullRequestsCreated = pullRequestsCreated
 		self.queueSnapshotJSON = queueSnapshotJSON
+		self.workflowPolicySnapshotMarkdown = workflowPolicySnapshotMarkdown
 		self.reportMarkdown = reportMarkdown
 		self.summary = summary
 	}

@@ -521,6 +521,9 @@ struct AuditoriumTests {
 		defer { try? FileManager.default.removeItem(at: root) }
 		let workspace = ApplicationWorkspaceService(rootDirectory: root)
 		let projectID = try DemoDataSeeder(workspaceService: workspace).openDemoProject(in: context)
+		let project = try #require(try context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
+		let workflowSnapshot = WorkflowPolicy.defaultMarkdown.replacingOccurrences(of: "concurrency: 3", with: "concurrency: 2")
+		project.workflowPolicyMarkdown = workflowSnapshot
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 			.filter { $0.sourceProjectID == projectID }
 			.sorted { $0.externalID < $1.externalID }
@@ -559,6 +562,7 @@ struct AuditoriumTests {
 		firstQueueItem.position = 99
 		firstQueueItem.isEnabled = false
 		secondQueueItem.concurrencyGroup = "changed-after-run"
+		project.workflowPolicyMarkdown = WorkflowPolicy.defaultMarkdown.replacingOccurrences(of: "concurrency: 3", with: "concurrency: 7")
 		try context.save()
 
 		#expect(snapshot.map(\.id) == [firstQueueItem.id, secondQueueItem.id])
@@ -567,6 +571,7 @@ struct AuditoriumTests {
 		#expect(snapshot.map(\.priority) == [.high, .low])
 		#expect(snapshot.map(\.concurrencyGroup) == ["ui", "backend"])
 		#expect(run.queueSnapshot == snapshot)
+		#expect(run.workflowPolicySnapshotMarkdown == workflowSnapshot)
 	}
 
 	@Test func invalidProjectDraftDoesNotPersistRows() throws {
@@ -639,8 +644,8 @@ struct AuditoriumTests {
 		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 4)
-		#expect(AppSchema.MigrationPlan.stages.count == 3)
+		#expect(AppSchema.MigrationPlan.schemas.count == 5)
+		#expect(AppSchema.MigrationPlan.stages.count == 4)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
@@ -649,6 +654,7 @@ struct AuditoriumTests {
 		#expect(queueItems.first?.ticketID == ids.ticketID)
 		#expect(runs.first?.id == ids.runID)
 		#expect(runs.first?.queueSnapshotJSON == "[]")
+		#expect(runs.first?.workflowPolicySnapshotMarkdown == WorkflowPolicy.defaultMarkdown)
 		#expect(ticketRuns.first?.runID == ids.runID)
 		#expect(pullRequests.first?.ticketRunID == ids.ticketRunID)
 		#expect(events.first?.runID == ids.runID)
