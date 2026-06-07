@@ -9,13 +9,18 @@ struct ProjectDashboardView: View {
 	let pullRequests: [PullRequestRecord]
 	let runtimeHealth: [RuntimeHealthCheck]
 	let symphonyDoctorStatus: SymphonyDoctorStatus?
+	let demoModeState: DemoModeState?
 	let workspaceLocations: WorkspaceLocationState?
 	let revealLocation: (URL) -> Void
+	let resetDemoProject: () -> Void
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 18) {
 				header
+				if let demoModeState, demoModeState.isDemoProject {
+					DemoModePanelView(state: demoModeState, resetDemoProject: resetDemoProject)
+				}
 				statsGrid
 				HStack(alignment: .top, spacing: 16) {
 					summaryPanel("Repository", symbol: "shippingbox", rows: [

@@ -142,13 +142,13 @@ Acceptance gate:
 - [x] Make mock agent work offline.
 - [x] Generate mock PR URLs.
 - [x] Generate markdown report from mock run.
-- [ ] Make demo mode explicit in UI.
-- [ ] Ensure demo data never requires network access.
-- [ ] Add reset demo project action.
+- [x] Make demo mode explicit in UI.
+- [x] Ensure demo data never requires network access.
+- [x] Add reset demo project action.
 
 Acceptance gate:
 
-- [ ] A fresh app launch can complete the full demo flow offline.
+- [x] A fresh app launch can complete the full demo flow offline.
 
 ## 8. Queue
 
@@ -443,6 +443,7 @@ Acceptance gate:
 - [x] Swift tests for ticket inspector action availability and markdown status timeline.
 - [x] Swift tests for run-detail pull request visibility.
 - [x] Swift tests for interrupted run reconciliation on app relaunch.
+- [x] Swift tests for offline demo state, reset cleanup, and full mock run.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.

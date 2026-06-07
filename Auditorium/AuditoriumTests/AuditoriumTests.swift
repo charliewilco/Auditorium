@@ -205,6 +205,101 @@ struct AuditoriumTests {
 		#expect(FileManager.default.fileExists(atPath: workspace.repositoryDirectory(projectID: projectID).path()))
 	}
 
+	@Test func demoModeStateMarksSeededProjectOfflineAndCredentialless() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = try DemoDataSeeder(workspaceService: workspace).openDemoProject(in: context)
+		let project = try #require(context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
+		let repository = try #require(context.fetch(FetchDescriptor<RepositoryRecord>()).first { $0.projectID == projectID })
+		let issueTracker = try #require(context.fetch(FetchDescriptor<IssueTrackerRecord>()).first { $0.projectID == projectID })
+
+		let state = DemoModeState(project: project, repository: repository, issueTracker: issueTracker)
+
+		#expect(state.isDemoProject)
+		#expect(state.usesOfflineRuntime)
+		#expect(state.hasStoredCredentials == false)
+		#expect(state.isNetworkFree)
+		#expect(try context.fetch(FetchDescriptor<ProviderAccountRecord>()).isEmpty)
+	}
+
+	@Test func resetDemoProjectRemovesOwnedRowsAndWorkspaceBeforeReseeding() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let seeder = DemoDataSeeder(workspaceService: workspace)
+		let originalProjectID = try seeder.openDemoProject(in: context)
+		let originalProjectDirectory = workspace.projectDirectory(projectID: originalProjectID)
+		let sentinel = originalProjectDirectory.appending(path: "stale-demo-output.txt")
+		try "stale".write(to: sentinel, atomically: true, encoding: .utf8)
+		let ticket = try #require(context.fetch(FetchDescriptor<TicketRecord>()).first { $0.sourceProjectID == originalProjectID })
+		let run = RunRecord(projectID: originalProjectID, status: .completed, totalTickets: 1, completedTickets: 1)
+		let ticketRun = TicketRunRecord(runID: run.id, ticketID: ticket.id, status: .needsReview, pullRequestURL: "https://example.com/demo/pull/1")
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: originalProjectID, position: 0, priority: .medium))
+		context.insert(run)
+		context.insert(ticketRun)
+		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .agent, message: "stale event"))
+		context.insert(PullRequestRecord(provider: .github, ticketRunID: ticketRun.id, title: "Demo PR", url: "https://example.com/demo/pull/1", branchName: "auditorium/demo", targetBranch: "next", status: .open, checksStatus: .passed))
+		context.insert(ReportRecord(projectID: originalProjectID, runID: run.id, title: "Demo Report", markdown: "stale", filePath: root.appending(path: "stale-report.md").path()))
+		try ModelIntegrityValidator.save(context: context)
+
+		let resetProjectID = try seeder.resetDemoProject(in: context)
+
+		#expect(resetProjectID != originalProjectID)
+		#expect(FileManager.default.fileExists(atPath: originalProjectDirectory.path()) == false)
+		#expect(try context.fetch(FetchDescriptor<Project>()).map(\.id) == [resetProjectID])
+		#expect(try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == resetProjectID }.count == DemoTickets.all.count)
+		#expect(try context.fetch(FetchDescriptor<QueueItemRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<RunRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<TicketRunRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<RuntimeEventRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<PullRequestRecord>()).isEmpty)
+		#expect(try context.fetch(FetchDescriptor<ReportRecord>()).isEmpty)
+		#expect(FileManager.default.fileExists(atPath: workspace.projectDirectory(projectID: resetProjectID).path()))
+	}
+
+	@Test func freshDemoProjectCanRunEveryDemoTicketOffline() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = try DemoDataSeeder(workspaceService: workspace).openDemoProject(in: context)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == projectID }
+		try QueueService().addTickets(Set(tickets.map(\.id)), projectID: projectID, context: context)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(level: .success, category: .pullRequest, message: "offline demo complete", summary: "Offline demo ticket completed.", outcome: .completed)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockSourceProvider: sourceProvider,
+			mockAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: projectID, concurrency: 3, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+
+		#expect(tickets.count == DemoTickets.all.count)
+		#expect(run.status == .completed)
+		#expect(run.totalTickets == DemoTickets.all.count)
+		#expect(run.completedTickets == DemoTickets.all.count)
+		#expect(run.failedTickets == 0)
+		#expect(ticketRuns.count == DemoTickets.all.count)
+		#expect(ticketRuns.allSatisfy { $0.status == .needsReview })
+		#expect(sourceProvider.createdPullRequestTitles.count == DemoTickets.all.count)
+		#expect(reports.count == 1)
+		#expect(try context.fetch(FetchDescriptor<ProviderAccountRecord>()).isEmpty)
+	}
+
 	@Test func invalidProjectDraftDoesNotPersistRows() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

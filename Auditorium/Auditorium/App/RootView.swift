@@ -8,6 +8,7 @@ struct RootView: View {
 	@Environment(AppState.self) private var appState
 	@Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
 	@Query(sort: \RepositoryRecord.fullName) private var repositories: [RepositoryRecord]
+	@Query(sort: \IssueTrackerRecord.displayName) private var issueTrackers: [IssueTrackerRecord]
 	@Query(sort: \TicketRecord.updatedAt, order: .reverse) private var tickets: [TicketRecord]
 	@Query(sort: \QueueItemRecord.position) private var queueItems: [QueueItemRecord]
 	@Query(sort: \RunRecord.startedAt, order: .reverse) private var runs: [RunRecord]
@@ -47,6 +48,15 @@ struct RootView: View {
 	var selectedRepository: RepositoryRecord? {
 		guard let id = appState.selectedProjectID else { return nil }
 		return repositories.first { $0.projectID == id }
+	}
+
+	var selectedIssueTracker: IssueTrackerRecord? {
+		guard let id = appState.selectedProjectID else { return nil }
+		return issueTrackers.first { $0.projectID == id }
+	}
+
+	var demoModeState: DemoModeState? {
+		DemoModeState(project: selectedProject, repository: selectedRepository, issueTracker: selectedIssueTracker)
 	}
 
 	var workspaceLocations: WorkspaceLocationState? {
@@ -123,7 +133,7 @@ struct RootView: View {
 	private var detailView: some View {
 		switch appState.selectedDestination {
 		case .dashboard:
-			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus, workspaceLocations: workspaceLocations, revealLocation: revealLocation)
+			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus, demoModeState: demoModeState, workspaceLocations: workspaceLocations, revealLocation: revealLocation, resetDemoProject: resetDemoProject)
 		case .tickets:
 			TicketBrowserView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, addToQueue: addTicketsToQueue)
 		case .queue:
@@ -163,6 +173,16 @@ struct RootView: View {
 		do {
 			let id = try DemoDataSeeder(workspaceService: services.workspace).openDemoProject(in: modelContext)
 			appState.selectProject(id)
+		} catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func resetDemoProject() {
+		do {
+			let id = try DemoDataSeeder(workspaceService: services.workspace).resetDemoProject(in: modelContext)
+			appState.selectProject(id)
+			appState.selectedDestination = .dashboard
 		} catch {
 			NSAlert(error: error).runModal()
 		}

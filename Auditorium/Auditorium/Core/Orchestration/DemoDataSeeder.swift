@@ -3,20 +3,26 @@ import SwiftData
 
 @MainActor
 struct DemoDataSeeder {
+	static let projectName = "Burton Demo"
+	static let repositoryFullName = "charlie/burton-ios"
+	static let repositoryURL = "https://github.com/charlie/burton-ios"
+	static let defaultBranch = "next"
+
 	let workspaceService: ApplicationWorkspaceService
 
 	func openDemoProject(in context: ModelContext) throws -> UUID {
 		let projects = try context.fetch(FetchDescriptor<Project>())
-		if let existing = projects.first(where: { $0.name == "Burton Demo" }) {
+		if let existing = projects.first(where: { Self.isDemoProject($0) }) {
+			try workspaceService.ensureProjectLayout(projectID: existing.id)
 			return existing.id
 		}
 
 		let project = Project(
-			name: "Burton Demo",
+			name: Self.projectName,
 			repositoryProviderKind: .github,
-			repositoryName: "charlie/burton-ios",
-			repositoryURL: "https://github.com/charlie/burton-ios",
-			defaultBranch: "next",
+			repositoryName: Self.repositoryFullName,
+			repositoryURL: Self.repositoryURL,
+			defaultBranch: Self.defaultBranch,
 			issueProviderKind: .githubIssues,
 			runtimeProviderKind: .mockRuntime,
 			agentProviderKind: .mockAgent
@@ -27,20 +33,20 @@ struct DemoDataSeeder {
 			provider: .github,
 			owner: "charlie",
 			name: "burton-ios",
-			fullName: "charlie/burton-ios",
-			cloneURL: "https://github.com/charlie/burton-ios.git",
-			webURL: "https://github.com/charlie/burton-ios",
-			defaultBranch: "next",
+			fullName: Self.repositoryFullName,
+			cloneURL: "\(Self.repositoryURL).git",
+			webURL: Self.repositoryURL,
+			defaultBranch: Self.defaultBranch,
 			localPath: workspaceService.repositoryDirectory(projectID: project.id).path(),
 			projectID: project.id
 		)
 		context.insert(repository)
 		context.insert(IssueTrackerRecord(
 			provider: .githubIssues,
-			displayName: "charlie/burton-ios",
-			sourceIdentifier: "charlie/burton-ios",
+			displayName: Self.repositoryFullName,
+			sourceIdentifier: Self.repositoryFullName,
 			filterName: "Ready for agent",
-			webURL: "https://github.com/charlie/burton-ios/issues",
+			webURL: "\(Self.repositoryURL)/issues",
 			projectID: project.id
 		))
 
@@ -67,6 +73,96 @@ struct DemoDataSeeder {
 		try workspaceService.ensureProjectLayout(projectID: project.id)
 		try ModelIntegrityValidator.save(context: context)
 		return project.id
+	}
+
+	func resetDemoProject(in context: ModelContext) throws -> UUID {
+		let projects = try context.fetch(FetchDescriptor<Project>())
+		let demoProjects = projects.filter { Self.isDemoProject($0) }
+		for project in demoProjects {
+			try deleteProjectTree(projectID: project.id, context: context)
+			try? FileManager.default.removeItem(at: workspaceService.projectDirectory(projectID: project.id))
+		}
+		try ModelIntegrityValidator.save(context: context)
+		return try openDemoProject(in: context)
+	}
+
+	static func isDemoProject(_ project: Project) -> Bool {
+		project.name == projectName &&
+			project.repositoryName == repositoryFullName &&
+			project.runtimeProviderKind == .mockRuntime &&
+			project.agentProviderKind == .mockAgent
+	}
+
+	private func deleteProjectTree(projectID: UUID, context: ModelContext) throws {
+		let repositories = try context.fetch(FetchDescriptor<RepositoryRecord>()).filter { $0.projectID == projectID }
+		let issueTrackers = try context.fetch(FetchDescriptor<IssueTrackerRecord>()).filter { $0.projectID == projectID }
+		let accountIDs = Set((repositories.compactMap(\.providerAccountID) + issueTrackers.compactMap(\.providerAccountID)))
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == projectID }
+		let ticketIDs = Set(tickets.map(\.id))
+		let runs = try context.fetch(FetchDescriptor<RunRecord>()).filter { $0.projectID == projectID }
+		let runIDs = Set(runs.map(\.id))
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>()).filter { runIDs.contains($0.runID) || ticketIDs.contains($0.ticketID) }
+		let ticketRunIDs = Set(ticketRuns.map(\.id))
+
+		try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+			.filter { runIDs.contains($0.runID) || $0.ticketRunID.map(ticketRunIDs.contains) == true }
+			.forEach(context.delete)
+		try context.fetch(FetchDescriptor<PullRequestRecord>())
+			.filter { ticketRunIDs.contains($0.ticketRunID) }
+			.forEach(context.delete)
+		try context.fetch(FetchDescriptor<ReportRecord>())
+			.filter { $0.projectID == projectID || runIDs.contains($0.runID) }
+			.forEach(context.delete)
+		ticketRuns.forEach(context.delete)
+		runs.forEach(context.delete)
+		try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == projectID || ticketIDs.contains($0.ticketID) }
+			.forEach(context.delete)
+		tickets.forEach(context.delete)
+		repositories.forEach(context.delete)
+		issueTrackers.forEach(context.delete)
+		try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+			.filter { accountIDs.contains($0.id) }
+			.forEach(context.delete)
+		try context.fetch(FetchDescriptor<Project>())
+			.filter { $0.id == projectID }
+			.forEach(context.delete)
+	}
+}
+
+struct DemoModeState: Equatable {
+	let isDemoProject: Bool
+	let usesOfflineRuntime: Bool
+	let hasStoredCredentials: Bool
+
+	var title: String {
+		isDemoProject ? "Offline Demo" : "Live Project"
+	}
+
+	var detail: String {
+		if isDemoProject && isNetworkFree {
+			return "Mock runtime and mock agent are active. No GitHub credentials are attached."
+		}
+		if isDemoProject {
+			return "Demo project needs attention before it can be treated as fully offline."
+		}
+		return "Project uses configured providers."
+	}
+
+	var isNetworkFree: Bool {
+		isDemoProject && usesOfflineRuntime && hasStoredCredentials == false
+	}
+
+	init(project: Project?, repository: RepositoryRecord?, issueTracker: IssueTrackerRecord?) {
+		guard let project else {
+			isDemoProject = false
+			usesOfflineRuntime = false
+			hasStoredCredentials = false
+			return
+		}
+		isDemoProject = DemoDataSeeder.isDemoProject(project)
+		usesOfflineRuntime = project.runtimeProviderKind == .mockRuntime && project.agentProviderKind == .mockAgent
+		hasStoredCredentials = repository?.providerAccountID != nil || issueTracker?.providerAccountID != nil
 	}
 }
 
