@@ -23,7 +23,8 @@ struct OrchestrationRunPlan: Equatable, Sendable {
 	static func make(queueItems: [QueueItemRecord], requestedConcurrency: Int, workflowPolicyMarkdown: String) -> OrchestrationRunPlan {
 		let parsedPolicy = try? WorkflowPolicyParser().parse(workflowPolicyMarkdown)
 		let concurrency = max(1, requestedConcurrency > 0 ? requestedConcurrency : parsedPolicy?.concurrency ?? 1)
-		let snapshot = queueItems
+		let snapshot =
+			queueItems
 			.filter(\.isEnabled)
 			.sorted { $0.position < $1.position }
 			.map {
@@ -38,7 +39,8 @@ struct OrchestrationRunPlan: Equatable, Sendable {
 		return OrchestrationRunPlan(
 			concurrency: concurrency,
 			workflowPolicyMarkdown: workflowPolicyMarkdown,
-			retryPolicy: parsedPolicy.map(RetryPolicy.init(parsedPolicy:)) ?? RetryPolicy(maxRetries: 0, maxRetryBackoffMilliseconds: 300_000),
+			retryPolicy: parsedPolicy.map(RetryPolicy.init(parsedPolicy:))
+				?? RetryPolicy(maxRetries: 0, maxRetryBackoffMilliseconds: 300_000),
 			queueSnapshot: snapshot
 		)
 	}
@@ -61,7 +63,7 @@ struct RetryPolicy: Equatable, Sendable {
 	}
 
 	func shouldRetry(status: TicketRunStatus, retryCount: Int) -> Bool {
-		status == .failed && retryCount < maxRetries
+		status == .failed && retryCount > 0 && retryCount <= maxRetries
 	}
 
 	func backoffMilliseconds(for retryCount: Int) -> Int {

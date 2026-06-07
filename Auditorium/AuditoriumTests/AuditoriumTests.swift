@@ -2219,9 +2219,10 @@ struct AuditoriumTests {
 	@Test func retryPolicyRetriesOnlyFailedRunsWithinLimit() {
 		let policy = RetryPolicy(maxRetries: 2, maxRetryBackoffMilliseconds: 8_000)
 
-		#expect(policy.shouldRetry(status: .failed, retryCount: 0))
+		#expect(policy.shouldRetry(status: .failed, retryCount: 0) == false)
 		#expect(policy.shouldRetry(status: .failed, retryCount: 1))
-		#expect(policy.shouldRetry(status: .failed, retryCount: 2) == false)
+		#expect(policy.shouldRetry(status: .failed, retryCount: 2))
+		#expect(policy.shouldRetry(status: .failed, retryCount: 3) == false)
 		#expect(policy.shouldRetry(status: .blocked, retryCount: 0) == false)
 		#expect(policy.shouldRetry(status: .canceled, retryCount: 0) == false)
 		#expect(policy.shouldRetry(status: .completed, retryCount: 0) == false)
@@ -2990,6 +2991,191 @@ struct AuditoriumTests {
 		#expect(sourceProvider.commitPaths.count == 2)
 		#expect(sourceProvider.pushedBranches.count == 2)
 		#expect(Set(sourceProvider.createdPullRequestTitles) == ["401: First concurrent ticket", "402: Second concurrent ticket"])
+	}
+
+	@Test func localWorkspaceCodexRetriesFailedAgentOutcomeWithinWorkflowPolicy() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = SequencedAgentProvider(
+			sequences: AgentEventSequences([
+				[
+					AgentEvent(
+						level: .error,
+						category: .agent,
+						message: "codex_failed_once",
+						summary: "Transient agent failure.",
+						outcome: .failed
+					)
+				],
+				[
+					AgentEvent(
+						level: .success,
+						category: .agent,
+						message: "codex_completed_after_retry",
+						summary: "Implemented after retry.",
+						outcome: .completed
+					)
+				],
+			])
+		)
+		let workflow = """
+			---
+			concurrency: 1
+			max_retries: 1
+			max_retry_backoff_ms: 0
+			branch_prefix: "auditorium"
+			run_tests: true
+			open_pull_request: true
+			---
+			Retry transient failures once.
+			"""
+		let project = Project(
+			name: "Retry Local Codex",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: workflow
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "501",
+			title: "Retry transient failure",
+			body: "Agent failure should be retried by policy.",
+			status: .ready,
+			labels: ["retry"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/501",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .high))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+
+		#expect(run.status == .completed)
+		#expect(run.completedTickets == 1)
+		#expect(run.failedTickets == 0)
+		#expect(run.pullRequestsCreated == 1)
+		#expect(ticket.status == .needsReview)
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.retryCount == 1)
+		#expect(ticketRun.failureReason == nil)
+		#expect(ticketRun.summary == "Implemented after retry.")
+		#expect(ticketRun.pullRequestURL == "https://example.com/charliewilco/Auditorium/pull/source-provider")
+		#expect(sourceProvider.clonePaths.count == 2)
+		#expect(sourceProvider.commitPaths.count == 1)
+		#expect(sourceProvider.pushedBranches == ["auditorium/501-retry-transient-failure"])
+		#expect(sourceProvider.createdPullRequestTitles == ["501: Retry transient failure"])
+		#expect(
+			events.contains {
+				$0.level == .warning && $0.category == .orchestration && $0.message.hasPrefix("Retrying 501 after failed attempt 1")
+			}
+		)
+		#expect(events.contains { $0.metadataJSON == #"{"retryAttempt":1,"backoffMilliseconds":0}"# })
+	}
+
+	@Test func localWorkspaceCodexCancellationMarksRunAndActiveTicketRunsCanceled() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let cancellationProbe = AgentCancellationProbe()
+		let agentProvider = BlockingAgentProvider(probe: cancellationProbe)
+		let project = Project(
+			name: "Cancel Local Codex",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "601",
+			title: "Cancel running ticket",
+			body: "Run should be canceled durably.",
+			status: .ready,
+			labels: ["cancel"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/601",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+		let task = Task { @MainActor in
+			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		}
+
+		await cancellationProbe.waitUntilStarted()
+		task.cancel()
+		await cancellationProbe.release()
+		try await task.value
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+
+		#expect(run.status == .canceled)
+		#expect(run.completedTickets == 0)
+		#expect(run.failedTickets == 0)
+		#expect(run.blockedTickets == 0)
+		#expect(run.summary == "Run canceled by user.")
+		#expect(ticket.status == .canceled)
+		#expect(ticketRun.status == .canceled)
+		#expect(ticketRun.failureReason == "Canceled by user.")
+		#expect(ticketRun.endedAt != nil)
+		#expect(sourceProvider.commitPaths.isEmpty)
+		#expect(sourceProvider.pushedBranches.isEmpty)
+		#expect(sourceProvider.createdPullRequestTitles.isEmpty)
+		#expect(events.contains { $0.message == "Run canceled by user." })
 	}
 
 	@Test func localWorkspaceCodexRecoversTicketFailureAndContinuesQueue() async throws {
@@ -3800,6 +3986,35 @@ private struct StaticAgentProvider: AgentProvider {
 	}
 }
 
+private actor AgentEventSequences {
+	private var sequences: [[AgentEvent]]
+
+	init(_ sequences: [[AgentEvent]]) {
+		self.sequences = sequences
+	}
+
+	func next() -> [AgentEvent] {
+		if sequences.isEmpty {
+			return []
+		}
+		return sequences.removeFirst()
+	}
+}
+
+private struct SequencedAgentProvider: AgentProvider {
+	let sequences: AgentEventSequences
+
+	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
+		let events = await sequences.next()
+		return AsyncThrowingStream { continuation in
+			for event in events {
+				continuation.yield(event)
+			}
+			continuation.finish()
+		}
+	}
+}
+
 private actor AgentConcurrencyProbe {
 	let releaseAfter: Int
 	private var activeCount = 0
@@ -3826,6 +4041,53 @@ private actor AgentConcurrencyProbe {
 
 	func observedMaxActiveCount() -> Int {
 		maxActiveCount
+	}
+}
+
+private actor AgentCancellationProbe {
+	private var started = false
+	private var released = false
+
+	func markStarted() {
+		started = true
+	}
+
+	func release() {
+		released = true
+	}
+
+	func waitUntilStarted() async {
+		let deadline = Date().addingTimeInterval(5)
+		while started == false && Date() < deadline {
+			try? await Task.sleep(nanoseconds: 10_000_000)
+		}
+	}
+
+	func shouldContinueBlocking() -> Bool {
+		released == false
+	}
+}
+
+private struct BlockingAgentProvider: AgentProvider {
+	let probe: AgentCancellationProbe
+
+	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
+		AsyncThrowingStream { continuation in
+			let task = Task {
+				await probe.markStarted()
+				continuation.yield(AgentEvent(level: .info, category: .agent, message: "blocking_agent_started"))
+				while Task.isCancelled == false {
+					if await probe.shouldContinueBlocking() == false {
+						break
+					}
+					try? await Task.sleep(nanoseconds: 10_000_000)
+				}
+				continuation.finish(throwing: CancellationError())
+			}
+			continuation.onTermination = { _ in
+				task.cancel()
+			}
+		}
 	}
 }
 

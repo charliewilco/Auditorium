@@ -42,6 +42,10 @@ final class Orchestrator {
 			do {
 				try await execute(projectID: projectID, concurrency: concurrency, context: context)
 			}
+			catch is CancellationError {
+			}
+			catch ProcessCommandError.canceled {
+			}
 			catch {
 				try? insertRunFailure(projectID: projectID, message: error.localizedDescription, context: context)
 			}
@@ -137,29 +141,40 @@ final class Orchestrator {
 		)
 		let runtime = MockRuntimeProvider(workspaceService: workspaceService, projectID: projectID)
 
-		for batch in plan.batches {
-			context.insert(
-				RuntimeEventRecord(
-					runID: run.id,
-					level: .info,
-					category: .orchestration,
-					message: "Dispatching batch of \(batch.count) ticket runs."
+		do {
+			for batch in plan.batches {
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						level: .info,
+						category: .orchestration,
+						message: "Dispatching batch of \(batch.count) ticket runs."
+					)
 				)
-			)
-			try ModelIntegrityValidator.save(context: context)
-			try await processBatchWithRecovery(
-				batch,
-				project: project,
-				repository: repository,
-				tickets: tickets,
-				ticketRuns: ticketRuns,
-				run: run,
-				runtime: runtime,
-				agent: mockAgentProvider,
-				sourceProvider: mockSourceProvider,
-				context: context,
-				workflowPolicyMarkdown: plan.workflowPolicyMarkdown
-			)
+				try ModelIntegrityValidator.save(context: context)
+				try await processBatchWithRecovery(
+					batch,
+					project: project,
+					repository: repository,
+					tickets: tickets,
+					ticketRuns: ticketRuns,
+					run: run,
+					runtime: runtime,
+					agent: mockAgentProvider,
+					sourceProvider: mockSourceProvider,
+					context: context,
+					workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
+					retryPolicy: plan.retryPolicy
+				)
+			}
+		}
+		catch is CancellationError {
+			try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+			return
+		}
+		catch ProcessCommandError.canceled {
+			try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+			return
 		}
 
 		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -250,30 +265,41 @@ final class Orchestrator {
 		}
 		try ModelIntegrityValidator.save(context: context)
 
-		for batch in plan.batches {
-			context.insert(
-				RuntimeEventRecord(
-					runID: run.id,
-					level: .info,
-					category: .orchestration,
-					message: "Dispatching batch of \(batch.count) local ticket runs."
+		do {
+			for batch in plan.batches {
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						level: .info,
+						category: .orchestration,
+						message: "Dispatching batch of \(batch.count) local ticket runs."
+					)
 				)
-			)
-			try ModelIntegrityValidator.save(context: context)
-			try await processBatchWithRecovery(
-				batch,
-				project: project,
-				repository: repository,
-				tickets: tickets,
-				ticketRuns: ticketRuns,
-				run: run,
-				runtime: runtime,
-				agent: codexAgentProvider,
-				sourceProvider: sourceProvider,
-				context: context,
-				workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
-				commitAndPush: true
-			)
+				try ModelIntegrityValidator.save(context: context)
+				try await processBatchWithRecovery(
+					batch,
+					project: project,
+					repository: repository,
+					tickets: tickets,
+					ticketRuns: ticketRuns,
+					run: run,
+					runtime: runtime,
+					agent: codexAgentProvider,
+					sourceProvider: sourceProvider,
+					context: context,
+					workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
+					retryPolicy: plan.retryPolicy,
+					commitAndPush: true
+				)
+			}
+		}
+		catch is CancellationError {
+			try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+			return
+		}
+		catch ProcessCommandError.canceled {
+			try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+			return
 		}
 
 		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -350,7 +376,7 @@ final class Orchestrator {
 
 		for ticketRun in ticketRuns {
 			if Task.isCancelled {
-				try cancelSymphonyRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+				try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
 				return
 			}
 			guard let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
@@ -453,7 +479,7 @@ final class Orchestrator {
 						message: "symphony run canceled."
 					)
 				)
-				try cancelSymphonyRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+				try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
 				return
 			}
 			catch {
@@ -507,7 +533,7 @@ final class Orchestrator {
 		try ModelIntegrityValidator.save(context: context)
 	}
 
-	private func cancelSymphonyRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {
+	private func cancelRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {
 		for ticketRun in ticketRuns where ticketRun.status == .pending || ticketRun.status == .preparing || ticketRun.status == .running {
 			ticketRun.status = .canceled
 			ticketRun.endedAt = .now
@@ -519,6 +545,10 @@ final class Orchestrator {
 		}
 		run.status = .canceled
 		run.endedAt = .now
+		run.completedTickets = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
+		run.failedTickets = ticketRuns.filter { $0.status == .failed }.count
+		run.blockedTickets = ticketRuns.filter { $0.status == .blocked }.count
+		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
 		run.summary = "Run canceled by user."
 		context.insert(RuntimeEventRecord(runID: run.id, level: .warning, category: .orchestration, message: "Run canceled by user."))
 		try ModelIntegrityValidator.save(context: context)
@@ -573,6 +603,8 @@ final class Orchestrator {
 		ticket.updatedAt = .now
 		ticketRun.status = .preparing
 		ticketRun.startedAt = .now
+		ticketRun.endedAt = nil
+		ticketRun.failureReason = nil
 		context.insert(
 			RuntimeEventRecord(
 				runID: run.id,
@@ -657,14 +689,17 @@ final class Orchestrator {
 			}
 			try ModelIntegrityValidator.save(context: context)
 		}
+		try Task.checkCancellation()
 
 		switch finalOutcome ?? .completed {
 		case .completed:
 			if commitAndPush {
-				let didCommit = try await sourceProvider.commitChanges(
-					in: workspace.path,
-					message: "\(ticket.externalID): \(ticket.title)"
-				)
+				let didCommit = try await nonRetryableAsync {
+					try await sourceProvider.commitChanges(
+						in: workspace.path,
+						message: "\(ticket.externalID): \(ticket.title)"
+					)
+				}
 				if didCommit == false {
 					ticket.status = .completed
 					ticketRun.status = .completed
@@ -690,7 +725,9 @@ final class Orchestrator {
 						message: "Committed agent changes on \(workspace.branchName)."
 					)
 				)
-				try await sourceProvider.pushBranch(named: workspace.branchName, from: workspace.path)
+				try await nonRetryableAsync {
+					try await sourceProvider.pushBranch(named: workspace.branchName, from: workspace.path)
+				}
 				context.insert(
 					RuntimeEventRecord(
 						runID: run.id,
@@ -725,8 +762,12 @@ final class Orchestrator {
 				targetBranch: project.defaultBranch,
 				repository: repository
 			)
-			try PullRequestReviewPolicy().validate(pullRequestRequest)
-			let pr = try await sourceProvider.createPullRequest(pullRequestRequest)
+			try nonRetryableSync {
+				try PullRequestReviewPolicy().validate(pullRequestRequest)
+			}
+			let pr = try await nonRetryableAsync {
+				try await sourceProvider.createPullRequest(pullRequestRequest)
+			}
 			ticket.status = .needsReview
 			ticketRun.status = .needsReview
 			ticketRun.pullRequestURL = pr.url.absoluteString
@@ -774,32 +815,60 @@ final class Orchestrator {
 		sourceProvider: any SourceCodeProvider,
 		context: ModelContext,
 		workflowPolicyMarkdown: String,
+		retryPolicy: RetryPolicy,
 		commitAndPush: Bool = false
 	) async throws {
-		do {
-			try await processTicket(
-				project: project,
-				repository: repository,
-				ticket: ticket,
-				ticketRun: ticketRun,
-				run: run,
-				runtime: runtime,
-				agent: agent,
-				sourceProvider: sourceProvider,
-				context: context,
-				workflowPolicyMarkdown: workflowPolicyMarkdown,
-				commitAndPush: commitAndPush
+		while true {
+			try Task.checkCancellation()
+			do {
+				try await processTicket(
+					project: project,
+					repository: repository,
+					ticket: ticket,
+					ticketRun: ticketRun,
+					run: run,
+					runtime: runtime,
+					agent: agent,
+					sourceProvider: sourceProvider,
+					context: context,
+					workflowPolicyMarkdown: workflowPolicyMarkdown,
+					commitAndPush: commitAndPush
+				)
+			}
+			catch is CancellationError {
+				throw CancellationError()
+			}
+			catch ProcessCommandError.canceled(let executable, let arguments) {
+				throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
+			}
+			catch let error as NonRetryableTicketFailure {
+				markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
+				try ModelIntegrityValidator.save(context: context)
+				return
+			}
+			catch {
+				markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
+				try ModelIntegrityValidator.save(context: context)
+			}
+			guard retryPolicy.shouldRetry(status: ticketRun.status, retryCount: ticketRun.retryCount) else {
+				return
+			}
+			let retryAttempt = ticketRun.retryCount
+			let backoffMilliseconds = retryPolicy.backoffMilliseconds(for: max(0, retryAttempt - 1))
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .warning,
+					category: .orchestration,
+					message: "Retrying \(ticket.externalID) after failed attempt \(retryAttempt) of \(retryPolicy.maxRetries).",
+					metadataJSON: #"{"retryAttempt":\#(retryAttempt),"backoffMilliseconds":\#(backoffMilliseconds)}"#
+				)
 			)
-		}
-		catch is CancellationError {
-			throw CancellationError()
-		}
-		catch ProcessCommandError.canceled(let executable, let arguments) {
-			throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
-		}
-		catch {
-			markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
 			try ModelIntegrityValidator.save(context: context)
+			if backoffMilliseconds > 0 {
+				try await Task.sleep(nanoseconds: UInt64(backoffMilliseconds) * 1_000_000)
+			}
 		}
 	}
 
@@ -815,6 +884,7 @@ final class Orchestrator {
 		sourceProvider: any SourceCodeProvider,
 		context: ModelContext,
 		workflowPolicyMarkdown: String,
+		retryPolicy: RetryPolicy,
 		commitAndPush: Bool = false
 	) async throws {
 		let tasks = batch.compactMap { item -> Task<Void, Error>? in
@@ -836,6 +906,7 @@ final class Orchestrator {
 					sourceProvider: sourceProvider,
 					context: context,
 					workflowPolicyMarkdown: workflowPolicyMarkdown,
+					retryPolicy: retryPolicy,
 					commitAndPush: commitAndPush
 				)
 			}
@@ -874,6 +945,24 @@ final class Orchestrator {
 		)
 	}
 
+	private func nonRetryableSync<T>(_ operation: () throws -> T) throws -> T {
+		do {
+			return try operation()
+		}
+		catch {
+			throw NonRetryableTicketFailure(underlying: error)
+		}
+	}
+
+	private func nonRetryableAsync<T>(_ operation: () async throws -> T) async throws -> T {
+		do {
+			return try await operation()
+		}
+		catch {
+			throw NonRetryableTicketFailure(underlying: error)
+		}
+	}
+
 	private func insertRunFailure(projectID: UUID, message: String, context: ModelContext) throws {
 		let run = RunRecord(projectID: projectID, status: .failed, totalTickets: 0, summary: message)
 		run.endedAt = .now
@@ -900,5 +989,13 @@ extension TicketRecord {
 			estimatedComplexity: estimatedComplexity,
 			blockedBy: blockedBy
 		)
+	}
+}
+
+private struct NonRetryableTicketFailure: LocalizedError {
+	let underlying: Error
+
+	var errorDescription: String? {
+		underlying.localizedDescription
 	}
 }
