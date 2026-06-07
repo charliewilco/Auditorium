@@ -1300,6 +1300,68 @@ fn normalize_github_issues_payload(
         .collect())
 }
 
+fn split_command_line(command: &str) -> Result<Vec<String>, SymphonyError> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_token = false;
+
+    for character in command.chars() {
+        if escaped {
+            current.push(character);
+            saw_token = true;
+            escaped = false;
+            continue;
+        }
+
+        match (quote, character) {
+            (None, '\\') | (Some('"'), '\\') => {
+                escaped = true;
+                saw_token = true;
+            }
+            (None, '\'' | '"') => {
+                quote = Some(character);
+                saw_token = true;
+            }
+            (Some(active_quote), character) if character == active_quote => {
+                quote = None;
+                saw_token = true;
+            }
+            (None, character) if character.is_whitespace() => {
+                if saw_token {
+                    parts.push(std::mem::take(&mut current));
+                    saw_token = false;
+                }
+            }
+            (_, character) => {
+                current.push(character);
+                saw_token = true;
+            }
+        }
+    }
+
+    if escaped {
+        return Err(SymphonyError::InvalidConfig(
+            "command must not end with an unfinished escape".to_string(),
+        ));
+    }
+    if let Some(active_quote) = quote {
+        return Err(SymphonyError::InvalidConfig(format!(
+            "command contains an unmatched {active_quote} quote"
+        )));
+    }
+    if saw_token {
+        parts.push(current);
+    }
+    if parts.is_empty() {
+        return Err(SymphonyError::InvalidConfig(
+            "command must include a program".to_string(),
+        ));
+    }
+    Ok(parts)
+}
+
 async fn fetch_default_branch(repo: &str) -> Result<String, SymphonyError> {
     let output = command_stdout(
         "gh",
@@ -1367,11 +1429,11 @@ async fn run_codex(
         "codex_started",
         json!({ "command": config.codex_command }),
     )?;
-    let mut parts = config.codex_command.split_whitespace();
-    let program = parts.next().ok_or_else(|| {
+    let parts = split_command_line(&config.codex_command)?;
+    let (program, args) = parts.split_first().ok_or_else(|| {
         SymphonyError::InvalidConfig("codex.command must not be empty".to_string())
     })?;
-    let args: Vec<String> = parts.map(ToString::to_string).collect();
+    let args = args.to_vec();
     let mut command = Command::new(program);
     command
         .args(&args)
@@ -1429,7 +1491,7 @@ async fn run_codex(
     }
     if !status.success() {
         return Err(SymphonyError::CommandFailed {
-            program: program.to_string(),
+            program: program.clone(),
             args,
             status: status.code().unwrap_or(1),
             stderr: stderr_lines.join("\n"),
@@ -2047,6 +2109,7 @@ fn os_str(value: &str) -> &OsStr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn parses_front_matter_and_prompt() {
@@ -2136,6 +2199,96 @@ Body
         assert_eq!(
             config.codex_command,
             "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
+        );
+    }
+
+    #[test]
+    fn command_line_preserves_quoted_arguments() {
+        let parts = split_command_line(
+            r#"codex exec --json --sandbox "workspace write" -c approval_policy=\"never\""#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parts,
+            vec![
+                "codex",
+                "exec",
+                "--json",
+                "--sandbox",
+                "workspace write",
+                "-c",
+                r#"approval_policy="never""#
+            ]
+        );
+    }
+
+    #[test]
+    fn command_line_supports_single_quotes_and_escaped_spaces() {
+        let parts = split_command_line(
+            r#"/Applications/Codex\ CLI.app/Contents/MacOS/codex exec --prompt 'fix login flow'"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parts,
+            vec![
+                "/Applications/Codex CLI.app/Contents/MacOS/codex",
+                "exec",
+                "--prompt",
+                "fix login flow"
+            ]
+        );
+    }
+
+    #[test]
+    fn command_line_rejects_unmatched_quotes_and_dangling_escape() {
+        let quote_error = split_command_line(r#"codex exec "unterminated"#).unwrap_err();
+        let escape_error = split_command_line(r#"codex exec \"#).unwrap_err();
+
+        assert_eq!(quote_error.code(), "invalid_config");
+        assert!(quote_error.to_string().contains("unmatched"));
+        assert_eq!(escape_error.code(), "invalid_config");
+        assert!(escape_error.to_string().contains("unfinished escape"));
+    }
+
+    #[tokio::test]
+    async fn codex_runner_passes_quoted_command_arguments_verbatim() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let script = tempdir.path().join("fake-codex");
+        let args_path = tempdir.path().join("codex-args.txt");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
+                args_path.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        let workflow = parse_workflow("Body").unwrap();
+        let mut config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        config.codex_command = format!(
+            "{} --mode \"two words\" -c approval_policy=\\\"never\\\"",
+            script.display()
+        );
+
+        run_codex(&config, tempdir.path(), "Prompt body", true)
+            .await
+            .unwrap();
+
+        let args = std::fs::read_to_string(args_path).unwrap();
+        assert_eq!(
+            args.lines().collect::<Vec<_>>(),
+            vec![
+                "--mode",
+                "two words",
+                "-c",
+                r#"approval_policy="never""#,
+                "Prompt body"
+            ]
         );
     }
 
