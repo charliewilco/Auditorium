@@ -535,6 +535,17 @@ xcodebuild test \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
+Build macOS app release smoke target:
+
+```sh
+xcodebuild build \
+	-workspace Auditorium.xcworkspace \
+	-scheme Auditorium \
+	-configuration Release \
+	-destination 'platform=macOS,arch=arm64' \
+	CODE_SIGNING_ALLOWED=NO
+```
+
 Run all local checks:
 
 ```sh
@@ -543,7 +554,10 @@ swift test
 cargo fmt --all --check
 cargo test --all-targets
 xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
+xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Release -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 ```
+
+Release signing and notarization policy lives in [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Contributing Direction
 

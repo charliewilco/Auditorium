@@ -460,10 +460,10 @@ Acceptance gate:
 - [x] GitHub Actions macOS build workflow.
 - [x] GitHub Actions SwiftPM core build/test workflow.
 - [x] GitHub Actions Rust test workflow.
-- [ ] Release build configuration.
-- [ ] Signing/entitlements review.
-- [ ] App sandbox/security policy decision.
-- [ ] Distribution/notarization plan.
+- [x] Release build configuration.
+- [x] Signing/entitlements review.
+- [x] App sandbox/security policy decision.
+- [x] Distribution/notarization plan.
 
 Acceptance gate:
 

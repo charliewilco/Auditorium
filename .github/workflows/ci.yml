@@ -25,8 +25,10 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
-      - name: Build app target
+      - name: Build debug app target
         run: xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
+      - name: Build release app target
+        run: xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Release -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 
   rust:
     name: symphony
