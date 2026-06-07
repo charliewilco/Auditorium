@@ -22,7 +22,11 @@ struct QueueScreen: View {
 				EmptyStateView(
 					symbol: "text.line.first.and.arrowtriangle.forward",
 					title: "Queue Is Empty",
-					message: "Add tickets from the Ticket Browser to build an agent run."
+					message: "Add tickets from the Ticket Browser to build an agent run.",
+					recoverySuggestion:
+						"Queued tickets keep their order, enabled state, and per-run snapshot before Codex starts.",
+					actionTitle: "Open Tickets",
+					action: { appState.selectedDestination = .tickets }
 				)
 			}
 			else {

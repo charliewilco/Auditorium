@@ -45,7 +45,10 @@ struct TicketBrowserView: View {
 				EmptyStateView(
 					symbol: "ticket",
 					title: "No Tickets",
-					message: "Open the demo project or adjust filters to see imported issue work."
+					message: "Open the demo project or adjust filters to see imported issue work.",
+					recoverySuggestion: emptyStateRecoverySuggestion,
+					actionTitle: emptyStateActionTitle,
+					action: resetFilters
 				)
 			}
 			else {
@@ -123,6 +126,31 @@ struct TicketBrowserView: View {
 			.disabled(tickets.isEmpty)
 		}
 		.padding()
+	}
+
+	private var emptyStateRecoverySuggestion: String {
+		if appState.ticketSearchText.isEmpty == false || statusFilter != nil || priorityFilter != nil {
+			return "Clear the current search and filters to show every imported issue for this project."
+		}
+		return "Import GitHub Issues during project setup, then select rows here before adding them to the queue."
+	}
+
+	private var emptyStateActionTitle: String {
+		if appState.ticketSearchText.isEmpty == false || statusFilter != nil || priorityFilter != nil {
+			return "Clear Filters"
+		}
+		return "Open Settings"
+	}
+
+	private func resetFilters() {
+		if appState.ticketSearchText.isEmpty == false || statusFilter != nil || priorityFilter != nil {
+			appState.ticketSearchText = ""
+			statusFilter = nil
+			priorityFilter = nil
+		}
+		else {
+			appState.selectedDestination = .settings
+		}
 	}
 }
 

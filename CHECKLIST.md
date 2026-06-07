@@ -286,11 +286,11 @@ Acceptance gate:
 - [x] Reports screen.
 - [x] Settings screen.
 - [x] Replace mock-only text with real provider states.
-- [ ] Improve empty/error states.
+- [x] Improve empty/error states.
 - [x] Add focused keyboard shortcut handling for all required commands.
-- [ ] Verify layout on multiple window sizes.
-- [ ] Verify no text overlap.
-- [ ] Add visual proof/screenshots for acceptance flow.
+- [x] Verify layout on multiple window sizes.
+- [x] Verify no text overlap.
+- [x] Add visual proof/screenshots for acceptance flow.
 
 Acceptance gate:
 
@@ -446,7 +446,7 @@ Acceptance gate:
 - [x] Rust tests for quoted Codex command parsing and argv handoff.
 - [x] Rust integration test for non-mock GitHub issue, workspace, Codex, validation, git push, PR, and report flow.
 - [x] UI smoke tests that are not template-only.
-- [ ] Manual acceptance checklist with screenshots.
+- [x] Manual acceptance checklist with screenshots.
 
 Acceptance gate:
 

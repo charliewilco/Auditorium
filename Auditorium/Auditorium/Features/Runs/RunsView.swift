@@ -38,7 +38,11 @@ struct RunsView: View {
 				EmptyStateView(
 					symbol: "play.circle.fill",
 					title: "No Run Selected",
-					message: "Start a queue run to see live execution details."
+					message: "Start a queue run to see live execution details.",
+					recoverySuggestion:
+						"Runs stream ticket progress, workspace paths, PR links, and report previews as events arrive.",
+					actionTitle: "Open Queue",
+					action: { appState.selectedDestination = .queue }
 				)
 			}
 		}

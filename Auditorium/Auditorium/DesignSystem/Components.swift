@@ -100,9 +100,28 @@ struct EmptyStateView: View {
 	let symbol: String
 	let title: String
 	let message: String
+	let recoverySuggestion: String?
+	let actionTitle: String?
+	let action: (() -> Void)?
+
+	init(
+		symbol: String,
+		title: String,
+		message: String,
+		recoverySuggestion: String? = nil,
+		actionTitle: String? = nil,
+		action: (() -> Void)? = nil
+	) {
+		self.symbol = symbol
+		self.title = title
+		self.message = message
+		self.recoverySuggestion = recoverySuggestion
+		self.actionTitle = actionTitle
+		self.action = action
+	}
 
 	var body: some View {
-		VStack(spacing: 12) {
+		VStack(spacing: 14) {
 			Image(systemName: symbol)
 				.font(.system(size: 42))
 				.foregroundStyle(.secondary)
@@ -112,6 +131,22 @@ struct EmptyStateView: View {
 				.foregroundStyle(.secondary)
 				.multilineTextAlignment(.center)
 				.frame(maxWidth: 360)
+			if let recoverySuggestion {
+				Text(recoverySuggestion)
+					.font(.callout)
+					.foregroundStyle(.secondary)
+					.multilineTextAlignment(.center)
+					.frame(maxWidth: 400)
+			}
+			if let actionTitle,
+				let action
+			{
+				Button(action: action) {
+					Text(actionTitle)
+				}
+				.buttonStyle(.borderedProminent)
+				.controlSize(.regular)
+			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
 		.padding()

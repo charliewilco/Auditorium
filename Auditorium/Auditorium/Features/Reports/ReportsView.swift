@@ -62,7 +62,8 @@ struct ReportsView: View {
 				EmptyStateView(
 					symbol: "doc.text",
 					title: "No Reports",
-					message: "Run the queue to generate a detailed markdown report."
+					message: "Run the queue to generate a detailed markdown report.",
+					recoverySuggestion: "Completed runs save reports locally so they can be copied, exported, and revealed later."
 				)
 			}
 		}

@@ -16,55 +16,68 @@ enum ScreenshotExporter {
 			state.selectedTicketID = data.tickets.first?.id
 			state.selectedRunID = data.run.id
 			state.selectedReportID = data.report.id
+			let layouts = [
+				ScreenshotLayout(name: "desktop", size: CGSize(width: 1280, height: 800), sidebarWidth: 220, inspectorWidth: 340),
+				ScreenshotLayout(name: "compact", size: CGSize(width: 1120, height: 760), sidebarWidth: 200, inspectorWidth: 300),
+			]
 
-			try render(
-				WelcomeView(createProject: {}, openDemo: {})
-					.frame(width: 1280, height: 800),
-				name: "01-welcome.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .dashboard) {
-					ScreenshotDashboard(data: data)
-				},
-				name: "02-dashboard.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .tickets) {
-					ScreenshotTickets(data: data)
-				},
-				name: "03-tickets.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .queue) {
-					ScreenshotQueue(data: data)
-				},
-				name: "04-queue.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .runs) {
-					ScreenshotRunDetail(data: data)
-				},
-				name: "05-run-detail.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .reports) {
-					ScreenshotReports(data: data)
-				},
-				name: "06-reports.png",
-				to: directory
-			)
-			try render(
-				ScreenshotShell(state: state, data: data, destination: .settings) {
-					ScreenshotSettings(data: data)
-				},
-				name: "07-settings.png",
-				to: directory
-			)
+			for layout in layouts {
+				try render(
+					WelcomeView(createProject: {}, openDemo: {})
+						.frame(width: layout.size.width, height: layout.size.height),
+					name: "01-welcome-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .dashboard) {
+						ScreenshotDashboard(data: data)
+					},
+					name: "02-dashboard-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .tickets) {
+						ScreenshotTickets(data: data)
+					},
+					name: "03-tickets-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .queue) {
+						ScreenshotQueue(data: data)
+					},
+					name: "04-queue-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .runs) {
+						ScreenshotRunDetail(data: data)
+					},
+					name: "05-run-detail-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .reports) {
+						ScreenshotReports(data: data)
+					},
+					name: "06-reports-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .settings) {
+						ScreenshotSettings(data: data)
+					},
+					name: "07-settings-\(layout.name).png",
+					to: directory
+				)
+				try render(
+					ScreenshotShell(state: state, data: data, layout: layout, destination: .tickets) {
+						ScreenshotEmptyStates()
+					},
+					name: "08-empty-states-\(layout.name).png",
+					to: directory
+				)
+			}
 			print("Wrote Auditorium screenshots to \(directory.path())")
 			NSApp.terminate(nil)
 		}
@@ -98,15 +111,28 @@ private enum ScreenshotExportError: LocalizedError {
 	}
 }
 
+private struct ScreenshotLayout {
+	let name: String
+	let size: CGSize
+	let sidebarWidth: CGFloat
+	let inspectorWidth: CGFloat
+
+	var contentWidth: CGFloat {
+		size.width - sidebarWidth - inspectorWidth - 2
+	}
+}
+
 private struct ScreenshotShell<Content: View>: View {
 	let state: AppState
 	let data: ScreenshotData
+	let layout: ScreenshotLayout
 	let destination: SidebarDestination
 	let content: Content
 
-	init(state: AppState, data: ScreenshotData, destination: SidebarDestination, @ViewBuilder content: () -> Content) {
+	init(state: AppState, data: ScreenshotData, layout: ScreenshotLayout, destination: SidebarDestination, @ViewBuilder content: () -> Content) {
 		self.state = state
 		self.data = data
+		self.layout = layout
 		self.destination = destination
 		self.content = content()
 	}
@@ -114,16 +140,16 @@ private struct ScreenshotShell<Content: View>: View {
 	var body: some View {
 		HStack(spacing: 0) {
 			ScreenshotSidebar(project: data.project, selected: destination)
-				.frame(width: 220, height: 800)
+				.frame(width: layout.sidebarWidth, height: layout.size.height)
 			Divider()
 			content
 				.environment(state)
-				.frame(width: 720, height: 800)
+				.frame(width: layout.contentWidth, height: layout.size.height, alignment: .topLeading)
 			Divider()
 			ScreenshotInspector(data: data.inspector, project: data.project)
-				.frame(width: 340, height: 800)
+				.frame(width: layout.inspectorWidth, height: layout.size.height, alignment: .topLeading)
 		}
-		.frame(width: 1280, height: 800)
+		.frame(width: layout.size.width, height: layout.size.height)
 		.onAppear {
 			state.selectedDestination = destination
 		}
@@ -410,6 +436,62 @@ private struct ScreenshotSettings: View {
 			}
 		}
 		.padding(18)
+	}
+}
+
+private struct ScreenshotEmptyStates: View {
+	var body: some View {
+		VStack(alignment: .leading, spacing: 14) {
+			ScreenshotHeader(
+				title: "Empty And Error States",
+				subtitle: "Actionable recovery copy for first-run, filtered, and blocked workflows",
+				badge: "Verified"
+			)
+			LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
+				ScreenshotEmptyStateCard(
+					symbol: "ticket",
+					title: "No Tickets",
+					message: "Open the demo project or adjust filters to see imported issue work.",
+					recoverySuggestion:
+						"Clear the current search and filters to show every imported issue for this project."
+				)
+				ScreenshotEmptyStateCard(
+					symbol: "text.line.first.and.arrowtriangle.forward",
+					title: "Queue Is Empty",
+					message: "Add tickets from the Ticket Browser to build an agent run.",
+					recoverySuggestion:
+						"Queued tickets keep their order, enabled state, and per-run snapshot before Codex starts."
+				)
+				ScreenshotEmptyStateCard(
+					symbol: "play.circle.fill",
+					title: "No Run Selected",
+					message: "Start a queue run to see live execution details.",
+					recoverySuggestion:
+						"Runs stream ticket progress, workspace paths, PR links, and report previews as events arrive."
+				)
+				ScreenshotEmptyStateCard(
+					symbol: "exclamationmark.triangle",
+					title: "Run Blocked",
+					message: "GitHub credentials need repo and issue scopes before this queue can start.",
+					recoverySuggestion:
+						"Reconnect GitHub in Settings, then retry the same queue without losing ticket order."
+				)
+			}
+		}
+		.padding(18)
+	}
+}
+
+private struct ScreenshotEmptyStateCard: View {
+	let symbol: String
+	let title: String
+	let message: String
+	let recoverySuggestion: String
+
+	var body: some View {
+		EmptyStateView(symbol: symbol, title: title, message: message, recoverySuggestion: recoverySuggestion)
+			.frame(height: 260)
+			.background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
 	}
 }
 

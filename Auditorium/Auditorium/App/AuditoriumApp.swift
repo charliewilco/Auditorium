@@ -10,7 +10,10 @@ struct AuditoriumApp: App {
 	init() {
 		do {
 			let environment = ProcessInfo.processInfo.environment
-			let shouldUseEphemeralStore = environment["XCTestConfigurationFilePath"] != nil || environment["CI"] == "true"
+			let shouldUseEphemeralStore =
+				environment["XCTestConfigurationFilePath"] != nil
+				|| environment["CI"] == "true"
+				|| environment["AUDITORIUM_EXPORT_SCREENSHOTS"] != nil
 			modelContainer = try AppSchema.makeModelContainer(inMemory: shouldUseEphemeralStore)
 		}
 		catch {

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct TicketInspectorView: View {
+	@Environment(AppState.self) private var appState
 	let project: Project?
 	let ticket: TicketRecord?
 	let queueItem: QueueItemRecord?
@@ -63,7 +64,11 @@ struct TicketInspectorView: View {
 					EmptyStateView(
 						symbol: "sidebar.right",
 						title: "No Ticket Selected",
-						message: "Select a ticket to inspect orchestration state."
+						message: "Select a ticket to inspect orchestration state.",
+						recoverySuggestion:
+							"The inspector shows queue state, latest run status, workspace, branch, PR, actions, and timeline events.",
+						actionTitle: "Open Tickets",
+						action: { appState.selectedDestination = .tickets }
 					)
 					.frame(height: 360)
 				}
