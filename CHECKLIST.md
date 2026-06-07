@@ -66,7 +66,7 @@ Acceptance gate:
 - [x] Store secret material through Keychain service.
 - [x] Persist only account metadata in SwiftData.
 - [~] Allow pasted access token as temporary bootstrap.
-- [ ] Implement GitHub OAuth device flow or native callback flow.
+- [x] Implement GitHub OAuth device flow or native callback flow.
 - [ ] Store and refresh OAuth token metadata safely.
 - [x] Validate granted scopes.
 - [~] Detect missing or insufficient GitHub credentials before import/run.
@@ -76,7 +76,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] A user can connect GitHub without manually pasting a token.
+- [~] A user can connect GitHub without manually pasting a token.
 - [x] Repository and issue APIs can share one GitHub account.
 - [x] Clearing the account removes Keychain secrets and SwiftData metadata.
 
@@ -123,7 +123,7 @@ Acceptance gate:
 - [x] Default to GitHub repository provider.
 - [x] Default to GitHub Issues provider.
 - [x] Persist project, repository, issue tracker, workflow policy, and optional demo tickets.
-- [~] Show OAuth-shaped credential step.
+- [x] Show OAuth-shaped credential step.
 - [ ] Select GitHub account.
 - [x] Select repository from real GitHub data.
 - [ ] Select issue filter/query from real GitHub Issues data.
@@ -455,7 +455,7 @@ Acceptance gate:
 
 ## 24. v0 Final Acceptance
 
-- [ ] User authenticates GitHub.
+- [~] User authenticates GitHub.
 - [x] User selects GitHub repository.
 - [x] User imports GitHub Issues.
 - [ ] User queues issues.

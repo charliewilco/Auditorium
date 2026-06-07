@@ -15,6 +15,7 @@ struct ProviderAuthenticationDescriptor: Sendable {
 struct OAuthAuthorizationDescriptor: Sendable {
 	let authorizationEndpoint: URL
 	let tokenEndpoint: URL
+	let deviceCodeEndpoint: URL?
 	let callbackScheme: String
 	let scopes: [String]
 
@@ -36,6 +37,7 @@ enum GitHubOAuth {
 	static let descriptor = OAuthAuthorizationDescriptor(
 		authorizationEndpoint: URL(string: "https://github.com/login/oauth/authorize")!,
 		tokenEndpoint: URL(string: "https://github.com/login/oauth/access_token")!,
+		deviceCodeEndpoint: URL(string: "https://github.com/login/device/code")!,
 		callbackScheme: callbackScheme,
 		scopes: ["repo", "read:user"]
 	)

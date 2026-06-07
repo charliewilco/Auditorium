@@ -291,6 +291,63 @@ struct AuditoriumTests {
 		#expect(try keychain.readSecret(account: keychainAccount) == nil)
 	}
 
+	@Test func githubDeviceFlowRequestsUserCode() async throws {
+		let payload = """
+		{
+			"device_code": "device-123",
+			"user_code": "ABCD-EFGH",
+			"verification_uri": "https://github.com/login/device",
+			"verification_uri_complete": "https://github.com/login/device?user_code=ABCD-EFGH",
+			"expires_in": 900,
+			"interval": 5
+		}
+		"""
+		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
+
+		let code = try await service.requestDeviceCode(clientID: "client-123")
+
+		#expect(code.deviceCode == "device-123")
+		#expect(code.userCode == "ABCD-EFGH")
+		#expect(code.verificationURI.absoluteString == "https://github.com/login/device")
+		#expect(code.verificationURIComplete?.absoluteString == "https://github.com/login/device?user_code=ABCD-EFGH")
+	}
+
+	@Test func githubDeviceFlowExchangesDeviceCodeForToken() async throws {
+		let payload = """
+		{
+			"access_token": "gho_test",
+			"scope": "repo,read:user",
+			"token_type": "bearer"
+		}
+		"""
+		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
+
+		let token = try await service.requestToken(clientID: "client-123", deviceCode: "device-123")
+
+		#expect(token.accessToken == "gho_test")
+		#expect(token.scope == "repo,read:user")
+		#expect(token.tokenType == "bearer")
+	}
+
+	@Test func githubDeviceFlowReportsPendingAuthorization() async throws {
+		let payload = """
+		{
+			"error": "authorization_pending",
+			"error_description": "The authorization request is still pending."
+		}
+		"""
+		let service = GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload))
+		var isPending = false
+
+		do {
+			_ = try await service.requestToken(clientID: "client-123", deviceCode: "device-123")
+		} catch GitHubOAuthDeviceFlowError.unsupportedResponse(let response) where response == "authorization_pending" {
+			isPending = true
+		}
+
+		#expect(isPending)
+	}
+
 	@Test func projectDraftDefaultsToGitHubForSourceAndIssues() {
 		let draft = ProjectDraft()
 

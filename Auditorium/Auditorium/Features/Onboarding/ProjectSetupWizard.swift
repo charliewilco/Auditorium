@@ -13,6 +13,9 @@ struct ProjectSetupWizard: View {
 	@State private var repositoryLoadMessage = ""
 	@State private var isLoadingRepositories = false
 	@State private var isCreating = false
+	@State private var oauthMessage = ""
+	@State private var isAuthorizingGitHub = false
+	@AppStorage("githubOAuthClientID") private var githubOAuthClientID = ""
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -63,7 +66,8 @@ struct ProjectSetupWizard: View {
 			oauthForm(
 				title: "\(draft.repositoryProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
-				text: Binding(get: { draft.repositoryCredential }, set: { draft.repositoryCredential = $0 })
+				text: Binding(get: { draft.repositoryCredential }, set: { draft.repositoryCredential = $0 }),
+				connect: { Task { await connectGitHub() } }
 			)
 		case 2:
 			VStack(alignment: .leading, spacing: 14) {
@@ -117,7 +121,8 @@ struct ProjectSetupWizard: View {
 			oauthForm(
 				title: "\(draft.issueProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
-				text: Binding(get: { draft.issueCredential }, set: { draft.issueCredential = $0 })
+				text: Binding(get: { draft.issueCredential }, set: { draft.issueCredential = $0 }),
+				connect: { Task { await connectGitHub() } }
 			)
 		case 5:
 			VStack(alignment: .leading, spacing: 14) {
@@ -196,14 +201,30 @@ struct ProjectSetupWizard: View {
 		}
 	}
 
-	private func oauthForm(title: String, placeholder: String, text: Binding<String>) -> some View {
+	private func oauthForm(title: String, placeholder: String, text: Binding<String>, connect: @escaping () -> Void) -> some View {
 		VStack(alignment: .leading, spacing: 14) {
 			Text(title)
 				.font(.headline)
 			Label("GitHub OAuth", systemImage: "person.crop.circle.badge.checkmark")
 				.font(.subheadline.weight(.semibold))
-			Text("Auditorium will use one GitHub OAuth connection for source code and issues. Full browser callback handling is not wired yet; paste an OAuth access token for now.")
+			Text("Auditorium uses one GitHub OAuth connection for source code and issues.")
 				.foregroundStyle(.secondary)
+			TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
+			HStack {
+				Button("Connect with GitHub") {
+					connect()
+				}
+				.disabled(githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAuthorizingGitHub)
+				if isAuthorizingGitHub {
+					ProgressView()
+						.controlSize(.small)
+				}
+			}
+			if !oauthMessage.isEmpty {
+				Text(oauthMessage)
+					.foregroundStyle(.secondary)
+			}
+			Divider()
 			SecureField(placeholder, text: text)
 			Text("Requested scopes: \(GitHubOAuth.descriptor.scopes.joined(separator: ", "))")
 				.foregroundStyle(.secondary)
@@ -224,6 +245,30 @@ struct ProjectSetupWizard: View {
 			return (value.title, "Coding agent", value.symbol)
 		}
 		return ("Provider", "Provider", "square")
+	}
+
+	private func connectGitHub() async {
+		let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !clientID.isEmpty else {
+			return
+		}
+		isAuthorizingGitHub = true
+		oauthMessage = ""
+		defer { isAuthorizingGitHub = false }
+
+		do {
+			let service = GitHubOAuthDeviceFlowService()
+			let deviceCode = try await service.requestDeviceCode(clientID: clientID)
+			let verificationURL = deviceCode.verificationURIComplete ?? deviceCode.verificationURI
+			oauthMessage = "Enter code \(deviceCode.userCode) in GitHub, then return here."
+			NSWorkspace.shared.open(verificationURL)
+			let token = try await service.pollToken(clientID: clientID, deviceCode: deviceCode)
+			draft.repositoryCredential = token.accessToken
+			draft.issueCredential = token.accessToken
+			oauthMessage = "GitHub connected with scopes: \(token.scope)"
+		} catch {
+			oauthMessage = error.localizedDescription
+		}
 	}
 
 	private func loadRepositories() async {
