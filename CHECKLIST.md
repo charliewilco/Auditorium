@@ -32,13 +32,13 @@ Acceptance gate:
 - [x] Keep secrets out of SwiftData.
 - [x] Store selected navigation state by stable IDs instead of long-lived model references.
 - [x] Add `IssueTrackerRecord`.
-- [ ] Add explicit schema migration plan.
-- [ ] Add migration tests before changing persisted model shape.
+- [x] Add explicit schema migration plan.
+- [x] Add migration tests before changing persisted model shape.
 - [x] Add data validation helpers for invalid/corrupt persisted rows.
 
 Acceptance gate:
 
-- [ ] Existing app data survives one intentional schema migration.
+- [x] Existing app data survives one intentional schema migration.
 - [x] No persisted record can contain OAuth tokens or PATs in app-owned SwiftData save paths.
 
 ## 2. Provider Architecture
@@ -417,6 +417,7 @@ Acceptance gate:
 - [x] Swift tests for invalid draft persistence.
 - [x] Swift tests for model integrity validation and persisted secret leakage detection.
 - [x] Swift tests for integrity-enforced saves blocking persisted secret material.
+- [x] Swift tests for on-disk SwiftData migration survival.
 - [x] Swift tests for report generation.
 - [x] Swift tests for workspace paths.
 - [x] Swift tests for provider normalization.

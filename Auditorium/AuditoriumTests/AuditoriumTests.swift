@@ -190,6 +190,44 @@ struct AuditoriumTests {
 		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
 	}
 
+	@Test func existingAppDataSurvivesSchemaMigration() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumMigrationTests-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: root) }
+		let storeURL = root.appending(path: "Auditorium.store")
+		let ids = try writeLegacyV1Store(at: storeURL)
+
+		let container = try AppSchema.makeModelContainer(storeURL: storeURL)
+		let context = container.mainContext
+		let projects = try context.fetch(FetchDescriptor<Project>())
+		let repositories = try context.fetch(FetchDescriptor<RepositoryRecord>())
+		let issueTrackers = try context.fetch(FetchDescriptor<IssueTrackerRecord>())
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+		let queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>())
+		let runs = try context.fetch(FetchDescriptor<RunRecord>())
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
+		let pullRequests = try context.fetch(FetchDescriptor<PullRequestRecord>())
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+
+		#expect(AppSchema.MigrationPlan.schemas.count == 2)
+		#expect(AppSchema.MigrationPlan.stages.count == 1)
+		#expect(projects.map(\.id) == [ids.projectID])
+		#expect(projects.first?.name == "Migrated Project")
+		#expect(repositories.first?.projectID == ids.projectID)
+		#expect(issueTrackers.first?.projectID == ids.projectID)
+		#expect(tickets.first?.sourceProjectID == ids.projectID)
+		#expect(queueItems.first?.ticketID == ids.ticketID)
+		#expect(runs.first?.id == ids.runID)
+		#expect(ticketRuns.first?.runID == ids.runID)
+		#expect(pullRequests.first?.ticketRunID == ids.ticketRunID)
+		#expect(events.first?.runID == ids.runID)
+		#expect(reports.first?.runID == ids.runID)
+		#expect(accounts.first?.displayName == "GitHub")
+		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
+	}
+
 	@Test func modelIntegrityValidatorFlagsCorruptPersistedRows() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -1589,6 +1627,127 @@ struct AuditoriumTests {
 		#expect(try context.fetch(FetchDescriptor<TicketRunRecord>()).isEmpty)
 		#expect(try context.fetch(FetchDescriptor<RunRecord>()).isEmpty)
 		#expect(!FileManager.default.fileExists(atPath: workspace.workspacesDirectory(projectID: project.id).path()))
+	}
+}
+
+private struct MigrationFixtureIDs {
+	let projectID: UUID
+	let ticketID: UUID
+	let runID: UUID
+	let ticketRunID: UUID
+}
+
+@MainActor
+private extension AuditoriumTests {
+	func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {
+		let schema = Schema(AppSchema.modelTypes, version: AppSchema.V1.versionIdentifier)
+		let configuration = ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none)
+		let container = try ModelContainer(for: schema, configurations: [configuration])
+		let context = container.mainContext
+		let projectID = UUID()
+		let ticketID = UUID()
+		let runID = UUID()
+		let ticketRunID = UUID()
+		let project = Project(
+			id: projectID,
+			name: "Migrated Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent,
+			createdAt: Date(timeIntervalSince1970: 1_780_000_000),
+			updatedAt: Date(timeIntervalSince1970: 1_780_000_001)
+		)
+		let repository = RepositoryRecord(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: "https://github.com/charliewilco/Auditorium.git",
+			webURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			localPath: "/tmp/auditorium",
+			projectID: projectID
+		)
+		let issueTracker = IssueTrackerRecord(
+			provider: .githubIssues,
+			displayName: "charliewilco/Auditorium",
+			sourceIdentifier: "charliewilco/Auditorium",
+			filterName: "Ready",
+			webURL: "https://github.com/charliewilco/Auditorium/issues",
+			projectID: projectID
+		)
+		let ticket = TicketRecord(
+			id: ticketID,
+			provider: .githubIssues,
+			externalID: "101",
+			title: "Migrate persisted ticket",
+			body: "Verify existing issue data survives migration.",
+			status: .queued,
+			labels: ["migration"],
+			assignee: "charlie",
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: Date(timeIntervalSince1970: 1_780_000_002),
+			updatedAt: Date(timeIntervalSince1970: 1_780_000_003),
+			estimatedComplexity: 3,
+			sourceProjectID: projectID
+		)
+		let queueItem = QueueItemRecord(ticketID: ticketID, projectID: projectID, position: 0, priority: .high)
+		let run = RunRecord(id: runID, projectID: projectID, status: .completed, totalTickets: 1, completedTickets: 1, summary: "Migrated run")
+		let ticketRun = TicketRunRecord(
+			id: ticketRunID,
+			runID: runID,
+			ticketID: ticketID,
+			workspacePath: "/tmp/auditorium/workspaces/101",
+			containerID: "mock-runtime",
+			branchName: "auditorium/101-migrate-persisted-ticket",
+			status: .completed,
+			retryCount: 0,
+			logPath: "/tmp/auditorium/logs/101.log",
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/101",
+			summary: "Completed",
+			confidence: 0.9
+		)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: ticketRunID,
+			title: "Migrate persisted ticket",
+			url: "https://github.com/charliewilco/Auditorium/pull/101",
+			branchName: "auditorium/101-migrate-persisted-ticket",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .passed
+		)
+		let event = RuntimeEventRecord(runID: runID, ticketRunID: ticketRunID, level: .info, category: .orchestration, message: "Migration fixture created")
+		let report = ReportRecord(
+			projectID: projectID,
+			runID: runID,
+			title: "Migration Fixture Report",
+			markdown: "# Migration Fixture Report\n\nPersisted data survived migration.",
+			filePath: "/tmp/auditorium/reports/run.md"
+		)
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub",
+			keychainAccount: "auditorium-github-account"
+		)
+		context.insert(project)
+		context.insert(repository)
+		context.insert(issueTracker)
+		context.insert(ticket)
+		context.insert(queueItem)
+		context.insert(run)
+		context.insert(ticketRun)
+		context.insert(pullRequest)
+		context.insert(event)
+		context.insert(report)
+		context.insert(account)
+		try context.save()
+		return MigrationFixtureIDs(projectID: projectID, ticketID: ticketID, runID: runID, ticketRunID: ticketRunID)
 	}
 }
 
