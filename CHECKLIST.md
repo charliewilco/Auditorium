@@ -222,7 +222,7 @@ Acceptance gate:
 - [x] Implement per-ticket failure recovery.
 - [x] Snapshot queue and workflow policy per run.
 - [x] Reconcile run state on app relaunch.
-- [ ] Move real long-running work out of SwiftUI views and into isolated services/actors.
+- [x] Move real long-running work out of SwiftUI views and into isolated services/actors.
 
 Acceptance gate:
 

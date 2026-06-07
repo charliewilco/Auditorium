@@ -2582,12 +2582,14 @@ struct AuditoriumTests {
 			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
 		}
 		var earlyEvents: [RuntimeEventRecord] = []
-		for _ in 0..<100 {
+		let streamingDeadline = Date().addingTimeInterval(15)
+		while Date() < streamingDeadline {
 			earlyEvents = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
 			if earlyEvents.contains(where: { $0.message == "streamed_before_exit" }) {
 				break
 			}
-			try await Task.sleep(nanoseconds: 50_000_000)
+			await Task.yield()
+			try await Task.sleep(nanoseconds: 25_000_000)
 		}
 		_ = FileManager.default.createFile(atPath: releasePath, contents: Data())
 

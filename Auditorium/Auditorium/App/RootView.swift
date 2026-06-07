@@ -18,7 +18,7 @@ struct RootView: View {
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
 	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
-	@State private var orchestrator: Orchestrator?
+	@State private var runCoordinator: AppRunCoordinator?
 	@State private var didReconcileInterruptedRuns = false
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
@@ -106,14 +106,7 @@ struct RootView: View {
 			.frame(minWidth: 760, minHeight: 620)
 		}
 		.task(id: appState.selectedProjectID) {
-			if orchestrator == nil {
-				orchestrator = Orchestrator(
-					workspaceService: services.workspace,
-					runtimeDetection: services.runtimeDetection,
-					reportGenerator: services.reportGenerator,
-					providerRegistry: services.providerRegistry
-				)
-			}
+			_ = ensureRunCoordinator()
 			reconcileInterruptedRunsIfNeeded()
 			let activeProject = selectedProject ?? projects.first
 			runtimeHealth = await services.runtimeDetection.detect()
@@ -326,62 +319,42 @@ struct RootView: View {
 			return
 		}
 		appState.selectedDestination = .runs
-		orchestrator?.runQueue(projectID: project.id, concurrency: appState.queueConcurrency, context: modelContext)
+		ensureRunCoordinator().startQueue(project: project, concurrency: appState.queueConcurrency, context: modelContext)
 	}
 
 	private func cancelActiveRun() {
-		orchestrator?.cancel()
+		ensureRunCoordinator().cancelActiveRun()
 	}
 
 	private func dryRun() {
 		guard let project = selectedProject else { return }
-		let run = RunRecord(
-			projectID: project.id,
-			status: .completed,
-			totalTickets: projectQueueItems.filter { $0.isEnabled }.count,
-			summary: "Dry run completed. No workspaces or agents were started."
-		)
-		run.endedAt = .now
-		modelContext.insert(run)
-		let event = RuntimeEventRecord(
-			runID: run.id,
-			level: .success,
-			category: .orchestration,
-			message: "Dry run validated \(run.totalTickets) enabled queue items."
-		)
-		modelContext.insert(event)
 		do {
-			let markdown = services.reportGenerator.generate(
+			try ensureRunCoordinator().createDryRun(
 				project: project,
-				run: run,
-				ticketRuns: [],
+				queueItems: projectQueueItems,
 				tickets: projectTickets,
-				pullRequests: [],
-				events: [event]
+				context: modelContext
 			)
-			let reportURL = try services.reportGenerator.save(
-				markdown: markdown,
-				projectID: project.id,
-				runID: run.id,
-				workspace: services.workspace
-			)
-			run.reportMarkdown = markdown
-			modelContext.insert(
-				ReportRecord(
-					projectID: project.id,
-					runID: run.id,
-					title: "Dry Run \(run.id.uuidString.prefix(8))",
-					markdown: markdown,
-					filePath: reportURL.path()
-				)
-			)
-			try ModelIntegrityValidator.save(context: modelContext)
 		}
 		catch {
 			NSAlert(error: error).runModal()
 			return
 		}
 		appState.selectedDestination = .runs
+	}
+
+	private func ensureRunCoordinator() -> AppRunCoordinator {
+		if let runCoordinator {
+			return runCoordinator
+		}
+		let coordinator = AppRunCoordinator(
+			workspaceService: services.workspace,
+			runtimeDetection: services.runtimeDetection,
+			reportGenerator: services.reportGenerator,
+			providerRegistry: services.providerRegistry
+		)
+		runCoordinator = coordinator
+		return coordinator
 	}
 
 	private func clearQueue() {

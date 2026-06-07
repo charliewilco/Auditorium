@@ -325,6 +325,70 @@ struct AuditoriumCoreTests {
 		#expect(markdown.contains("[orchestration] Dry run validated 0 enabled queue items."))
 	}
 
+	@Test func appRunCoordinatorPersistsDryRunReportOutsideSwiftUIView() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let project = Project(
+			name: "Coordinator Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "101",
+			title: "Move run coordination",
+			body: "Dry-run persistence should live outside SwiftUI.",
+			status: .ready,
+			labels: ["architecture"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		let enabledItem = QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium)
+		let disabledItem = QueueItemRecord(ticketID: UUID(), projectID: project.id, position: 1, priority: .low, isEnabled: false)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(enabledItem)
+		context.insert(disabledItem)
+		try context.save()
+		let coordinator = AppRunCoordinator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator()
+		)
+
+		let run = try coordinator.createDryRun(
+			project: project,
+			queueItems: [enabledItem, disabledItem],
+			tickets: [ticket],
+			context: context
+		)
+
+		let persistedRun = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let event = try #require(context.fetch(FetchDescriptor<RuntimeEventRecord>()).first)
+		let report = try #require(context.fetch(FetchDescriptor<ReportRecord>()).first)
+
+		#expect(run.id == persistedRun.id)
+		#expect(persistedRun.status == .completed)
+		#expect(persistedRun.totalTickets == 1)
+		#expect(persistedRun.reportMarkdown.contains("Run Summary: Dry run completed. No workspaces or agents were started."))
+		#expect(event.message == "Dry run validated 1 enabled queue items.")
+		#expect(report.markdown == persistedRun.reportMarkdown)
+		#expect(FileManager.default.fileExists(atPath: report.filePath))
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(
