@@ -76,13 +76,11 @@ struct AuditoriumTests {
 		let suiteName = "AuditoriumTests-\(UUID().uuidString)"
 		let defaults = try #require(UserDefaults(suiteName: suiteName))
 		defer { defaults.removePersistentDomain(forName: suiteName) }
-		defaults.set(RuntimeIsolationLevel.mockOnly.rawValue, forKey: ApplicationSettingsKeys.runtimeIsolationLevel)
 		defaults.set("~/AuditoriumLogs", forKey: ApplicationSettingsKeys.logsDirectoryPath)
 		defaults.set("/tmp/AuditoriumReports", forKey: ApplicationSettingsKeys.reportsDirectoryPath)
 
 		let settings = ApplicationPathSettings.load(defaults: defaults)
 
-		#expect(settings.runtimeIsolationLevel == .mockOnly)
 		#expect(settings.logsDirectoryPath == "~/AuditoriumLogs")
 		#expect(settings.reportsDirectoryPath == "/tmp/AuditoriumReports")
 		#expect(
@@ -100,7 +98,6 @@ struct AuditoriumTests {
 		let reportsRoot = URL(fileURLWithPath: "/tmp/AuditoriumCustomReports")
 		let service = ApplicationWorkspaceService(rootDirectory: root) {
 			ApplicationPathSettings(
-				runtimeIsolationLevel: .localWorkspace,
 				logsDirectoryPath: logsRoot.path(),
 				reportsDirectoryPath: reportsRoot.path()
 			)
@@ -3537,30 +3534,6 @@ struct AuditoriumTests {
 		)
 
 		#expect(throws: RunSecurityPolicyError.filesystemWriteDisabled) {
-			try RunSecurityPolicy().validate(project: project, preferences: preferences)
-		}
-	}
-
-	@Test func runSecurityPolicyBlocksRuntimesOutsideIsolationLevel() throws {
-		let project = Project(
-			name: "Local Run",
-			repositoryProviderKind: .github,
-			repositoryName: "charliewilco/Auditorium",
-			repositoryURL: "https://github.com/charliewilco/Auditorium",
-			defaultBranch: "main",
-			issueProviderKind: .githubIssues,
-			runtimeProviderKind: .localWorkspace,
-			agentProviderKind: .mockAgent
-		)
-		let preferences = RunSecurityPreferences(
-			allowNetworkAccess: true,
-			allowFilesystemWrite: true,
-			requireRunConfirmation: true,
-			requirePullRequestConfirmation: true,
-			runtimeIsolationLevel: .mockOnly
-		)
-
-		#expect(throws: RunSecurityPolicyError.runtimeIsolationDisallowsProvider(.mockOnly, .localWorkspace)) {
 			try RunSecurityPolicy().validate(project: project, preferences: preferences)
 		}
 	}

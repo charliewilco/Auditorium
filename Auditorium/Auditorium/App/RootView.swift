@@ -24,8 +24,6 @@ struct RootView: View {
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
 	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
-	@AppStorage(ApplicationSettingsKeys.runtimeIsolationLevel) private var runtimeIsolationLevelRaw = RuntimeIsolationLevel.localWorkspace
-		.rawValue
 
 	var selectedProject: Project? {
 		guard let id = appState.selectedProjectID else { return nil }
@@ -294,8 +292,7 @@ struct RootView: View {
 			allowNetworkAccess: allowNetworkAccess,
 			allowFilesystemWrite: allowFilesystemWrite,
 			requireRunConfirmation: requireRunConfirmation,
-			requirePullRequestConfirmation: requirePROpenConfirmation,
-			runtimeIsolationLevel: RuntimeIsolationLevel(rawValue: runtimeIsolationLevelRaw) ?? .localWorkspace
+			requirePullRequestConfirmation: requirePROpenConfirmation
 		)
 		let policy = RunSecurityPolicy()
 		do {

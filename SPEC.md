@@ -771,7 +771,6 @@ Security settings:
 - Require confirmation before opening PRs.
 - Allow network access.
 - Allow filesystem writes.
-- Runtime isolation level.
 
 Settings must reflect enforced behavior, not only visual preferences.
 

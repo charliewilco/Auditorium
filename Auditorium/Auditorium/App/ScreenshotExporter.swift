@@ -403,7 +403,6 @@ private struct ScreenshotSettings: View {
 				ScreenshotToggle(title: "Require confirmation before opening PRs", isOn: true)
 				ScreenshotToggle(title: "Allow network access", isOn: false)
 				ScreenshotToggle(title: "Allow filesystem write", isOn: true)
-				ScreenshotField("Runtime isolation", "Mock isolated workspace")
 			}
 			ScreenshotPanel(title: "Accounts", symbol: "key") {
 				Text("Secret values are stored in Keychain under co.charliewil.Auditorium.")

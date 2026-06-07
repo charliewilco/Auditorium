@@ -29,8 +29,6 @@ struct SettingsContentView: View {
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
 	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
-	@AppStorage(ApplicationSettingsKeys.runtimeIsolationLevel) private var runtimeIsolationLevelRaw = RuntimeIsolationLevel.localWorkspace
-		.rawValue
 	@AppStorage("reportAutoSave") private var reportAutoSave = true
 	@AppStorage("logRetentionDays") private var logRetentionDays = 30
 	@AppStorage(ApplicationSettingsKeys.logsDirectoryPath) private var logsDirectoryPath = ""
@@ -106,14 +104,6 @@ struct SettingsContentView: View {
 					Toggle("Require confirmation before opening PRs", isOn: $requirePROpenConfirmation)
 					Toggle("Allow network access", isOn: $allowNetworkAccess)
 					Toggle("Allow filesystem write", isOn: $allowFilesystemWrite)
-					Picker("Runtime isolation", selection: $runtimeIsolationLevelRaw) {
-						ForEach(RuntimeIsolationLevel.allCases) { level in
-							Text(level.title).tag(level.rawValue)
-						}
-					}
-					Text(selectedRuntimeIsolationLevel.detail)
-						.font(.caption)
-						.foregroundStyle(.secondary)
 				}
 				settingsSection("Concurrency") {
 					Text("Per-project queue concurrency is controlled from the Queue screen.")
@@ -147,10 +137,6 @@ struct SettingsContentView: View {
 
 	private var runtimeProviderStatuses: [RuntimeProviderStatus] {
 		RuntimeDetectionService.runtimeProviderStatuses(from: runtimeHealth)
-	}
-
-	private var selectedRuntimeIsolationLevel: RuntimeIsolationLevel {
-		RuntimeIsolationLevel(rawValue: runtimeIsolationLevelRaw) ?? .localWorkspace
 	}
 
 	private var githubAuthenticationState: GitHubAuthenticationState {
