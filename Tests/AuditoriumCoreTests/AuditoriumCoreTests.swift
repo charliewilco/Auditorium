@@ -70,6 +70,101 @@ struct AuditoriumCoreTests {
 		Issue.record("Expected blank branch prefix to throw.")
 	}
 
+	@Test func workflowPolicyEditorBuffersValidProjectEditsBeforeSaving() throws {
+		let project = Project(
+			name: "Workflow Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		var editor = WorkflowPolicyEditorState(project: project)
+		let updatedMarkdown = """
+			---
+			concurrency: 5
+			max_retries: 1
+			branch_prefix: "codex"
+			run_tests: false
+			open_pull_request: true
+			---
+			Fix the selected issue.
+			"""
+
+		editor.draftMarkdown = updatedMarkdown
+
+		#expect(editor.hasProject)
+		#expect(editor.hasUnsavedChanges)
+		#expect(editor.canSave)
+		#expect(project.workflowPolicyMarkdown == WorkflowPolicy.defaultMarkdown)
+		try editor.apply(to: project, now: Date(timeIntervalSince1970: 42))
+
+		#expect(project.workflowPolicyMarkdown == updatedMarkdown)
+		#expect(project.updatedAt == Date(timeIntervalSince1970: 42))
+		#expect(editor.hasUnsavedChanges == false)
+	}
+
+	@Test func workflowPolicyEditorRejectsInvalidDrafts() throws {
+		let project = Project(
+			name: "Invalid Workflow",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		var editor = WorkflowPolicyEditorState(project: project)
+
+		editor.draftMarkdown = """
+			---
+			concurrency: 99
+			---
+			Prompt
+			"""
+
+		#expect(editor.isValid == false)
+		#expect(editor.canSave == false)
+		#expect(editor.validationError == "concurrency must be between 1 and 16.")
+		#expect(throws: WorkflowPolicyEditorError.invalidPolicy("concurrency must be between 1 and 16.")) {
+			try editor.apply(to: project)
+		}
+		#expect(project.workflowPolicyMarkdown == WorkflowPolicy.defaultMarkdown)
+	}
+
+	@Test func workflowPolicyEditorCanRestoreDefaultAndRevert() {
+		let customMarkdown = """
+			---
+			concurrency: 2
+			max_retries: 0
+			---
+			Custom prompt.
+			"""
+		let project = Project(
+			name: "Custom Workflow",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: customMarkdown
+		)
+		var editor = WorkflowPolicyEditorState(project: project)
+
+		editor.restoreDefault()
+		#expect(editor.draftMarkdown == WorkflowPolicy.defaultMarkdown)
+		#expect(editor.hasUnsavedChanges)
+
+		editor.revert()
+		#expect(editor.draftMarkdown == customMarkdown)
+		#expect(editor.hasUnsavedChanges == false)
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(

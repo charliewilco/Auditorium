@@ -344,7 +344,7 @@ Acceptance gate:
 
 - [x] Store default workflow policy markdown.
 - [x] Use workflow policy in mock prompts.
-- [ ] Add workflow editor UI.
+- [x] Add workflow editor UI.
 - [x] Parse YAML front matter.
 - [x] Validate policy values.
 - [~] Snapshot policy per run.

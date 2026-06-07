@@ -18,6 +18,7 @@ struct SettingsSceneView: View {
 }
 
 struct SettingsContentView: View {
+	let project: Project?
 	let runtimeHealth: [RuntimeHealthCheck]
 	let symphonyDoctorStatus: SymphonyDoctorStatus?
 	@Environment(\.modelContext) private var modelContext
@@ -34,6 +35,12 @@ struct SettingsContentView: View {
 	@AppStorage("logRetentionDays") private var logRetentionDays = 30
 	@AppStorage(ApplicationSettingsKeys.logsDirectoryPath) private var logsDirectoryPath = ""
 	@AppStorage(ApplicationSettingsKeys.reportsDirectoryPath) private var reportsDirectoryPath = ""
+
+	init(project: Project? = nil, runtimeHealth: [RuntimeHealthCheck], symphonyDoctorStatus: SymphonyDoctorStatus?) {
+		self.project = project
+		self.runtimeHealth = runtimeHealth
+		self.symphonyDoctorStatus = symphonyDoctorStatus
+	}
 
 	var body: some View {
 		ScrollView {
@@ -111,6 +118,9 @@ struct SettingsContentView: View {
 				settingsSection("Concurrency") {
 					Text("Per-project queue concurrency is controlled from the Queue screen.")
 						.foregroundStyle(.secondary)
+				}
+				settingsSection("Workflow") {
+					WorkflowPolicyEditorView(project: project)
 				}
 				settingsSection("Reports") {
 					Toggle("Save reports to project history", isOn: $reportAutoSave)

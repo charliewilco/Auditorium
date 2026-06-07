@@ -186,7 +186,7 @@ struct RootView: View {
 				reveal: revealReport
 			)
 		case .settings:
-			SettingsContentView(runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
+			SettingsContentView(project: selectedProject, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
 		}
 	}
 
