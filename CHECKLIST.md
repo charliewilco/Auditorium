@@ -277,7 +277,7 @@ Acceptance gate:
 - [x] Include validation/test output.
 - [ ] Include failure details and suggested actions.
 - [ ] Include PR/check status.
-- [ ] Add report golden tests.
+- [x] Add report golden tests.
 
 Acceptance gate:
 
@@ -394,7 +394,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Each command has help text, tests, and documented exit behavior.
+- [x] Each command has help text, tests, and documented exit behavior.
 
 ## 21. App And CLI Integration
 
@@ -428,7 +428,7 @@ Acceptance gate:
 - [x] Swift tests for cancellation.
 - [ ] Swift tests for bounded concurrency.
 - [x] Rust unit tests.
-- [ ] Rust integration tests.
+- [x] Rust integration tests.
 - [ ] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
 

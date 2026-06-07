@@ -701,6 +701,13 @@ async fn fetch_github_issue(repo: &str, issue: u64) -> Result<NormalizedIssue, S
         None,
     )
     .await?;
+    normalize_github_issue_payload(repo, &output)
+}
+
+fn normalize_github_issue_payload(
+    repo: &str,
+    output: &str,
+) -> Result<NormalizedIssue, SymphonyError> {
     #[derive(Deserialize)]
     struct GhLabel {
         name: String,
@@ -723,7 +730,7 @@ async fn fetch_github_issue(repo: &str, issue: u64) -> Result<NormalizedIssue, S
         created_at: Option<String>,
         updated_at: Option<String>,
     }
-    let issue: GhIssue = serde_json::from_str(&output)?;
+    let issue: GhIssue = serde_json::from_str(output)?;
     Ok(NormalizedIssue {
         identifier: format!("#{}", issue.number),
         repo: repo.to_string(),
@@ -1098,32 +1105,17 @@ async fn write_report(
         .workspace_root
         .join("reports")
         .join(format!("{run_id}.md"));
-    let changed_files_markdown = if changed_files.is_empty() {
-        "No changed files detected.".to_string()
-    } else {
-        changed_files
-            .iter()
-            .map(|file| format!("- `{file}`"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let validation_markdown = validation_output
-        .as_deref()
-        .filter(|output| !output.trim().is_empty())
-        .map(|output| format!("```text\n{}\n```", output.trim()))
-        .unwrap_or_else(|| "No validation command was run.".to_string());
-    let markdown = format!(
-        "# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Changed Files\n{}\n\n## Validation\n{}\n",
-        issue.repo,
-        issue.identifier,
-        issue.title,
-        workspace.display(),
-        pull_request_url.clone().unwrap_or_else(|| "None".to_string()),
-        started_at.to_rfc3339(),
-        ended_at.to_rfc3339(),
-        issue.description.clone().unwrap_or_default(),
-        changed_files_markdown,
-        validation_markdown
+    let markdown = render_report_markdown(
+        run_id,
+        issue,
+        workspace,
+        branch_name,
+        status,
+        pull_request_url.as_deref(),
+        changed_files,
+        validation_output.as_deref(),
+        started_at,
+        ended_at,
     );
     fs::write(&report_path, markdown).await?;
     Ok(RunReport {
@@ -1140,6 +1132,46 @@ async fn write_report(
         started_at,
         ended_at,
     })
+}
+
+fn render_report_markdown(
+    run_id: &str,
+    issue: &NormalizedIssue,
+    workspace: &Path,
+    branch_name: &str,
+    status: &str,
+    pull_request_url: Option<&str>,
+    changed_files: &[String],
+    validation_output: Option<&str>,
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+) -> String {
+    let changed_files_markdown = if changed_files.is_empty() {
+        "No changed files detected.".to_string()
+    } else {
+        changed_files
+            .iter()
+            .map(|file| format!("- `{file}`"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let validation_markdown = validation_output
+        .filter(|output| !output.trim().is_empty())
+        .map(|output| format!("```text\n{}\n```", output.trim()))
+        .unwrap_or_else(|| "No validation command was run.".to_string());
+    format!(
+        "# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Changed Files\n{}\n\n## Validation\n{}\n",
+        issue.repo,
+        issue.identifier,
+        issue.title,
+        workspace.display(),
+        pull_request_url.unwrap_or("None"),
+        started_at.to_rfc3339(),
+        ended_at.to_rfc3339(),
+        issue.description.clone().unwrap_or_default(),
+        changed_files_markdown,
+        validation_markdown
+    )
 }
 
 fn emit(
@@ -1267,6 +1299,15 @@ Hello {{ issue.title }}
     }
 
     #[test]
+    fn workspace_keys_prevent_path_traversal() {
+        assert_eq!(
+            workspace_key("../Issue 42/../../secrets"),
+            ".._issue_42_.._.._secrets"
+        );
+        assert_eq!(workspace_key("Fix Café 🔐"), "fix_caf___");
+    }
+
+    #[test]
     fn branch_names_are_deterministic() {
         let issue = mock_issue("charlie/auditorium", 42);
         assert!(branch_name("auditorium", &issue).starts_with("auditorium/issue-42-"));
@@ -1292,6 +1333,30 @@ Body
     }
 
     #[test]
+    fn resolves_config_defaults() {
+        let workflow = parse_workflow("Body").unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/project/WORKFLOW.md")).unwrap();
+
+        assert_eq!(config.tracker_kind, "github");
+        assert_eq!(config.polling_interval_ms, 30_000);
+        assert_eq!(
+            config.workspace_root,
+            PathBuf::from("/tmp/project/.auditorium/symphony-workspaces")
+        );
+        assert_eq!(config.max_concurrent_agents, 3);
+        assert_eq!(config.max_turns, 1);
+        assert_eq!(config.max_retry_backoff_ms, 300_000);
+        assert_eq!(config.branch_prefix, "auditorium");
+        assert_eq!(config.max_retries, 2);
+        assert!(config.run_tests);
+        assert!(config.open_pull_request);
+        assert_eq!(
+            config.codex_command,
+            "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
+        );
+    }
+
+    #[test]
     fn parses_changed_files_from_porcelain_status() {
         let files = parse_changed_files(" M README.md\n?? src/main.rs\nR  old.rs -> new.rs\n");
 
@@ -1309,5 +1374,267 @@ Body
             files,
             vec!["README.md", "symphony/src/lib.rs", "WORKFLOW.md"]
         );
+    }
+
+    #[test]
+    fn rejects_non_github_tracker_for_v0() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  kind: linear
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert!(matches!(error, SymphonyError::InvalidConfig(_)));
+        assert!(error.to_string().contains("tracker.kind must be github"));
+    }
+
+    #[test]
+    fn rejects_zero_concurrency() {
+        let workflow = parse_workflow(
+            r#"---
+agent:
+  max_concurrent_agents: 0
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("agent.max_concurrent_agents must be positive"));
+    }
+
+    #[test]
+    fn rejects_empty_codex_command() {
+        let workflow = parse_workflow(
+            r#"---
+codex:
+  command: ""
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("codex.command must not be empty"));
+    }
+
+    #[test]
+    fn rejects_zero_max_turns() {
+        let workflow = parse_workflow(
+            r#"---
+agent:
+  max_turns: 0
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("agent.max_turns must be positive"));
+    }
+
+    #[test]
+    fn normalizes_github_issue_payload() {
+        let issue = normalize_github_issue_payload(
+            "acme/app",
+            r#"{
+  "id": "I_kwDOExample",
+  "number": 42,
+  "title": "Fix OAuth",
+  "body": "Use device flow.",
+  "url": "https://github.com/acme/app/issues/42",
+  "labels": [{ "name": "Bug" }, { "name": "Needs Review" }],
+  "assignees": [{ "login": "charlie" }],
+  "state": "OPEN",
+  "createdAt": "2026-06-01T12:00:00Z",
+  "updatedAt": "2026-06-02T12:00:00Z"
+}"#,
+        )
+        .unwrap();
+
+        assert_eq!(issue.id, "I_kwDOExample");
+        assert_eq!(issue.identifier, "#42");
+        assert_eq!(issue.repo, "acme/app");
+        assert_eq!(issue.number, 42);
+        assert_eq!(issue.title, "Fix OAuth");
+        assert_eq!(issue.description.as_deref(), Some("Use device flow."));
+        assert_eq!(
+            issue.url.as_deref(),
+            Some("https://github.com/acme/app/issues/42")
+        );
+        assert_eq!(issue.labels, vec!["bug", "needs review"]);
+        assert_eq!(issue.assignees, vec!["charlie"]);
+        assert_eq!(issue.state, "open");
+        assert_eq!(issue.created_at.as_deref(), Some("2026-06-01T12:00:00Z"));
+        assert_eq!(issue.updated_at.as_deref(), Some("2026-06-02T12:00:00Z"));
+    }
+
+    #[test]
+    fn render_prompt_substitutes_issue_fields_and_policy() {
+        let issue = NormalizedIssue {
+            title: "Fix onboarding".to_string(),
+            description: Some("OAuth button is unclear.".to_string()),
+            url: Some("https://github.com/acme/app/issues/7".to_string()),
+            ..mock_issue("acme/app", 7)
+        };
+        let workflow = parse_workflow(
+            r#"---
+branch_prefix: "tickets"
+run_tests: false
+---
+Handle {{ issue.identifier }} in {{ issue.repo }}: {{ issue.title }}
+{{ issue.description }}
+{{ issue.url }}
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        let prompt = render_prompt(&workflow.prompt_template, &issue, &config);
+
+        assert!(prompt.contains("Handle #7 in acme/app: Fix onboarding"));
+        assert!(prompt.contains("OAuth button is unclear."));
+        assert!(prompt.contains("https://github.com/acme/app/issues/7"));
+        assert!(prompt.contains("Branch prefix: tickets"));
+        assert!(prompt.contains("Run tests: false"));
+    }
+
+    #[tokio::test]
+    async fn prepare_workspace_creates_ticket_and_reports_directories() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workflow = parse_workflow(&format!(
+            r#"---
+workspace:
+  root: "{}"
+---
+Body
+"#,
+            tempdir.path().join("workspaces").display()
+        ))
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let issue = mock_issue("acme/app", 11);
+
+        let workspace = prepare_workspace(&config, &issue).await.unwrap();
+
+        assert!(workspace.ends_with("_11"));
+        assert!(workspace.is_dir());
+        assert!(config.workspace_root.join("reports").is_dir());
+    }
+
+    #[tokio::test]
+    async fn write_report_persists_reviewable_markdown() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workflow = parse_workflow(&format!(
+            r#"---
+workspace:
+  root: "{}"
+---
+Body
+"#,
+            tempdir.path().join("workspaces").display()
+        ))
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        fs::create_dir_all(config.workspace_root.join("reports"))
+            .await
+            .unwrap();
+        let issue = mock_issue("acme/app", 12);
+        let workspace = config.workspace_root.join("#12");
+
+        let report = write_report(
+            &config,
+            "run-12",
+            &issue,
+            &workspace,
+            "auditorium/issue-12-mock-auditorium-issue",
+            "completed",
+            Some("https://github.com/acme/app/pull/34".to_string()),
+            &["README.md".to_string(), "src/lib.rs".to_string()],
+            Some("tests passed".to_string()),
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        let markdown = fs::read_to_string(&report.report_path).await.unwrap();
+
+        assert_eq!(report.status, "completed");
+        assert!(markdown.contains("# Auditorium Symphony Run"));
+        assert!(markdown.contains("Pull Request: https://github.com/acme/app/pull/34"));
+        assert!(markdown.contains("- `README.md`"));
+        assert!(markdown.contains("tests passed"));
+    }
+
+    #[test]
+    fn render_report_markdown_matches_golden_output() {
+        let issue = NormalizedIssue {
+            description: Some("The setup flow needs a clearer credential state.".to_string()),
+            ..mock_issue("acme/app", 12)
+        };
+        let started_at = DateTime::parse_from_rfc3339("2026-06-07T01:02:03Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ended_at = DateTime::parse_from_rfc3339("2026-06-07T01:04:05Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let markdown = render_report_markdown(
+            "run-12",
+            &issue,
+            Path::new("/tmp/workspaces/_12"),
+            "auditorium/issue-12-mock-auditorium-issue",
+            "completed",
+            None,
+            &[],
+            None,
+            started_at,
+            ended_at,
+        );
+
+        assert_eq!(
+            markdown,
+            "# Auditorium Symphony Run\n\nRun ID: run-12\nRepository: acme/app\nIssue: #12 Mock Auditorium issue\nStatus: completed\nBranch: auditorium/issue-12-mock-auditorium-issue\nWorkspace: /tmp/workspaces/_12\nPull Request: None\nStarted: 2026-06-07T01:02:03+00:00\nEnded: 2026-06-07T01:04:05+00:00\n\n## Issue\nThe setup flow needs a clearer credential state.\n\n## Changed Files\nNo changed files detected.\n\n## Validation\nNo validation command was run.\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_validation_returns_combined_output() {
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let output = run_validation(
+            "printf 'stdout-line'; printf 'stderr-line' >&2",
+            tempdir.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(output, "stdout-line\nstderr-line");
+    }
+
+    #[tokio::test]
+    async fn run_validation_failure_uses_stable_error_code() {
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let error = run_validation("printf 'nope' >&2; exit 13", tempdir.path())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "command_failed");
+        assert_eq!(error.exit_code(), 30);
+        assert!(error.to_string().contains("nope"));
     }
 }

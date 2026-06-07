@@ -363,6 +363,27 @@ For real runs, make sure:
 - The target repository is accessible.
 - The working policy in `WORKFLOW.md` is appropriate for the repository.
 
+### `symphony` Command Contract
+
+Every `symphony` command supports `--help` through Clap-generated help text. The v0 commands are:
+
+- `symphony init`
+- `symphony doctor`
+- `symphony run`
+- `symphony daemon`
+- `symphony report`
+
+The CLI writes human-oriented status to stderr unless `--json` is supported and enabled. JSON run mode emits newline-delimited JSON events followed by a final JSON report payload.
+
+Exit behavior is stable by error class:
+
+- `20`: missing workflow file.
+- `21`: malformed workflow front matter.
+- `22`: invalid workflow/configuration or failed `doctor` preflight.
+- `30`: child command failed, including Git, GitHub CLI, validation, or Codex.
+- `40`: filesystem or process I/O failure.
+- `41`: JSON serialization/deserialization failure.
+
 ## `WORKFLOW.md`
 
 Auditorium projects and the CLI both use a workflow policy concept. The default policy describes concurrency, retry behavior, branch naming, testing, pull request creation, and agent instructions.
