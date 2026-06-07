@@ -156,6 +156,50 @@ pub struct NormalizedIssue {
     pub updated_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonProjectState {
+    pub project: String,
+    pub repository: Option<String>,
+    #[serde(default)]
+    pub issue_query: Option<String>,
+    #[serde(default)]
+    pub runs: Vec<DaemonRunState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonRunState {
+    pub issue_identifier: String,
+    pub run_state: SchedulerRunState,
+    #[serde(default)]
+    pub retry_count: usize,
+    #[serde(default)]
+    pub not_before_tick: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulerPlan {
+    pub project: String,
+    pub tick: u64,
+    pub polled_issue_count: usize,
+    pub running_count: usize,
+    pub capacity: usize,
+    pub eligible_count: usize,
+    pub dispatches: Vec<SchedulerDispatch>,
+    pub skipped_terminal_count: usize,
+    pub skipped_running_count: usize,
+    pub skipped_blocked_count: usize,
+    pub skipped_canceled_count: usize,
+    pub retry_ready_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulerDispatch {
+    pub issue_identifier: String,
+    pub issue_number: u64,
+    pub repo: String,
+    pub retry_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub run_id: String,
@@ -186,7 +230,8 @@ pub struct WorkspaceManifest {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum SchedulerRunState {
     Pending,
     Running,
@@ -537,7 +582,8 @@ pub async fn daemon(options: DaemonOptions) -> Result<(), SymphonyError> {
     loop {
         tick += 1;
         let loaded = loader.load(&options.workflow).await?;
-        emit_daemon_tick(&options, tick, &loaded)?;
+        let plan = daemon_scheduler_plan(&options, tick as u64, &loaded.config).await?;
+        emit_daemon_tick(&options, tick, &loaded, plan.as_ref())?;
 
         if max_ticks.is_some_and(|limit| tick >= limit) || !options.watch {
             return Ok(());
@@ -595,6 +641,7 @@ fn emit_daemon_tick(
     options: &DaemonOptions,
     tick: usize,
     loaded: &LoadedDaemonWorkflow,
+    plan: Option<&SchedulerPlan>,
 ) -> Result<(), SymphonyError> {
     emit(
         options.json,
@@ -608,9 +655,34 @@ fn emit_daemon_tick(
             "workflowRevision": loaded.revision,
             "workflowReloaded": loaded.reloaded,
             "pollingIntervalMs": loaded.config.polling_interval_ms,
-            "maxConcurrentAgents": loaded.config.max_concurrent_agents
+            "maxConcurrentAgents": loaded.config.max_concurrent_agents,
+            "scheduler": plan
         }),
     )
+}
+
+async fn daemon_scheduler_plan(
+    options: &DaemonOptions,
+    tick: u64,
+    config: &WorkflowConfig,
+) -> Result<Option<SchedulerPlan>, SymphonyError> {
+    let Some(project_state) = load_daemon_project_state(config, &options.project).await? else {
+        return Ok(None);
+    };
+    let Some(repository) = project_state.repository.as_deref() else {
+        return Ok(None);
+    };
+
+    let issues = fetch_github_issues(repository, project_state.issue_query.as_deref()).await?;
+    let plan = plan_scheduler_tick(
+        &project_state.project,
+        tick,
+        &issues,
+        &project_state.runs,
+        config,
+    );
+    write_scheduler_plan(config, &options.project, &plan).await?;
+    Ok(Some(plan))
 }
 
 pub async fn print_report(
@@ -628,6 +700,55 @@ pub async fn print_report(
     let markdown = fs::read_to_string(&path).await?;
     print!("{markdown}");
     Ok(())
+}
+
+pub fn daemon_project_dir(config: &WorkflowConfig, project: &str) -> PathBuf {
+    config
+        .workspace_root
+        .join("projects")
+        .join(workspace_key(project))
+}
+
+pub fn daemon_project_state_path(config: &WorkflowConfig, project: &str) -> PathBuf {
+    daemon_project_dir(config, project).join("project-state.json")
+}
+
+pub fn daemon_scheduler_plan_path(config: &WorkflowConfig, project: &str) -> PathBuf {
+    daemon_project_dir(config, project).join("last-scheduler-plan.json")
+}
+
+async fn load_daemon_project_state(
+    config: &WorkflowConfig,
+    project: &str,
+) -> Result<Option<DaemonProjectState>, SymphonyError> {
+    let path = daemon_project_state_path(config, project);
+    let data = match fs::read_to_string(&path).await {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(SymphonyError::Io(error)),
+    };
+    let state: DaemonProjectState = serde_json::from_str(&data)?;
+    if state.project != project {
+        return Err(SymphonyError::InvalidConfig(format!(
+            "daemon project state at {} is for project {}, expected {project}",
+            path.display(),
+            state.project
+        )));
+    }
+    Ok(Some(state))
+}
+
+async fn write_scheduler_plan(
+    config: &WorkflowConfig,
+    project: &str,
+    plan: &SchedulerPlan,
+) -> Result<PathBuf, SymphonyError> {
+    let path = daemon_scheduler_plan_path(config, project);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(plan)?).await?;
+    Ok(path)
 }
 
 pub async fn load_workflow(path: &Path) -> Result<WorkflowDefinition, SymphonyError> {
@@ -946,6 +1067,88 @@ fn normalize_github_issue_payload(
     })
 }
 
+async fn fetch_github_issues(
+    repo: &str,
+    issue_query: Option<&str>,
+) -> Result<Vec<NormalizedIssue>, SymphonyError> {
+    let mut args = vec![
+        "issue".to_string(),
+        "list".to_string(),
+        "--repo".to_string(),
+        repo.to_string(),
+        "--state".to_string(),
+        "all".to_string(),
+        "--limit".to_string(),
+        "100".to_string(),
+        "--json".to_string(),
+        "id,number,title,body,url,labels,assignees,state,createdAt,updatedAt".to_string(),
+    ];
+    if let Some(query) = issue_query.filter(|query| !query.trim().is_empty()) {
+        args.push("--search".to_string());
+        args.push(query.to_string());
+    }
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let output = command_stdout("gh", &arg_refs, None).await?;
+    normalize_github_issues_payload(repo, &output)
+}
+
+fn normalize_github_issues_payload(
+    repo: &str,
+    output: &str,
+) -> Result<Vec<NormalizedIssue>, SymphonyError> {
+    #[derive(Deserialize)]
+    struct GhLabel {
+        name: String,
+    }
+    #[derive(Deserialize)]
+    struct GhAssignee {
+        login: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GhIssue {
+        id: String,
+        number: u64,
+        title: String,
+        body: Option<String>,
+        url: Option<String>,
+        #[serde(default)]
+        labels: Vec<GhLabel>,
+        #[serde(default)]
+        assignees: Vec<GhAssignee>,
+        state: String,
+        created_at: Option<String>,
+        updated_at: Option<String>,
+    }
+
+    let issues: Vec<GhIssue> = serde_json::from_str(output)?;
+    Ok(issues
+        .into_iter()
+        .map(|issue| NormalizedIssue {
+            identifier: format!("#{}", issue.number),
+            repo: repo.to_string(),
+            number: issue.number,
+            id: issue.id,
+            title: issue.title,
+            description: issue.body,
+            state: issue.state.to_lowercase(),
+            url: issue.url,
+            labels: issue
+                .labels
+                .into_iter()
+                .map(|label| label.name.to_lowercase())
+                .collect(),
+            assignees: issue
+                .assignees
+                .into_iter()
+                .map(|assignee| assignee.login)
+                .collect(),
+            created_at: issue.created_at,
+            updated_at: issue.updated_at,
+        })
+        .collect())
+}
+
 async fn fetch_default_branch(repo: &str) -> Result<String, SymphonyError> {
     let output = command_stdout(
         "gh",
@@ -1174,6 +1377,94 @@ pub fn dispatch_batch(
         .take(capacity)
         .cloned()
         .collect()
+}
+
+pub fn plan_scheduler_tick(
+    project: &str,
+    tick: u64,
+    issues: &[NormalizedIssue],
+    run_states: &[DaemonRunState],
+    config: &WorkflowConfig,
+) -> SchedulerPlan {
+    let states_by_issue = run_states
+        .iter()
+        .map(|run| (run.issue_identifier.as_str(), run))
+        .collect::<BTreeMap<_, _>>();
+    let items = issues
+        .iter()
+        .map(|issue| {
+            let run = states_by_issue.get(issue.identifier.as_str());
+            SchedulerItem {
+                issue_identifier: issue.identifier.clone(),
+                issue_state: issue.state.clone(),
+                run_state: run
+                    .map(|run| run.run_state)
+                    .unwrap_or(SchedulerRunState::Pending),
+                retry_count: run.map(|run| run.retry_count).unwrap_or(0),
+                not_before_tick: run.map(|run| run.not_before_tick).unwrap_or(0),
+            }
+        })
+        .collect::<Vec<_>>();
+    let running_count = items
+        .iter()
+        .filter(|item| item.run_state == SchedulerRunState::Running)
+        .count();
+    let capacity = config.max_concurrent_agents.saturating_sub(running_count);
+    let dispatch_items = dispatch_batch(&items, config, running_count, tick);
+    let dispatches = dispatch_items
+        .iter()
+        .filter_map(|item| {
+            let issue = issues
+                .iter()
+                .find(|issue| issue.identifier == item.issue_identifier)?;
+            Some(SchedulerDispatch {
+                issue_identifier: issue.identifier.clone(),
+                issue_number: issue.number,
+                repo: issue.repo.clone(),
+                retry_count: item.retry_count,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    SchedulerPlan {
+        project: project.to_string(),
+        tick,
+        polled_issue_count: issues.len(),
+        running_count,
+        capacity,
+        eligible_count: items
+            .iter()
+            .filter(|item| is_dispatch_eligible(item, config, tick))
+            .count(),
+        dispatches,
+        skipped_terminal_count: items
+            .iter()
+            .filter(|item| {
+                config
+                    .terminal_states
+                    .contains(&item.issue_state.to_lowercase())
+            })
+            .count(),
+        skipped_running_count: items
+            .iter()
+            .filter(|item| item.run_state == SchedulerRunState::Running)
+            .count(),
+        skipped_blocked_count: items
+            .iter()
+            .filter(|item| item.run_state == SchedulerRunState::Blocked)
+            .count(),
+        skipped_canceled_count: items
+            .iter()
+            .filter(|item| item.run_state == SchedulerRunState::Canceled)
+            .count(),
+        retry_ready_count: items
+            .iter()
+            .filter(|item| {
+                item.run_state == SchedulerRunState::Failed
+                    && is_dispatch_eligible(item, config, tick)
+            })
+            .count(),
+    }
 }
 
 pub fn is_dispatch_eligible(item: &SchedulerItem, config: &WorkflowConfig, tick: u64) -> bool {
@@ -1752,6 +2043,100 @@ Body
     }
 
     #[test]
+    fn scheduler_plan_counts_dispatches_and_skip_reasons() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  kind: github
+  active_states: ["open"]
+  terminal_states: ["closed"]
+agent:
+  max_concurrent_agents: 3
+max_retries: 2
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let issues = vec![
+            normalized_issue(1, "open"),
+            normalized_issue(2, "open"),
+            normalized_issue(3, "open"),
+            normalized_issue(4, "open"),
+            normalized_issue(5, "closed"),
+        ];
+        let run_states = vec![
+            DaemonRunState {
+                issue_identifier: "#2".to_string(),
+                run_state: SchedulerRunState::Running,
+                retry_count: 0,
+                not_before_tick: 0,
+            },
+            DaemonRunState {
+                issue_identifier: "#3".to_string(),
+                run_state: SchedulerRunState::Failed,
+                retry_count: 1,
+                not_before_tick: 4,
+            },
+            DaemonRunState {
+                issue_identifier: "#4".to_string(),
+                run_state: SchedulerRunState::Blocked,
+                retry_count: 0,
+                not_before_tick: 0,
+            },
+        ];
+
+        let plan = plan_scheduler_tick("project-1", 4, &issues, &run_states, &config);
+
+        assert_eq!(plan.project, "project-1");
+        assert_eq!(plan.polled_issue_count, 5);
+        assert_eq!(plan.running_count, 1);
+        assert_eq!(plan.capacity, 2);
+        assert_eq!(plan.eligible_count, 2);
+        assert_eq!(plan.retry_ready_count, 1);
+        assert_eq!(plan.skipped_terminal_count, 1);
+        assert_eq!(plan.skipped_running_count, 1);
+        assert_eq!(plan.skipped_blocked_count, 1);
+        assert_eq!(
+            plan.dispatches
+                .iter()
+                .map(|dispatch| (dispatch.issue_identifier.as_str(), dispatch.retry_count))
+                .collect::<Vec<_>>(),
+            vec![("#1", 0), ("#3", 1)]
+        );
+    }
+
+    #[test]
+    fn normalizes_github_issue_list_payload() {
+        let issues = normalize_github_issues_payload(
+            "acme/app",
+            r#"[
+  {
+    "id": "I_1",
+    "number": 42,
+    "title": "Ship it",
+    "body": "Issue body",
+    "url": "https://github.com/acme/app/issues/42",
+    "labels": [{"name": "Ready"}],
+    "assignees": [{"login": "octocat"}],
+    "state": "OPEN",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-02T00:00:00Z"
+  }
+]"#,
+        )
+        .unwrap();
+
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].identifier, "#42");
+        assert_eq!(issues[0].repo, "acme/app");
+        assert_eq!(issues[0].state, "open");
+        assert_eq!(issues[0].labels, vec!["ready"]);
+        assert_eq!(issues[0].assignees, vec!["octocat"]);
+    }
+
+    #[test]
     fn rejects_non_github_tracker_for_v0() {
         let workflow = parse_workflow(
             r#"---
@@ -2137,6 +2522,23 @@ Prompt
             run_state,
             retry_count,
             not_before_tick,
+        }
+    }
+
+    fn normalized_issue(number: u64, state: &str) -> NormalizedIssue {
+        NormalizedIssue {
+            id: format!("I_{number}"),
+            identifier: format!("#{number}"),
+            repo: "acme/app".to_string(),
+            number,
+            title: format!("Issue {number}"),
+            description: None,
+            state: state.to_string(),
+            url: Some(format!("https://github.com/acme/app/issues/{number}")),
+            labels: Vec::new(),
+            assignees: Vec::new(),
+            created_at: None,
+            updated_at: None,
         }
     }
 }

@@ -381,6 +381,8 @@ The CLI writes human-oriented status to stderr unless `--json` is supported and 
 
 `symphony daemon` runs one scheduling tick by default. Use `--watch` to keep the daemon alive and reload `WORKFLOW.md` before each tick. `--max-ticks` and `--poll-interval-ms` make watch mode deterministic for smoke tests and local validation.
 
+When a project handoff file exists at `<workspace.root>/projects/<project-id>/project-state.json`, `symphony daemon --project <project-id>` reads it, polls GitHub issues for the configured repository with `gh issue list`, applies workflow concurrency/retry policy, emits the scheduler plan in JSON mode, and writes the latest plan to `last-scheduler-plan.json` beside the handoff file.
+
 Exit behavior is stable by error class:
 
 - `20`: missing workflow file.
