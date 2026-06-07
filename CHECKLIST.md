@@ -275,8 +275,8 @@ Acceptance gate:
 - [ ] Verify copy/export/reveal manually.
 - [x] Include accurate changed files.
 - [x] Include validation/test output.
-- [ ] Include failure details and suggested actions.
-- [ ] Include PR/check status.
+- [x] Include failure details and suggested actions.
+- [x] Include PR/check status.
 - [x] Add report golden tests.
 
 Acceptance gate:
@@ -419,6 +419,7 @@ Acceptance gate:
 - [x] Swift tests for integrity-enforced saves blocking persisted secret material.
 - [x] Swift tests for on-disk SwiftData migration survival.
 - [x] Swift tests for report generation.
+- [x] Swift tests for report failure guidance and PR/check status.
 - [x] Swift tests for workspace paths.
 - [x] Swift tests for provider normalization.
 - [x] Swift tests for source-provider injection in mock orchestration.

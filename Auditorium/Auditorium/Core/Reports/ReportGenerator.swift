@@ -32,19 +32,26 @@ struct ReportGenerator {
 		Success Rate: \(Int(successRate * 100))%
 
 		## Pull Requests
-		| Ticket | PR | Status | Confidence |
-		|---|---|---|---|
+		| Ticket | PR | PR Status | Checks | Ticket Status | Confidence |
+		|---|---|---|---|---|---|
 		"""
 
+		var pullRequestRows = 0
 		for ticketRun in ticketRuns where ticketRun.pullRequestURL != nil {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
-			markdown += "\n| \(ticket?.externalID ?? "Unknown") | \(ticketRun.pullRequestURL ?? "") | \(ticketRun.status.title) | \(Int(ticketRun.confidence * 100))% |"
+			let pullRequest = pullRequests.first { $0.ticketRunID == ticketRun.id }
+			markdown += "\n| \(ticket?.externalID ?? "Unknown") | \(pullRequest?.url ?? ticketRun.pullRequestURL ?? "") | \(pullRequest?.status.title ?? "Unknown") | \(pullRequest?.checksStatus.title ?? "Unknown") | \(ticketRun.status.title) | \(Int(ticketRun.confidence * 100))% |"
+			pullRequestRows += 1
+		}
+		if pullRequestRows == 0 {
+			markdown += "\n| None | None | None | None | None | 0% |"
 		}
 
 		markdown += "\n\n## Completed Tickets"
 		for ticketRun in ticketRuns where ticketRun.status == .completed || ticketRun.status == .needsReview {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
-			markdown += completedSection(ticketRun: ticketRun, ticket: ticket)
+			let pullRequest = pullRequests.first { $0.ticketRunID == ticketRun.id }
+			markdown += completedSection(ticketRun: ticketRun, ticket: ticket, pullRequest: pullRequest)
 		}
 
 		markdown += "\n\n## Failed Tickets"
@@ -58,6 +65,8 @@ struct ReportGenerator {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
 			markdown += blockedSection(ticketRun: ticketRun, ticket: ticket)
 		}
+
+		markdown += suggestedActionsSection(ticketRuns: ticketRuns, tickets: tickets, pullRequests: pullRequests)
 
 		markdown += "\n\n## Timeline"
 		for event in events.sorted(by: { $0.timestamp < $1.timestamp }) {
@@ -77,13 +86,15 @@ struct ReportGenerator {
 		return url
 	}
 
-	private func completedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?) -> String {
+	private func completedSection(ticketRun: TicketRunRecord, ticket: TicketRecord?, pullRequest: PullRequestRecord?) -> String {
 		"""
 
 		### \(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")
 		Status: \(ticketRun.status.title)
 		Branch: \(ticketRun.branchName)
 		Pull Request: \(ticketRun.pullRequestURL ?? "None")
+		PR Status: \(pullRequest?.status.title ?? "None")
+		Checks: \(pullRequest?.checksStatus.title ?? "None")
 		Duration: \(formatDuration((ticketRun.endedAt ?? .now).timeIntervalSince(ticketRun.startedAt ?? .now)))
 		Confidence: \(Int(ticketRun.confidence * 100))%
 		#### What changed
@@ -117,6 +128,32 @@ struct ReportGenerator {
 		Blocked because: \(ticketRun.failureReason ?? "The agent needs more information.")
 		Suggested next action: Resolve the missing decision, then retry this ticket.
 		"""
+	}
+
+	private func suggestedActionsSection(ticketRuns: [TicketRunRecord], tickets: [TicketRecord], pullRequests: [PullRequestRecord]) -> String {
+		var actions: [String] = []
+		for ticketRun in ticketRuns {
+			let ticket = tickets.first { $0.id == ticketRun.ticketID }
+			let label = "\(ticket?.externalID ?? "TICKET"): \(ticket?.title ?? "Unknown")"
+			switch ticketRun.status {
+			case .failed:
+				actions.append("- \(label): inspect failure reason `\(ticketRun.failureReason ?? "Unknown failure")`, fix the underlying issue, then retry.")
+			case .blocked:
+				actions.append("- \(label): resolve the blocker `\(ticketRun.failureReason ?? "Needs more information")`, then retry.")
+			case .completed where ticketRun.pullRequestURL == nil:
+				actions.append("- \(label): review the run summary because the agent completed without opening a pull request.")
+			case .needsReview:
+				if let pullRequest = pullRequests.first(where: { $0.ticketRunID == ticketRun.id }), pullRequest.checksStatus == .failed {
+					actions.append("- \(label): review failed checks on \(pullRequest.url) before merging.")
+				}
+			default:
+				break
+			}
+		}
+		if actions.isEmpty {
+			actions.append("- Review opened pull requests and reports before merging. Auditorium v0 never auto-merges.")
+		}
+		return "\n\n## Suggested Actions\n" + actions.joined(separator: "\n")
 	}
 
 	private func formatDuration(_ seconds: TimeInterval) -> String {

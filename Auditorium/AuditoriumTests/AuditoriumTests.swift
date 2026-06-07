@@ -1101,12 +1101,115 @@ struct AuditoriumTests {
 			sourceProjectID: project.id
 		)
 		let ticketRun = TicketRunRecord(runID: run.id, ticketID: ticket.id, branchName: "auditorium/bur-101", status: .needsReview, pullRequestURL: "https://example.com/pr/101", summary: "Done", confidence: 0.9)
-		let markdown = ReportGenerator().generate(project: project, run: run, ticketRuns: [ticketRun], tickets: [ticket], pullRequests: [], events: [])
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: ticketRun.id,
+			title: "BUR-101: Fix OAuth refresh race condition",
+			url: "https://example.com/pr/101",
+			branchName: "auditorium/bur-101",
+			targetBranch: "next",
+			status: .open,
+			checksStatus: .passed
+		)
+		let markdown = ReportGenerator().generate(project: project, run: run, ticketRuns: [ticketRun], tickets: [ticket], pullRequests: [pullRequest], events: [])
 
 		#expect(markdown.contains("# Auditorium Run Report"))
 		#expect(markdown.contains("## Pull Requests"))
 		#expect(markdown.contains("BUR-101"))
 		#expect(markdown.contains("https://example.com/pr/101"))
+		#expect(markdown.contains("| BUR-101 | https://example.com/pr/101 | Open | Passed | Needs Review | 90% |"))
+		#expect(markdown.contains("PR Status: Open"))
+		#expect(markdown.contains("Checks: Passed"))
+	}
+
+	@Test func reportGenerationIncludesFailureGuidanceAndCheckStatusActions() throws {
+		let project = Project(
+			name: "Review Flow",
+			repositoryProviderKind: .github,
+			repositoryName: "charlie/review-flow",
+			repositoryURL: "https://github.com/charlie/review-flow",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let run = RunRecord(projectID: project.id, status: .completedWithFailures, totalTickets: 3, completedTickets: 2, failedTickets: 1, pullRequestsCreated: 1)
+		run.endedAt = .now
+		let reviewTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "201",
+			title: "Review failed checks",
+			body: "Body",
+			status: .needsReview,
+			labels: ["ci"],
+			assignee: nil,
+			priority: .high,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: project.id
+		)
+		let failedTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "202",
+			title: "Handle failure",
+			body: "Body",
+			status: .failed,
+			labels: ["tests"],
+			assignee: nil,
+			priority: .high,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 5,
+			sourceProjectID: project.id
+		)
+		let noChangeTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "203",
+			title: "No diff needed",
+			body: "Body",
+			status: .completed,
+			labels: ["docs"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		let reviewRun = TicketRunRecord(runID: run.id, ticketID: reviewTicket.id, branchName: "auditorium/201", status: .needsReview, pullRequestURL: "https://example.com/pr/201", summary: "Needs CI review.", confidence: 0.8)
+		let failedRun = TicketRunRecord(runID: run.id, ticketID: failedTicket.id, status: .failed, retryCount: 1, failureReason: "Unit tests failed", confidence: 0.2)
+		let noChangeRun = TicketRunRecord(runID: run.id, ticketID: noChangeTicket.id, status: .completed, summary: "No code change was needed.", confidence: 0.7)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: reviewRun.id,
+			title: "201: Review failed checks",
+			url: "https://example.com/pr/201",
+			branchName: "auditorium/201",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .failed
+		)
+
+		let markdown = ReportGenerator().generate(
+			project: project,
+			run: run,
+			ticketRuns: [reviewRun, failedRun, noChangeRun],
+			tickets: [reviewTicket, failedTicket, noChangeTicket],
+			pullRequests: [pullRequest],
+			events: []
+		)
+
+		#expect(markdown.contains("| 201 | https://example.com/pr/201 | Open | Failed | Needs Review | 80% |"))
+		#expect(markdown.contains("Failure reason: Unit tests failed"))
+		#expect(markdown.contains("Suggested next action: Inspect the failure and retry after addressing the blocker."))
+		#expect(markdown.contains("## Suggested Actions"))
+		#expect(markdown.contains("201: Review failed checks: review failed checks on https://example.com/pr/201 before merging."))
+		#expect(markdown.contains("202: Handle failure: inspect failure reason `Unit tests failed`, fix the underlying issue, then retry."))
+		#expect(markdown.contains("203: No diff needed: review the run summary because the agent completed without opening a pull request."))
 	}
 
 	@Test func ticketInspectorStateReflectsCurrentRunState() {
