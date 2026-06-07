@@ -84,6 +84,7 @@ final class Orchestrator {
 
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 		let run = RunRecord(projectID: projectID, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets.")
+		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Run started with bounded concurrency \(plan.concurrency)."))
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
@@ -155,6 +156,7 @@ final class Orchestrator {
 		)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex.")
+		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Local Workspace Codex run started with bounded concurrency \(plan.concurrency)."))
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
@@ -220,6 +222,7 @@ final class Orchestrator {
 		try plan.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with symphony.")
+		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "symphony run started."))
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))

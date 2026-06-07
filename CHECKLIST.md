@@ -161,7 +161,7 @@ Acceptance gate:
 - [x] Add focused unit test for queue ordering.
 - [ ] Add drag-and-drop verification.
 - [ ] Add multi-select queue actions.
-- [ ] Add per-run queue snapshot.
+- [x] Add per-run queue snapshot.
 - [x] Prevent duplicate queue items reliably across all entry points.
 
 Acceptance gate:

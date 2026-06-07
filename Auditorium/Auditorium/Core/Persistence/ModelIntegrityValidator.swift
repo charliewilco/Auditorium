@@ -158,6 +158,7 @@ private extension ModelIntegrityValidator {
 				issues.append(ModelIntegrityIssue(model: "RunRecord", id: id, field: "totalTickets", reason: "terminal ticket counts exceed totalTickets"))
 			}
 			scanSecrets([
+				("queueSnapshotJSON", record.queueSnapshotJSON),
 				("reportMarkdown", record.reportMarkdown),
 				("summary", record.summary)
 			], model: "RunRecord", id: id, issues: &issues)

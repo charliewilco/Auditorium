@@ -102,6 +102,17 @@ struct AuditoriumCoreTests {
 		#expect(plan.batches.map(\.count) == [2])
 	}
 
+	@Test func runRecordPersistsQueueSnapshotJSON() {
+		let first = QueueRunSnapshot(id: UUID(), ticketID: UUID(), position: 0, priority: .high, concurrencyGroup: "ui")
+		let second = QueueRunSnapshot(id: UUID(), ticketID: UUID(), position: 1, priority: .low, concurrencyGroup: "backend")
+		let run = RunRecord(projectID: UUID())
+
+		run.queueSnapshot = [first, second]
+
+		#expect(run.queueSnapshotJSON.contains(first.ticketID.uuidString))
+		#expect(run.queueSnapshot == [first, second])
+	}
+
 	@Test func workspaceCleanupRemovesOnlyOwnedTerminalWorkspaces() throws {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }

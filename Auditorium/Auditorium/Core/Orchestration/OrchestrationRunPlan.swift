@@ -1,6 +1,6 @@
 import Foundation
 
-struct QueueRunSnapshot: Equatable, Sendable, Identifiable {
+struct QueueRunSnapshot: Codable, Equatable, Sendable, Identifiable {
 	let id: UUID
 	let ticketID: UUID
 	let position: Int

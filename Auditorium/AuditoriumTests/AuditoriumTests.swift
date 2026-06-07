@@ -402,6 +402,49 @@ struct AuditoriumTests {
 		#expect(try context.fetch(FetchDescriptor<ProviderAccountRecord>()).isEmpty)
 	}
 
+	@Test func runRecordPersistsQueueSnapshotBeforeQueueMutations() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = try DemoDataSeeder(workspaceService: workspace).openDemoProject(in: context)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+			.filter { $0.sourceProjectID == projectID }
+			.sorted { $0.externalID < $1.externalID }
+		let firstTicket = try #require(tickets.first)
+		let secondTicket = try #require(tickets.dropFirst().first)
+		let firstQueueItem = QueueItemRecord(ticketID: firstTicket.id, projectID: projectID, position: 10, priority: .high, concurrencyGroup: "ui")
+		let secondQueueItem = QueueItemRecord(ticketID: secondTicket.id, projectID: projectID, position: 20, priority: .low, concurrencyGroup: "backend")
+		context.insert(firstQueueItem)
+		context.insert(secondQueueItem)
+		try context.save()
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockSourceProvider: StaticSourceCodeProvider(kind: .github),
+			mockAgentProvider: StaticAgentProvider(events: [
+				AgentEvent(level: .success, category: .agent, message: "done", summary: "Done.", outcome: .completed)
+			])
+		)
+
+		try await orchestrator.execute(projectID: projectID, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let snapshot = run.queueSnapshot
+		firstQueueItem.position = 99
+		firstQueueItem.isEnabled = false
+		secondQueueItem.concurrencyGroup = "changed-after-run"
+		try context.save()
+
+		#expect(snapshot.map(\.id) == [firstQueueItem.id, secondQueueItem.id])
+		#expect(snapshot.map(\.ticketID) == [firstTicket.id, secondTicket.id])
+		#expect(snapshot.map(\.position) == [10, 20])
+		#expect(snapshot.map(\.priority) == [.high, .low])
+		#expect(snapshot.map(\.concurrencyGroup) == ["ui", "backend"])
+		#expect(run.queueSnapshot == snapshot)
+	}
+
 	@Test func invalidProjectDraftDoesNotPersistRows() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -472,8 +515,8 @@ struct AuditoriumTests {
 		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 3)
-		#expect(AppSchema.MigrationPlan.stages.count == 2)
+		#expect(AppSchema.MigrationPlan.schemas.count == 4)
+		#expect(AppSchema.MigrationPlan.stages.count == 3)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
@@ -481,6 +524,7 @@ struct AuditoriumTests {
 		#expect(tickets.first?.sourceProjectID == ids.projectID)
 		#expect(queueItems.first?.ticketID == ids.ticketID)
 		#expect(runs.first?.id == ids.runID)
+		#expect(runs.first?.queueSnapshotJSON == "[]")
 		#expect(ticketRuns.first?.runID == ids.runID)
 		#expect(pullRequests.first?.ticketRunID == ids.ticketRunID)
 		#expect(events.first?.runID == ids.runID)

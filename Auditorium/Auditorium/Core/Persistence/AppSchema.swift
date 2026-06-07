@@ -32,15 +32,26 @@ enum AppSchema {
 		}
 	}
 
+	enum V4: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 3, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypes
+		}
+	}
+
 	enum MigrationPlan: SchemaMigrationPlan {
 		static var schemas: [any VersionedSchema.Type] {
-			[V1.self, V2.self, V3.self]
+			[V1.self, V2.self, V3.self, V4.self]
 		}
 
 		static var stages: [MigrationStage] {
 			[
 				.lightweight(fromVersion: V1.self, toVersion: V2.self),
 				.lightweight(fromVersion: V2.self, toVersion: V3.self),
+				.lightweight(fromVersion: V3.self, toVersion: V4.self),
 			]
 		}
 	}
@@ -60,7 +71,7 @@ enum AppSchema {
 	]
 
 	static var currentSchema: Schema {
-		Schema(versionedSchema: V3.self)
+		Schema(versionedSchema: V4.self)
 	}
 
 	static func makeModelContainer(inMemory: Bool = false, storeURL: URL? = nil) throws -> ModelContainer {

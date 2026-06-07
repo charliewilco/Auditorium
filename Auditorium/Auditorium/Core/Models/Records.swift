@@ -274,6 +274,7 @@ final class RunRecord {
 	var failedTickets: Int
 	var blockedTickets: Int
 	var pullRequestsCreated: Int
+	var queueSnapshotJSON: String
 	var reportMarkdown: String
 	var summary: String
 
@@ -288,6 +289,7 @@ final class RunRecord {
 		failedTickets: Int = 0,
 		blockedTickets: Int = 0,
 		pullRequestsCreated: Int = 0,
+		queueSnapshotJSON: String = "[]",
 		reportMarkdown: String = "",
 		summary: String = ""
 	) {
@@ -301,6 +303,7 @@ final class RunRecord {
 		self.failedTickets = failedTickets
 		self.blockedTickets = blockedTickets
 		self.pullRequestsCreated = pullRequestsCreated
+		self.queueSnapshotJSON = queueSnapshotJSON
 		self.reportMarkdown = reportMarkdown
 		self.summary = summary
 	}
@@ -308,6 +311,15 @@ final class RunRecord {
 	var status: RunStatus {
 		get { RunStatus(rawValue: statusRaw) ?? .pending }
 		set { statusRaw = newValue.rawValue }
+	}
+
+	var queueSnapshot: [QueueRunSnapshot] {
+		get {
+			(try? JSONDecoder().decode([QueueRunSnapshot].self, from: Data(queueSnapshotJSON.utf8))) ?? []
+		}
+		set {
+			queueSnapshotJSON = (try? String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]"
+		}
 	}
 }
 
