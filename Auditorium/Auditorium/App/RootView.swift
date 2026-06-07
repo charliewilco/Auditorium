@@ -71,7 +71,8 @@ struct RootView: View {
 					createProject: { appState.isShowingProjectWizard = true },
 					openDemo: openDemoProject
 				)
-			} else {
+			}
+			else {
 				NavigationSplitView {
 					SidebarView(projects: projects)
 				} detail: {
@@ -104,7 +105,12 @@ struct RootView: View {
 		}
 		.task(id: appState.selectedProjectID) {
 			if orchestrator == nil {
-				orchestrator = Orchestrator(workspaceService: services.workspace, runtimeDetection: services.runtimeDetection, reportGenerator: services.reportGenerator, providerRegistry: services.providerRegistry)
+				orchestrator = Orchestrator(
+					workspaceService: services.workspace,
+					runtimeDetection: services.runtimeDetection,
+					reportGenerator: services.reportGenerator,
+					providerRegistry: services.providerRegistry
+				)
 			}
 			reconcileInterruptedRunsIfNeeded()
 			let activeProject = selectedProject ?? projects.first
@@ -124,7 +130,8 @@ struct RootView: View {
 		didReconcileInterruptedRuns = true
 		do {
 			_ = try RunReconciliationService().reconcileInterruptedRuns(context: modelContext)
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
@@ -133,15 +140,49 @@ struct RootView: View {
 	private var detailView: some View {
 		switch appState.selectedDestination {
 		case .dashboard:
-			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus, demoModeState: demoModeState, workspaceLocations: workspaceLocations, revealLocation: revealLocation, resetDemoProject: resetDemoProject)
+			ProjectDashboardView(
+				project: selectedProject,
+				tickets: projectTickets,
+				queueItems: projectQueueItems,
+				runs: projectRuns,
+				ticketRuns: ticketRuns,
+				pullRequests: pullRequests,
+				runtimeHealth: runtimeHealth,
+				symphonyDoctorStatus: symphonyDoctorStatus,
+				demoModeState: demoModeState,
+				workspaceLocations: workspaceLocations,
+				revealLocation: revealLocation,
+				resetDemoProject: resetDemoProject
+			)
 		case .tickets:
-			TicketBrowserView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, addToQueue: addTicketsToQueue)
+			TicketBrowserView(
+				project: selectedProject,
+				tickets: projectTickets,
+				queueItems: projectQueueItems,
+				addToQueue: addTicketsToQueue
+			)
 		case .queue:
-			QueueScreen(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runQueue: runQueue, dryRun: dryRun, clearQueue: clearQueue, removeItem: removeQueueItem, toggleItem: toggleQueueItem, moveItems: moveQueueItems)
+			QueueScreen(
+				project: selectedProject,
+				tickets: projectTickets,
+				queueItems: projectQueueItems,
+				runQueue: runQueue,
+				dryRun: dryRun,
+				clearQueue: clearQueue,
+				removeItem: removeQueueItem,
+				removeItems: removeQueueItems,
+				toggleItem: toggleQueueItem,
+				setItemsEnabled: setQueueItemsEnabled,
+				moveItems: moveQueueItems
+			)
 		case .runs:
 			RunsView(runs: projectRuns, ticketRuns: ticketRuns, tickets: projectTickets, events: events, pullRequests: pullRequests)
 		case .reports:
-			ReportsView(project: selectedProject, reports: reports.filter { $0.projectID == appState.selectedProjectID }, reveal: revealReport)
+			ReportsView(
+				project: selectedProject,
+				reports: reports.filter { $0.projectID == appState.selectedProjectID },
+				reveal: revealReport
+			)
 		case .settings:
 			SettingsContentView(runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
 		}
@@ -173,7 +214,8 @@ struct RootView: View {
 		do {
 			let id = try DemoDataSeeder(workspaceService: services.workspace).openDemoProject(in: modelContext)
 			appState.selectProject(id)
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
@@ -183,7 +225,8 @@ struct RootView: View {
 			let id = try DemoDataSeeder(workspaceService: services.workspace).resetDemoProject(in: modelContext)
 			appState.selectProject(id)
 			appState.selectedDestination = .dashboard
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
@@ -198,7 +241,8 @@ struct RootView: View {
 			let workflowURL = services.workspace.projectDirectory(projectID: project.id).appending(path: "WORKFLOW.md")
 			try project.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
 			symphonyDoctorStatus = await services.symphony.doctor(workflowPath: workflowURL)
-		} catch {
+		}
+		catch {
 			symphonyDoctorStatus = SymphonyDoctorStatus(
 				state: .error,
 				detail: "Unable to prepare workflow for symphony doctor: \(error.localizedDescription)",
@@ -212,7 +256,8 @@ struct RootView: View {
 		guard let projectID = appState.selectedProjectID else { return }
 		do {
 			try QueueService().addTickets(ids, projectID: projectID, context: modelContext)
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
@@ -233,7 +278,8 @@ struct RootView: View {
 			try QueueService().clearQueue(projectID: projectID, context: modelContext)
 			try QueueService().addTickets([ticket.id], projectID: projectID, context: modelContext)
 			runQueue()
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 		}
 	}
@@ -249,14 +295,22 @@ struct RootView: View {
 		let policy = RunSecurityPolicy()
 		do {
 			try policy.validate(project: project, preferences: preferences)
-		} catch {
+		}
+		catch {
 			NSAlert(error: error).runModal()
 			return
 		}
-		if preferences.requireRunConfirmation, confirm(title: "Start Run?", message: "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items.") == false {
+		if preferences.requireRunConfirmation,
+			confirm(
+				title: "Start Run?",
+				message: "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items."
+			) == false
+		{
 			return
 		}
-		if preferences.requirePullRequestConfirmation, policy.wouldOpenPullRequest(project: project), confirm(title: "Allow Pull Requests?", message: "This workflow may push branches and open GitHub pull requests.") == false {
+		if preferences.requirePullRequestConfirmation, policy.wouldOpenPullRequest(project: project),
+			confirm(title: "Allow Pull Requests?", message: "This workflow may push branches and open GitHub pull requests.") == false
+		{
 			return
 		}
 		appState.selectedDestination = .runs
@@ -269,10 +323,22 @@ struct RootView: View {
 
 	private func dryRun() {
 		guard let projectID = appState.selectedProjectID else { return }
-		let run = RunRecord(projectID: projectID, status: .completed, totalTickets: projectQueueItems.filter { $0.isEnabled }.count, summary: "Dry run completed. No workspaces or agents were started.")
+		let run = RunRecord(
+			projectID: projectID,
+			status: .completed,
+			totalTickets: projectQueueItems.filter { $0.isEnabled }.count,
+			summary: "Dry run completed. No workspaces or agents were started."
+		)
 		run.endedAt = .now
 		modelContext.insert(run)
-		modelContext.insert(RuntimeEventRecord(runID: run.id, level: .success, category: .orchestration, message: "Dry run validated \(run.totalTickets) enabled queue items."))
+		modelContext.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .success,
+				category: .orchestration,
+				message: "Dry run validated \(run.totalTickets) enabled queue items."
+			)
+		)
 		try? modelContext.save()
 		appState.selectedDestination = .runs
 	}
@@ -286,8 +352,18 @@ struct RootView: View {
 		try? QueueService().removeQueueItem(item, context: modelContext)
 	}
 
+	private func removeQueueItems(_ itemIDs: Set<UUID>) {
+		guard let projectID = appState.selectedProjectID else { return }
+		try? QueueService().removeQueueItems(itemIDs, projectID: projectID, context: modelContext)
+	}
+
 	private func toggleQueueItem(_ item: QueueItemRecord, isEnabled: Bool) {
 		try? QueueService().setQueueItem(item, isEnabled: isEnabled, context: modelContext)
+	}
+
+	private func setQueueItemsEnabled(_ itemIDs: Set<UUID>, isEnabled: Bool) {
+		guard let projectID = appState.selectedProjectID else { return }
+		try? QueueService().setQueueItems(itemIDs, isEnabled: isEnabled, projectID: projectID, context: modelContext)
 	}
 
 	private func moveQueueItems(_ offsets: IndexSet, _ destination: Int) {

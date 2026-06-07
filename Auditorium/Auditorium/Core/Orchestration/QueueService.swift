@@ -40,17 +40,39 @@ struct QueueService {
 	}
 
 	func removeQueueItem(_ item: QueueItemRecord, context: ModelContext) throws {
-		let ticketID = item.ticketID
-		context.delete(item)
-		if let ticket = try context.fetch(FetchDescriptor<TicketRecord>()).first(where: { $0.id == ticketID }) {
-			ticket.status = .ready
-			ticket.updatedAt = .now
+		try removeQueueItems([item.id], projectID: item.projectID, context: context)
+	}
+
+	func setQueueItem(_ item: QueueItemRecord, isEnabled: Bool, context: ModelContext) throws {
+		try setQueueItems([item.id], isEnabled: isEnabled, projectID: item.projectID, context: context)
+	}
+
+	func setQueueItems(_ itemIDs: Set<UUID>, isEnabled: Bool, projectID: UUID, context: ModelContext) throws {
+		let items = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == projectID && itemIDs.contains($0.id) }
+		for item in items {
+			item.isEnabled = isEnabled
 		}
 		try ModelIntegrityValidator.save(context: context)
 	}
 
-	func setQueueItem(_ item: QueueItemRecord, isEnabled: Bool, context: ModelContext) throws {
-		item.isEnabled = isEnabled
+	func removeQueueItems(_ itemIDs: Set<UUID>, projectID: UUID, context: ModelContext) throws {
+		let items = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == projectID }
+		let removing = items.filter { itemIDs.contains($0.id) }
+		let removingTicketIDs = Set(removing.map(\.ticketID))
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+		for ticket in tickets where removingTicketIDs.contains(ticket.id) && ticket.status == .queued {
+			ticket.status = .ready
+			ticket.updatedAt = .now
+		}
+		for item in removing {
+			context.delete(item)
+		}
+		let remaining = items.filter { itemIDs.contains($0.id) == false }.sorted { $0.position < $1.position }
+		for (index, item) in remaining.enumerated() {
+			item.position = index
+		}
 		try ModelIntegrityValidator.save(context: context)
 	}
 
@@ -66,4 +88,5 @@ struct QueueService {
 		}
 		try ModelIntegrityValidator.save(context: context)
 	}
+
 }

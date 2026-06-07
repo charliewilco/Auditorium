@@ -187,6 +187,79 @@ struct AuditoriumTests {
 		#expect(ordered.map(\.ticketID) == [second.ticketID, first.ticketID])
 	}
 
+	@Test func queueOrderingMovesNonContiguousDroppedItems() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let projectID = UUID()
+		let items = (0..<5).map {
+			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: $0, priority: .medium)
+		}
+		for item in items {
+			context.insert(item)
+		}
+		try context.save()
+
+		try QueueService().moveQueueItems(from: IndexSet([1, 3]), to: 5, projectID: projectID, context: context)
+		let ordered = try context.fetch(FetchDescriptor<QueueItemRecord>()).sorted { $0.position < $1.position }
+
+		#expect(ordered.map(\.ticketID) == [items[0].ticketID, items[2].ticketID, items[4].ticketID, items[1].ticketID, items[3].ticketID])
+		#expect(ordered.map(\.position) == [0, 1, 2, 3, 4])
+	}
+
+	@Test func queueServiceUpdatesSelectedItemsInBatches() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let projectID = UUID()
+		let otherProjectID = UUID()
+		let tickets = (0..<3).map {
+			TicketRecord(
+				provider: .githubIssues,
+				externalID: "\($0)",
+				title: "Issue \($0)",
+				body: "",
+				status: .queued,
+				labels: [],
+				assignee: nil,
+				priority: .medium,
+				webURL: "",
+				createdAt: .now,
+				updatedAt: .now,
+				estimatedComplexity: 1,
+				sourceProjectID: projectID
+			)
+		}
+		let first = QueueItemRecord(ticketID: tickets[0].id, projectID: projectID, position: 0, priority: .high)
+		let second = QueueItemRecord(ticketID: tickets[1].id, projectID: projectID, position: 1, priority: .medium)
+		let third = QueueItemRecord(ticketID: tickets[2].id, projectID: projectID, position: 2, priority: .low)
+		let other = QueueItemRecord(ticketID: UUID(), projectID: otherProjectID, position: 0, priority: .high)
+		for ticket in tickets {
+			context.insert(ticket)
+		}
+		for item in [first, second, third, other] {
+			context.insert(item)
+		}
+		try context.save()
+
+		try QueueService().setQueueItems([first.id, third.id, other.id], isEnabled: false, projectID: projectID, context: context)
+		#expect(first.isEnabled == false)
+		#expect(second.isEnabled == true)
+		#expect(third.isEnabled == false)
+		#expect(other.isEnabled == true)
+
+		try QueueService().removeQueueItems([first.id, third.id, other.id], projectID: projectID, context: context)
+		let remaining = try context.fetch(FetchDescriptor<QueueItemRecord>())
+		let remainingProjectItems = remaining.filter { $0.projectID == projectID }.sorted { $0.position < $1.position }
+		let remainingOtherProjectItems = remaining.filter { $0.projectID == otherProjectID }
+
+		#expect(remainingProjectItems.map(\.id) == [second.id])
+		#expect(remainingOtherProjectItems.map(\.id) == [other.id])
+		#expect(second.position == 0)
+		#expect(other.position == 0)
+		#expect(tickets[0].status == .ready)
+		#expect(tickets[1].status == .queued)
+		#expect(tickets[2].status == .ready)
+	}
+
 	@Test func queueServiceAddsSelectedTicketsAndAvoidsDuplicates() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

@@ -159,8 +159,8 @@ Acceptance gate:
 - [x] Remove queue items.
 - [x] Clear queue.
 - [x] Add focused unit test for queue ordering.
-- [ ] Add drag-and-drop verification.
-- [ ] Add multi-select queue actions.
+- [x] Add drag-and-drop verification.
+- [x] Add multi-select queue actions.
 - [x] Add per-run queue snapshot.
 - [x] Prevent duplicate queue items reliably across all entry points.
 
