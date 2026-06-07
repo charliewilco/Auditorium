@@ -454,12 +454,13 @@ Acceptance gate:
 - [x] Rust tests for daemon dispatch execution and project-state reconciliation.
 - [x] Rust tests for daemon stale-running reconciliation.
 - [x] Rust tests for quoted Codex command parsing and argv handoff.
+- [x] Rust integration test for non-mock GitHub issue, workspace, Codex, validation, git push, PR, and report flow.
 - [x] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
 
 Acceptance gate:
 
-- [ ] Swift and Rust test suites cover the v0 real GitHub flow.
+- [x] Swift and Rust test suites cover the v0 real GitHub flow.
 
 ## 23. Build, CI, And Release
 

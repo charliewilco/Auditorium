@@ -81,6 +81,63 @@ exit 1
     );
 }
 
+fn write_fake_real_run_toolchain(bin_dir: &Path) {
+    fs::create_dir_all(bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("gh"),
+        r#"#!/bin/sh
+set -eu
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  cat <<'JSON'
+{
+  "id":"I_real_24",
+  "number":24,
+  "title":"Real GitHub flow",
+  "body":"Exercise the non-mock run path.",
+  "url":"https://github.com/acme/app/issues/24",
+  "labels":[{"name":"Ready"}],
+  "assignees":[{"login":"charlie"}],
+  "state":"OPEN",
+  "createdAt":"2026-06-01T00:00:00Z",
+  "updatedAt":"2026-06-02T00:00:00Z"
+}
+JSON
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
+  printf '{"defaultBranchRef":{"name":"main"}}\n'
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  git clone "$SYMPHONY_TEST_REMOTE_REPO" "$4" >/dev/null 2>&1
+  git -C "$4" config user.name "Auditorium Bot"
+  git -C "$4" config user.email "auditorium@example.invalid"
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  printf 'https://github.com/acme/app/pull/99\n'
+  exit 0
+fi
+echo "unexpected gh invocation: $@" >&2
+exit 1
+"#,
+    );
+    write_executable(
+        &bin_dir.join("codex"),
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$@" > codex-prompt.txt
+printf 'implemented by fake codex\n' > codex-output.txt
+printf 'codex wrote codex-output.txt\n'
+exit 0
+"#,
+    );
+}
+
 fn path_with_fake_tools(bin_dir: &Path) -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
     format!("{}:{existing}", bin_dir.display())
@@ -96,6 +153,43 @@ fn read_ndjson(stdout: &[u8]) -> Vec<Value> {
         .filter(|line| line.trim_start().starts_with('{'))
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+fn git(args: &[&str], cwd: &Path) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn prepare_bare_remote(tempdir: &tempfile::TempDir) -> PathBuf {
+    let seed = tempdir.path().join("seed");
+    let remote = tempdir.path().join("remote.git");
+    fs::create_dir_all(&seed).unwrap();
+    git(&["init", "--initial-branch", "main"], &seed);
+    git(&["config", "user.name", "Auditorium Seed"], &seed);
+    git(&["config", "user.email", "seed@example.invalid"], &seed);
+    fs::write(seed.join("README.md"), "# Fixture\n").unwrap();
+    git(&["add", "README.md"], &seed);
+    git(&["commit", "-m", "Initial commit"], &seed);
+    git(
+        &[
+            "clone",
+            "--bare",
+            seed.to_str().unwrap(),
+            remote.to_str().unwrap(),
+        ],
+        tempdir.path(),
+    );
+    remote
 }
 
 #[test]
@@ -221,6 +315,104 @@ fn run_mock_json_writes_workspace_report_and_final_payload() {
     assert!(PathBuf::from(report["report_path"].as_str().unwrap()).exists());
     assert!(PathBuf::from(report["workspace_manifest_path"].as_str().unwrap()).exists());
     assert!(workspace_root.join("_77").is_dir());
+}
+
+#[test]
+fn run_non_mock_flow_clones_runs_codex_pushes_pr_and_writes_report() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    let bin_dir = tempdir.path().join("bin");
+    let remote = prepare_bare_remote(&tempdir);
+    write_fake_real_run_toolchain(&bin_dir);
+
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+validation:
+  command: "test -f codex-output.txt"
+codex:
+  command: "{} --json"
+branch_prefix: "auditorium"
+run_tests: true
+open_pull_request: true
+---
+Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
+
+{{{{ issue.title }}}}
+{{{{ issue.description }}}}
+{{{{ issue.url }}}}
+"#,
+            workspace_root.display(),
+            bin_dir.join("codex").display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args(["run", "--repo", "acme/app", "--issue", "24", "--workflow"])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .env("SYMPHONY_TEST_REMOTE_REPO", &remote)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+    let final_report = values
+        .last()
+        .expect("final report payload should be printed");
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "branch_ready"));
+    assert!(values.iter().any(|value| value["message"] == "codex_stdout"
+        && value["metadata"]["line"] == "codex wrote codex-output.txt"));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "validation_passed"));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "branch_pushed"));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "pull_request_opened"
+            && value["metadata"]["url"] == "https://github.com/acme/app/pull/99"));
+    assert_eq!(final_report["status"], "completed");
+    assert_eq!(
+        final_report["pull_request_url"],
+        "https://github.com/acme/app/pull/99"
+    );
+    assert_eq!(
+        final_report["branch_name"],
+        "auditorium/issue-24-real-github-flow"
+    );
+    assert!(final_report["changed_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|file| file == "codex-output.txt"));
+
+    let branch_ref = "refs/heads/auditorium/issue-24-real-github-flow";
+    git(&["rev-parse", "--verify", branch_ref], &remote);
+
+    let workspace = workspace_root.join("_24");
+    let repo_path = workspace.join("repo");
+    let prompt = fs::read_to_string(repo_path.join("codex-prompt.txt")).unwrap();
+    assert!(prompt.contains("Fix #24 in acme/app."));
+    assert!(prompt.contains("Real GitHub flow"));
+    assert!(prompt.contains("Exercise the non-mock run path."));
+
+    let report_path = PathBuf::from(final_report["report_path"].as_str().unwrap());
+    let markdown = fs::read_to_string(report_path).unwrap();
+    assert!(markdown.contains("Pull Request: https://github.com/acme/app/pull/99"));
+    assert!(markdown.contains("- `codex-output.txt`"));
+    assert!(PathBuf::from(final_report["workspace_manifest_path"].as_str().unwrap()).exists());
 }
 
 #[test]
