@@ -383,7 +383,7 @@ struct RootView: View {
 	}
 
 	private func revealReport(_ report: ReportRecord) {
-		NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: report.filePath)])
+		NSWorkspace.shared.activateFileViewerSelecting([ReportActions.revealURL(for: report)])
 	}
 
 	private func revealLocation(_ url: URL) {

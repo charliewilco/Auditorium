@@ -262,7 +262,7 @@ Acceptance gate:
 - [x] Persist `ReportRecord`.
 - [x] Save report file.
 - [x] Preview reports in app.
-- [~] Copy/export/reveal actions exist in prototype form.
+- [x] Copy/export/reveal actions exist in prototype form.
 - [ ] Verify copy/export/reveal manually.
 - [x] Include accurate changed files.
 - [x] Include validation/test output.

@@ -33,7 +33,7 @@ struct ReportsView: View {
 							.font(.largeTitle.weight(.semibold))
 						Spacer()
 						Button {
-							copy(report.markdown)
+							copy(ReportActions.markdownForCopy(report))
 						} label: {
 							Label("Copy Markdown", systemImage: "doc.on.doc")
 						}
@@ -57,8 +57,13 @@ struct ReportsView: View {
 					.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 				}
 				.padding()
-			} else {
-				EmptyStateView(symbol: "doc.text", title: "No Reports", message: "Run the queue to generate a detailed markdown report.")
+			}
+			else {
+				EmptyStateView(
+					symbol: "doc.text",
+					title: "No Reports",
+					message: "Run the queue to generate a detailed markdown report."
+				)
 			}
 		}
 		.navigationTitle("Reports")
@@ -71,10 +76,10 @@ struct ReportsView: View {
 
 	private func export(_ report: ReportRecord) {
 		let panel = NSSavePanel()
-		panel.nameFieldStringValue = "\(report.title).md"
+		panel.nameFieldStringValue = ReportActions.suggestedExportFileName(for: report)
 		panel.allowedContentTypes = [.plainText]
 		if panel.runModal() == .OK, let url = panel.url {
-			try? report.markdown.write(to: url, atomically: true, encoding: .utf8)
+			try? ReportActions.export(report, to: url)
 		}
 	}
 }

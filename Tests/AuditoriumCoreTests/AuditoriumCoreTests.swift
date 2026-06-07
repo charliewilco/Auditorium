@@ -325,6 +325,29 @@ struct AuditoriumCoreTests {
 		#expect(markdown.contains("[orchestration] Dry run validated 0 enabled queue items."))
 	}
 
+	@Test func reportActionsCopyExportAndRevealUseDurableReportData() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let reportPath = root.appending(path: "saved-report.md")
+		let exportPath = root.appending(path: "exported.md")
+		let report = ReportRecord(
+			projectID: UUID(),
+			runID: UUID(),
+			title: "Run 42: Fix / OAuth?",
+			markdown: "# Run 42\n\nValidated report actions.",
+			filePath: reportPath.path()
+		)
+
+		try ReportActions.export(report, to: exportPath)
+		let exportedMarkdown = try String(contentsOf: exportPath, encoding: .utf8)
+
+		#expect(ReportActions.markdownForCopy(report) == "# Run 42\n\nValidated report actions.")
+		#expect(ReportActions.revealURL(for: report) == reportPath)
+		#expect(ReportActions.suggestedExportFileName(for: report) == "Run 42- Fix - OAuth.md")
+		#expect(exportedMarkdown == report.markdown)
+	}
+
 	@Test func appRunCoordinatorPersistsDryRunReportOutsideSwiftUIView() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
