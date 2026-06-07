@@ -2833,6 +2833,85 @@ struct AuditoriumTests {
 		#expect(events.contains { $0.message == "Agent completed without file changes; no pull request was opened." })
 	}
 
+	@Test func localWorkspaceCodexHonorsWorkflowPolicyDisablingPullRequests() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "codex_completed",
+				summary: "Committed source changes without opening a PR.",
+				outcome: .completed
+			)
+		])
+		let project = Project(
+			name: "Policy No PR",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown.replacingOccurrences(
+				of: "open_pull_request: true",
+				with: "open_pull_request: false"
+			)
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "103",
+			title: "Commit Without PR",
+			body: "Policy should suppress PR creation while preserving committed changes.",
+			status: .ready,
+			labels: ["policy"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/103",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let workspacePath = workspace.workspacePath(projectID: project.id, ticketExternalID: "103")
+
+		#expect(ticket.status == .completed)
+		#expect(ticketRun.status == .completed)
+		#expect(ticketRun.pullRequestURL == nil)
+		#expect(run.status == .completed)
+		#expect(run.pullRequestsCreated == 0)
+		#expect(sourceProvider.commitPaths == [workspacePath])
+		#expect(sourceProvider.pushedBranches == ["auditorium/103-commit-without-pr"])
+		#expect(sourceProvider.createdPullRequestTitles.isEmpty)
+		#expect(try context.fetch(FetchDescriptor<PullRequestRecord>()).isEmpty)
+		#expect(events.contains { $0.message == "Workflow policy disabled pull request creation for 103." })
+	}
+
 	@Test func localWorkspaceCodexRecoversTicketFailureAndContinuesQueue() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

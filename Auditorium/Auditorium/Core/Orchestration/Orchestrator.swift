@@ -582,6 +582,7 @@ final class Orchestrator {
 		workflowPolicyMarkdown: String,
 		commitAndPush: Bool = false
 	) async throws {
+		let policy = try WorkflowPolicyParser().parse(workflowPolicyMarkdown)
 		ticket.status = .running
 		ticket.updatedAt = .now
 		ticketRun.status = .preparing
@@ -713,6 +714,23 @@ final class Orchestrator {
 						message: "Pushed \(workspace.branchName)."
 					)
 				)
+			}
+			if policy.openPullRequest == false {
+				ticket.status = .completed
+				ticketRun.status = .completed
+				ticketRun.summary =
+					finalSummary.isEmpty ? "Agent completed; pull request creation disabled by workflow policy." : finalSummary
+				ticketRun.confidence = 0.78
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						level: .info,
+						category: .orchestration,
+						message: "Workflow policy disabled pull request creation for \(ticket.externalID)."
+					)
+				)
+				break
 			}
 			let pullRequestRequest = PullRequestRequest(
 				title: "\(ticket.externalID): \(ticket.title)",

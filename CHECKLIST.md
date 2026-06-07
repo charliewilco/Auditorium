@@ -242,7 +242,7 @@ Acceptance gate:
 ## 13. Git And Pull Requests
 
 - [x] Create branch per ticket.
-- [ ] Apply agent file changes.
+- [x] Apply agent file changes.
 - [x] Detect changed files.
 - [x] Commit changes with deterministic message.
 - [x] Push branch.
