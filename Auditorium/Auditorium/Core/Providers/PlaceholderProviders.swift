@@ -238,10 +238,6 @@ struct AzureBoardsIssueTrackerProvider: IssueTrackerProvider {
 
 typealias AzureBoardsIssueProvider = AzureBoardsIssueTrackerProvider
 
-struct GenericShellAgentProvider: AgentProvider {
-	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> { throw ProviderError.notImplemented("Generic Shell Agent Provider") }
-}
-
 struct AppleContainerRuntimeProvider: RuntimeProvider {
 	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor { throw ProviderError.notImplemented("Apple Container Runtime Provider") }
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle { throw ProviderError.notImplemented("Apple Container Runtime Provider") }

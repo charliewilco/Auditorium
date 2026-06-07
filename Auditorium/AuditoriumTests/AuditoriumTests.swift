@@ -1317,6 +1317,56 @@ struct AuditoriumTests {
 		#expect(FileManager.default.fileExists(atPath: donePath.path()) == false)
 	}
 
+	@Test func genericCLIConfigurationParsesQuotedCommand() throws {
+		let configuration = try GenericCLIAgentConfiguration(commandLine: #"agent --name "two words" 'single quoted' escaped\ value"#)
+
+		#expect(configuration.executablePath == "/usr/bin/env")
+		#expect(configuration.arguments == ["agent", "--name", "two words", "single quoted", "escaped value"])
+	}
+
+	@Test func genericCLIConfigurationRejectsInvalidCommands() {
+		#expect(throws: GenericCLIAgentConfigurationError.emptyCommand) {
+			try GenericCLIAgentConfiguration(commandLine: "   ")
+		}
+		#expect(throws: GenericCLIAgentConfigurationError.unterminatedQuote) {
+			try GenericCLIAgentConfiguration(commandLine: #"agent "unterminated"#)
+		}
+	}
+
+	@Test func genericShellAgentProviderStreamsOutputAndWritesLog() async throws {
+		let root = try makeAgentWorkspace()
+		defer { try? FileManager.default.removeItem(at: root) }
+		let script = root.appending(path: "generic-agent")
+		try """
+		#!/bin/sh
+		case "$1" in
+		  *"Generic CLI output"*) printf 'generic-ok\\n' ;;
+		  *) printf 'missing prompt\\n' >&2; exit 9 ;;
+		esac
+		printf 'generic-err\\n' >&2
+		""".write(to: script, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path())
+		let provider = try GenericShellAgentProvider(commandLine: script.path())
+		let stream = try await provider.runAgent(makeAgentRunRequest(workspace: root, title: "Generic CLI output"))
+		var events: [AgentEvent] = []
+
+		for try await event in stream {
+			events.append(event)
+		}
+
+		let messages = events.map(\.message)
+		let logPath = root.appending(path: ".auditorium/generic-cli.log").path()
+		let log = try String(contentsOf: URL(fileURLWithPath: logPath), encoding: .utf8)
+		#expect(messages.contains("generic_cli_started"))
+		#expect(messages.contains("generic_cli_stdout: generic-ok"))
+		#expect(messages.contains("generic_cli_stderr: generic-err"))
+		#expect(events.last?.outcome == .completed)
+		#expect(events.last?.logPath == logPath)
+		#expect(log.contains("Command: \(script.path())"))
+		#expect(log.contains("generic-ok"))
+		#expect(log.contains("generic-err"))
+	}
+
 	@Test func orchestratorPersistsSymphonyEventsWhileProcessRuns() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

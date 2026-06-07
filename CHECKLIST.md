@@ -204,7 +204,7 @@ Acceptance gate:
 - [x] Stream agent output into `RuntimeEventRecord`.
 - [x] Support cancellation.
 - [x] Parse final result into ticket-run status.
-- [ ] Implement Generic CLI Agent configuration.
+- [x] Implement Generic CLI Agent configuration.
 
 Acceptance gate:
 
@@ -427,6 +427,7 @@ Acceptance gate:
 - [x] Swift tests for Codex CLI preflight.
 - [x] Swift tests for Codex CLI process agent streaming, failure, and cancellation.
 - [x] Swift tests for injected agent event metadata and log path persistence.
+- [x] Swift tests for Generic CLI agent command parsing and process execution.
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.
