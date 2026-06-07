@@ -4,19 +4,22 @@ import SwiftUI
 
 struct SettingsSceneView: View {
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
+	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
 	@Environment(\.appServices) private var services
 
 	var body: some View {
-		SettingsContentView(runtimeHealth: runtimeHealth)
+		SettingsContentView(runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
 			.frame(minWidth: 620, minHeight: 520)
 			.task {
 				runtimeHealth = await services.runtimeDetection.detect()
+				symphonyDoctorStatus = await services.symphony.doctor()
 			}
 	}
 }
 
 struct SettingsContentView: View {
 	let runtimeHealth: [RuntimeHealthCheck]
+	let symphonyDoctorStatus: SymphonyDoctorStatus?
 	@Environment(\.modelContext) private var modelContext
 	@Environment(\.appServices) private var services
 	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
@@ -62,6 +65,7 @@ struct SettingsContentView: View {
 					providerList(AgentProviderKind.allCases.map(\.title))
 				}
 				settingsSection("Runtime Providers") {
+					SymphonyDoctorStatusView(status: symphonyDoctorStatus)
 					ForEach(runtimeHealth) { health in
 						HStack {
 							VStack(alignment: .leading) {

@@ -56,6 +56,50 @@ struct SymphonyRunResult: Sendable {
 	let summary: SymphonyRunSummary?
 }
 
+struct SymphonyDoctorCheck: Sendable, Equatable, Identifiable {
+	let id: String
+	let name: String
+	let isOK: Bool
+	let detail: String
+	let code: String?
+}
+
+struct SymphonyDoctorStatus: Sendable, Equatable {
+	let state: RuntimeHealthState
+	let detail: String
+	let workflowDetail: String
+	let checks: [SymphonyDoctorCheck]
+
+	static let notChecked = SymphonyDoctorStatus(
+		state: .needsSetup,
+		detail: "symphony doctor has not run yet.",
+		workflowDetail: "No workflow validation result is available.",
+		checks: []
+	)
+}
+
+private struct SymphonyDoctorPayload: Decodable {
+	let ok: Bool
+	let workflow: SymphonyDoctorWorkflowPayload
+	let checks: [SymphonyDoctorCheckPayload]
+}
+
+private struct SymphonyDoctorWorkflowPayload: Decodable {
+	let ok: Bool
+	let workspaceRoot: String?
+	let trackerKind: String?
+	let maxConcurrentAgents: Int?
+	let code: String?
+	let message: String?
+}
+
+private struct SymphonyDoctorCheckPayload: Decodable {
+	let name: String
+	let ok: Bool
+	let detail: String
+	let code: String?
+}
+
 struct SymphonyCLIProcessRunner {
 	let executablePath: String
 
@@ -95,6 +139,33 @@ struct SymphonyCLIProcessRunner {
 		return try decode(output: result.standardOutput)
 	}
 
+	func doctor(workflowPath: URL? = nil) async -> SymphonyDoctorStatus {
+		var arguments = [
+			"symphony",
+			"doctor",
+			"--json"
+		]
+		if let workflowPath {
+			arguments.append(contentsOf: ["--workflow", workflowPath.path()])
+		}
+
+		do {
+			let result = try await ProcessCommand.runStreaming(
+				executable: executablePath,
+				arguments: arguments,
+				allowsNonZeroExit: true
+			)
+			return decodeDoctor(output: result.standardOutput, exitCode: result.exitCode, stderr: result.standardError)
+		} catch {
+			return SymphonyDoctorStatus(
+				state: .error,
+				detail: "Unable to launch symphony doctor: \(error.localizedDescription)",
+				workflowDetail: "Workflow validation did not run.",
+				checks: []
+			)
+		}
+	}
+
 	func decodeEvent(line: String) throws -> SymphonyCLIEvent {
 		let decoder = JSONDecoder()
 		decoder.dateDecodingStrategy = .iso8601
@@ -115,5 +186,55 @@ struct SymphonyCLIProcessRunner {
 			}
 		}
 		return SymphonyRunResult(events: events, summary: summary)
+	}
+
+	func decodeDoctor(output: String, exitCode: Int32, stderr: String) -> SymphonyDoctorStatus {
+		guard let data = output.data(using: .utf8),
+			  let payload = try? JSONDecoder().decode(SymphonyDoctorPayload.self, from: data) else {
+			return SymphonyDoctorStatus(
+				state: .error,
+				detail: "symphony doctor returned unreadable output\(exitCode == 0 ? "." : " and exited with \(exitCode).")",
+				workflowDetail: stderr.isEmpty ? "No workflow validation details were emitted." : stderr,
+				checks: []
+			)
+		}
+
+		let checks = payload.checks.map { check in
+			SymphonyDoctorCheck(
+				id: check.name,
+				name: check.name,
+				isOK: check.ok,
+				detail: check.detail,
+				code: check.code
+			)
+		}
+		let state: RuntimeHealthState = payload.ok && exitCode == 0 ? .available : .unavailable
+		let failingChecks = checks.filter { $0.isOK == false }
+		let detail: String
+		if state == .available {
+			detail = "symphony doctor passed \(checks.count) checks."
+		} else if failingChecks.isEmpty {
+			detail = "symphony doctor exited with \(exitCode)."
+		} else {
+			detail = "symphony doctor found \(failingChecks.count) failing checks."
+		}
+
+		return SymphonyDoctorStatus(
+			state: state,
+			detail: detail,
+			workflowDetail: workflowDetail(from: payload.workflow),
+			checks: checks
+		)
+	}
+
+	private func workflowDetail(from workflow: SymphonyDoctorWorkflowPayload) -> String {
+		if workflow.ok {
+			let trackerKind = workflow.trackerKind ?? "unknown"
+			let workspaceRoot = workflow.workspaceRoot ?? "unknown workspace"
+			let maxConcurrentAgents = workflow.maxConcurrentAgents.map(String.init) ?? "unknown"
+			return "Workflow is valid for \(trackerKind); workspace \(workspaceRoot); max agents \(maxConcurrentAgents)."
+		}
+		let code = workflow.code.map { "\($0): " } ?? ""
+		return "\(code)\(workflow.message ?? "Workflow validation failed.")"
 	}
 }

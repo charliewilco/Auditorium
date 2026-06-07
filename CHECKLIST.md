@@ -404,7 +404,7 @@ Acceptance gate:
 - [x] Handle CLI cancellation.
 - [x] Handle CLI failure exit codes.
 - [x] Persist CLI-generated reports.
-- [ ] Surface CLI doctor output in Settings/Dashboard.
+- [x] Surface CLI doctor output in Settings/Dashboard.
 
 Acceptance gate:
 

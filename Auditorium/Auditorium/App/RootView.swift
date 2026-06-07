@@ -15,6 +15,7 @@ struct RootView: View {
 	@Query(sort: \PullRequestRecord.createdAt, order: .reverse) private var pullRequests: [PullRequestRecord]
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
+	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
 	@State private var orchestrator: Orchestrator?
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
@@ -78,12 +79,14 @@ struct RootView: View {
 			}
 			.frame(minWidth: 760, minHeight: 620)
 		}
-		.task {
+		.task(id: appState.selectedProjectID) {
 			if orchestrator == nil {
 				orchestrator = Orchestrator(workspaceService: services.workspace, runtimeDetection: services.runtimeDetection, reportGenerator: services.reportGenerator)
 			}
+			let activeProject = selectedProject ?? projects.first
 			runtimeHealth = await services.runtimeDetection.detect()
-			if appState.selectedProjectID == nil, let first = projects.first {
+			await refreshSymphonyDoctorStatus(for: activeProject)
+			if appState.selectedProjectID == nil, let first = activeProject {
 				appState.selectProject(first.id)
 			}
 		}
@@ -96,7 +99,7 @@ struct RootView: View {
 	private var detailView: some View {
 		switch appState.selectedDestination {
 		case .dashboard:
-			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth)
+			ProjectDashboardView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runs: projectRuns, ticketRuns: ticketRuns, pullRequests: pullRequests, runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
 		case .tickets:
 			TicketBrowserView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, addToQueue: addTicketsToQueue)
 		case .queue:
@@ -106,7 +109,7 @@ struct RootView: View {
 		case .reports:
 			ReportsView(project: selectedProject, reports: reports.filter { $0.projectID == appState.selectedProjectID }, reveal: revealReport)
 		case .settings:
-			SettingsContentView(runtimeHealth: runtimeHealth)
+			SettingsContentView(runtimeHealth: runtimeHealth, symphonyDoctorStatus: symphonyDoctorStatus)
 		}
 	}
 
@@ -138,6 +141,26 @@ struct RootView: View {
 			appState.selectProject(id)
 		} catch {
 			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func refreshSymphonyDoctorStatus(for project: Project?) async {
+		guard let project else {
+			symphonyDoctorStatus = await services.symphony.doctor()
+			return
+		}
+		do {
+			try services.workspace.ensureProjectLayout(projectID: project.id)
+			let workflowURL = services.workspace.projectDirectory(projectID: project.id).appending(path: "WORKFLOW.md")
+			try project.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
+			symphonyDoctorStatus = await services.symphony.doctor(workflowPath: workflowURL)
+		} catch {
+			symphonyDoctorStatus = SymphonyDoctorStatus(
+				state: .error,
+				detail: "Unable to prepare workflow for symphony doctor: \(error.localizedDescription)",
+				workflowDetail: "Workflow validation did not run.",
+				checks: []
+			)
 		}
 	}
 

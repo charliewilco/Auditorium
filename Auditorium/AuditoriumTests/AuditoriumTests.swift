@@ -549,6 +549,69 @@ struct AuditoriumTests {
 		#expect(event.metadataJSON.contains("ticket"))
 	}
 
+	@Test func symphonyRunnerDecodesDoctorStatus() {
+		let output = """
+		{
+		  "ok": true,
+		  "workflow": {
+		    "ok": true,
+		    "workspaceRoot": "/tmp/auditorium",
+		    "trackerKind": "github",
+		    "maxConcurrentAgents": 3
+		  },
+		  "checks": [
+		    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
+		    { "name": "codex --version", "ok": true, "detail": "codex 0.1.0" }
+		  ]
+		}
+		"""
+
+		let status = SymphonyCLIProcessRunner().decodeDoctor(output: output, exitCode: 0, stderr: "")
+
+		#expect(status.state == .available)
+		#expect(status.detail == "symphony doctor passed 2 checks.")
+		#expect(status.workflowDetail.contains("github"))
+		#expect(status.workflowDetail.contains("max agents 3"))
+		#expect(status.checks.map(\.name) == ["git --version", "codex --version"])
+		#expect(status.checks.allSatisfy { $0.isOK })
+	}
+
+	@Test func symphonyRunnerDecodesFailingDoctorStatus() {
+		let output = """
+		{
+		  "ok": false,
+		  "workflow": {
+		    "ok": false,
+		    "code": "missing_workflow_file",
+		    "message": "workflow file was not found"
+		  },
+		  "checks": [
+		    { "name": "git --version", "ok": true, "detail": "git version 2.50.0" },
+		    { "name": "codex --version", "ok": false, "code": "command_failed", "detail": "codex was not found" }
+		  ]
+		}
+		"""
+
+		let status = SymphonyCLIProcessRunner().decodeDoctor(output: output, exitCode: 22, stderr: "invalid_config")
+
+		#expect(status.state == .unavailable)
+		#expect(status.detail == "symphony doctor found 1 failing checks.")
+		#expect(status.workflowDetail.contains("missing_workflow_file"))
+		#expect(status.checks.last?.code == "command_failed")
+	}
+
+	@Test func processCommandCanReturnNonZeroResultForStructuredOutput() async throws {
+		let result = try await ProcessCommand.runStreaming(
+			executable: "/bin/sh",
+			arguments: ["-lc", "printf '{\"ok\":false}\\n'; printf 'failed' >&2; exit 22"],
+			allowsNonZeroExit: true
+		)
+
+		#expect(result.exitCode == 22)
+		#expect(result.standardOutput == "{\"ok\":false}\n")
+		#expect(result.standardError == "failed")
+	}
+
 	@Test func processCommandStreamsStandardOutputLines() async throws {
 		var lines: [String] = []
 

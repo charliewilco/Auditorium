@@ -95,7 +95,8 @@ enum ProcessCommand {
 		arguments: [String],
 		workingDirectory: URL? = nil,
 		onStandardOutputLine: (@MainActor (String) async -> Void)? = nil,
-		onStandardErrorLine: (@MainActor (String) async -> Void)? = nil
+		onStandardErrorLine: (@MainActor (String) async -> Void)? = nil,
+		allowsNonZeroExit: Bool = false
 	) async throws -> ProcessResult {
 		let cancellationBox = ProcessCancellationBox()
 		let exitBox = ProcessExitBox()
@@ -126,7 +127,7 @@ enum ProcessCommand {
 			if cancellationBox.isCanceled {
 				throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
 			}
-			guard result.exitCode == 0 else {
+			guard allowsNonZeroExit || result.exitCode == 0 else {
 				throw ProcessCommandError.failed(executable: executable, arguments: arguments, exitCode: result.exitCode, stderr: result.standardError)
 			}
 			return result

@@ -8,6 +8,7 @@ struct ProjectDashboardView: View {
 	let ticketRuns: [TicketRunRecord]
 	let pullRequests: [PullRequestRecord]
 	let runtimeHealth: [RuntimeHealthCheck]
+	let symphonyDoctorStatus: SymphonyDoctorStatus?
 
 	var body: some View {
 		ScrollView {
@@ -82,6 +83,7 @@ struct ProjectDashboardView: View {
 		VStack(alignment: .leading, spacing: 12) {
 			Label("Runtime Health", systemImage: "cpu")
 				.font(.headline)
+			SymphonyDoctorStatusView(status: symphonyDoctorStatus)
 			ForEach(runtimeHealth) { health in
 				HStack {
 					VStack(alignment: .leading) {
