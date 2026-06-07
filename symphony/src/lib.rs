@@ -3159,6 +3159,39 @@ Body
         );
     }
 
+    #[test]
+    fn render_report_markdown_lists_review_artifacts() {
+        let issue = NormalizedIssue {
+            description: Some("Ship the reviewable report path.".to_string()),
+            ..mock_issue("acme/app", 34)
+        };
+        let started_at = DateTime::parse_from_rfc3339("2026-06-07T01:02:03Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ended_at = DateTime::parse_from_rfc3339("2026-06-07T01:04:05Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let markdown = render_report_markdown(
+            "run-34",
+            &issue,
+            Path::new("/tmp/workspaces/_34"),
+            Path::new("/tmp/workspaces/_34/workspace-manifest.json"),
+            "auditorium/issue-34-reviewable-report",
+            "completed",
+            Some("https://github.com/acme/app/pull/34"),
+            &["README.md".to_string(), "src/lib.rs".to_string()],
+            Some("\nchecks passed\n"),
+            started_at,
+            ended_at,
+        );
+
+        assert!(markdown.contains("Pull Request: https://github.com/acme/app/pull/34"));
+        assert!(markdown.contains("- `README.md`\n- `src/lib.rs`"));
+        assert!(markdown.contains("```text\nchecks passed\n```"));
+        assert!(!markdown.contains("\n\nchecks passed\n\n"));
+    }
+
     #[tokio::test]
     async fn write_workspace_manifest_persists_inspectable_json() {
         let tempdir = tempfile::tempdir().unwrap();
