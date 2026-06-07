@@ -17,12 +17,12 @@ Legend:
 - [x] Add root `SPEC.md`.
 - [x] Add root `CHECKLIST.md`.
 - [x] Add `.gitignore` for Xcode user state.
-- [ ] Add developer-facing README with build/run/test commands.
-- [ ] Add CI workflow for macOS build and tests.
+- [x] Add developer-facing README with build/run/test commands.
+- [x] Add CI workflow for macOS build and tests.
 
 Acceptance gate:
 
-- [ ] A fresh clone can build the app from documented commands.
+- [~] Documented commands build in the working tree; fresh-clone verification remains.
 - [ ] CI proves the documented commands stay valid.
 
 ## 1. Domain Model And SwiftData
@@ -50,9 +50,9 @@ Acceptance gate:
 - [x] Keep future adapter placeholders for Linear, GitLab, Bitbucket, Azure DevOps, Azure Boards, and generic Git.
 - [x] Add reusable provider authentication descriptors.
 - [x] Add tests proving GitHub providers use the repeatable protocol shape.
-- [ ] Add provider registry/factory so orchestration does not instantiate concrete providers directly.
-- [ ] Add provider capability model for supported operations.
-- [ ] Distinguish detected, authenticated, authorized, and implemented provider states in UI.
+- [x] Add provider registry/factory so orchestration does not instantiate concrete providers directly.
+- [x] Add provider capability model for supported operations.
+- [~] Distinguish detected, authenticated, authorized, and implemented provider states in UI.
 
 Acceptance gate:
 
@@ -68,10 +68,10 @@ Acceptance gate:
 - [~] Allow pasted access token as temporary bootstrap.
 - [ ] Implement GitHub OAuth device flow or native callback flow.
 - [ ] Store and refresh OAuth token metadata safely.
-- [ ] Validate granted scopes.
-- [ ] Detect missing or insufficient GitHub credentials before import/run.
-- [ ] Add Settings UI for connected GitHub account.
-- [ ] Add clear credentials action.
+- [x] Validate granted scopes.
+- [~] Detect missing or insufficient GitHub credentials before import/run.
+- [~] Add Settings UI for connected GitHub account.
+- [x] Add clear credentials action.
 - [ ] Add tests for Keychain-backed account lifecycle.
 
 Acceptance gate:
@@ -82,16 +82,16 @@ Acceptance gate:
 
 ## 4. GitHub Source-Code Provider
 
-- [ ] List repositories visible to authenticated user.
+- [x] List repositories visible to authenticated user.
 - [ ] Fetch repository metadata.
-- [ ] Clone repository into project repository path.
-- [ ] Update existing clone safely.
+- [x] Clone repository into project repository path.
+- [x] Update existing clone safely.
 - [ ] Create deterministic ticket branch names.
 - [ ] Commit agent changes.
 - [ ] Push ticket branch.
-- [ ] Open pull request.
+- [x] Open pull request.
 - [ ] Fetch PR/check status.
-- [ ] Add tests with mocked GitHub API responses.
+- [x] Add tests with mocked GitHub API responses.
 
 Acceptance gate:
 
@@ -100,16 +100,16 @@ Acceptance gate:
 
 ## 5. GitHub Issues Provider
 
-- [ ] List issues for selected repository.
+- [x] List issues for selected repository.
 - [ ] Support issue filter/query for v0.
 - [ ] Fetch issue details.
-- [ ] Normalize issue number, node ID, title, body, labels, assignees, URL, timestamps, and state.
-- [ ] Add issue comments.
+- [x] Normalize issue number, node ID, title, body, labels, assignees, URL, timestamps, and state.
+- [x] Add issue comments.
 - [ ] Optionally add/update labels when workflow policy allows.
-- [ ] Avoid closing issues automatically in v0.
+- [x] Avoid closing issues automatically in v0.
 - [ ] Add pagination handling.
 - [ ] Add rate-limit/error handling.
-- [ ] Add tests with mocked GitHub API responses.
+- [x] Add tests with mocked GitHub API responses.
 
 Acceptance gate:
 
@@ -162,7 +162,7 @@ Acceptance gate:
 - [ ] Add drag-and-drop verification.
 - [ ] Add multi-select queue actions.
 - [ ] Add per-run queue snapshot.
-- [ ] Prevent duplicate queue items reliably across all entry points.
+- [x] Prevent duplicate queue items reliably across all entry points.
 
 Acceptance gate:
 
@@ -347,12 +347,12 @@ Acceptance gate:
 - [x] Store default workflow policy markdown.
 - [x] Use workflow policy in mock prompts.
 - [ ] Add workflow editor UI.
-- [ ] Parse YAML front matter.
-- [ ] Validate policy values.
-- [ ] Snapshot policy per run.
-- [ ] Read repository-owned `WORKFLOW.md`.
+- [x] Parse YAML front matter.
+- [~] Validate policy values.
+- [~] Snapshot policy per run.
+- [x] Read repository-owned `WORKFLOW.md`.
 - [ ] Support live reload in `symphony` CLI.
-- [ ] Add parser tests.
+- [x] Add parser tests.
 
 Acceptance gate:
 
@@ -360,37 +360,37 @@ Acceptance gate:
 
 ## 19. Rust `symphony` CLI
 
-- [ ] Create Rust workspace/crate.
-- [ ] Add `symphony` binary target.
-- [ ] Add `clap` command parser.
-- [ ] Add `tokio` runtime.
-- [ ] Add `serde`/`serde_json`.
-- [ ] Add YAML front matter parser.
-- [ ] Add `tracing` logging.
-- [ ] Add GitHub client.
-- [ ] Add workflow loader.
-- [ ] Add typed config layer.
-- [ ] Add workspace manager.
-- [ ] Add orchestrator.
-- [ ] Add Codex process runner.
-- [ ] Add report generator.
-- [ ] Add NDJSON event output for app ingestion.
-- [ ] Add stable error codes.
+- [x] Create Rust workspace/crate.
+- [x] Add `symphony` binary target.
+- [x] Add `clap` command parser.
+- [x] Add `tokio` runtime.
+- [x] Add `serde`/`serde_json`.
+- [x] Add YAML front matter parser.
+- [x] Add `tracing` logging.
+- [x] Add GitHub client.
+- [x] Add workflow loader.
+- [x] Add typed config layer.
+- [x] Add workspace manager.
+- [~] Add orchestrator.
+- [x] Add Codex process runner.
+- [x] Add report generator.
+- [x] Add NDJSON event output for app ingestion.
+- [x] Add stable error codes.
 
 Acceptance gate:
 
-- [ ] `cargo test` passes.
-- [ ] `symphony doctor --json` works.
+- [x] `cargo test` passes.
+- [x] `symphony doctor --json` works.
 - [ ] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER` can complete one issue.
 
 ## 20. `symphony` CLI Commands
 
-- [ ] `symphony init`
-- [ ] `symphony doctor`
-- [ ] `symphony doctor --json`
-- [ ] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
-- [ ] `symphony daemon --project PROJECT_ID`
-- [ ] `symphony report --run RUN_ID`
+- [x] `symphony init`
+- [x] `symphony doctor`
+- [x] `symphony doctor --json`
+- [~] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
+- [~] `symphony daemon --project PROJECT_ID`
+- [x] `symphony report --run RUN_ID`
 
 Acceptance gate:
 
@@ -398,12 +398,12 @@ Acceptance gate:
 
 ## 21. App And CLI Integration
 
-- [ ] Decide app-to-CLI invocation boundary.
-- [ ] Pass project/run context to CLI.
-- [ ] Stream CLI NDJSON events into SwiftData runtime events.
+- [x] Decide app-to-CLI invocation boundary.
+- [x] Pass project/run context to CLI.
+- [x] Stream CLI NDJSON events into SwiftData runtime events.
 - [ ] Handle CLI cancellation.
-- [ ] Handle CLI failure exit codes.
-- [ ] Persist CLI-generated reports.
+- [x] Handle CLI failure exit codes.
+- [x] Persist CLI-generated reports.
 - [ ] Surface CLI doctor output in Settings/Dashboard.
 
 Acceptance gate:
@@ -427,7 +427,7 @@ Acceptance gate:
 - [ ] Swift tests for retry behavior.
 - [ ] Swift tests for cancellation.
 - [ ] Swift tests for bounded concurrency.
-- [ ] Rust unit tests.
+- [x] Rust unit tests.
 - [ ] Rust integration tests.
 - [ ] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
@@ -440,9 +440,9 @@ Acceptance gate:
 
 - [x] Local macOS Debug build passes.
 - [x] Focused Swift unit target passes.
-- [ ] Full Xcode scheme tests are reliable.
-- [ ] GitHub Actions macOS build workflow.
-- [ ] GitHub Actions Rust test workflow.
+- [x] Full Xcode scheme tests are reliable.
+- [x] GitHub Actions macOS build workflow.
+- [x] GitHub Actions Rust test workflow.
 - [ ] Release build configuration.
 - [ ] Signing/entitlements review.
 - [ ] App sandbox/security policy decision.
@@ -471,10 +471,10 @@ Acceptance gate:
 - [ ] Live events appear in UI.
 - [ ] Ticket inspector reflects current state.
 - [ ] Markdown report is generated and saved.
-- [ ] `symphony doctor` works.
+- [x] `symphony doctor` works.
 - [ ] `symphony run` works.
-- [ ] Swift tests pass.
-- [ ] Rust tests pass.
-- [ ] macOS app builds cleanly.
+- [x] Swift tests pass.
+- [x] Rust tests pass.
+- [x] macOS app builds cleanly.
 
 v0 is not complete until every item in this section is checked.
