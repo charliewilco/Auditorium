@@ -20,9 +20,14 @@ jobs:
   rust:
     name: symphony
     runs-on: macos-15
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
+      CARGO_NET_RETRY: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch dependencies
+        run: cargo fetch --locked
       - name: Format
         run: cargo fmt --all --check
       - name: Test
