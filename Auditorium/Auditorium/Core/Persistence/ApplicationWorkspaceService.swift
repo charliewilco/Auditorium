@@ -2,14 +2,17 @@ import Foundation
 
 struct ApplicationWorkspaceService {
 	let rootDirectory: URL
+	private let pathSettings: @Sendable () -> ApplicationPathSettings
 
-	init(rootDirectory: URL? = nil) {
+	init(rootDirectory: URL? = nil, pathSettings: @escaping @Sendable () -> ApplicationPathSettings = { ApplicationPathSettings.load() }) {
 		if let rootDirectory {
 			self.rootDirectory = rootDirectory
-		} else {
+		}
+		else {
 			let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 			self.rootDirectory = base.appending(path: "Auditorium")
 		}
+		self.pathSettings = pathSettings
 	}
 
 	func projectDirectory(projectID: UUID) -> URL {
@@ -29,11 +32,14 @@ struct ApplicationWorkspaceService {
 	}
 
 	func logsDirectory(projectID: UUID) -> URL {
-		projectDirectory(projectID: projectID).appending(path: "Logs")
+		pathSettings().logsDirectory(defaultDirectory: projectDirectory(projectID: projectID).appending(path: "Logs"), projectID: projectID)
 	}
 
 	func reportDirectory(projectID: UUID) -> URL {
-		projectDirectory(projectID: projectID).appending(path: "Reports")
+		pathSettings().reportsDirectory(
+			defaultDirectory: projectDirectory(projectID: projectID).appending(path: "Reports"),
+			projectID: projectID
+		)
 	}
 
 	func reportPath(projectID: UUID, runID: UUID) -> URL {
@@ -45,7 +51,7 @@ struct ApplicationWorkspaceService {
 			repositoryDirectory(projectID: projectID),
 			workspacesDirectory(projectID: projectID),
 			logsDirectory(projectID: projectID),
-			reportDirectory(projectID: projectID)
+			reportDirectory(projectID: projectID),
 		]
 		for directory in directories {
 			try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

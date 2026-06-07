@@ -28,9 +28,12 @@ struct SettingsContentView: View {
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
 	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
-	@AppStorage("runtimeIsolationLevel") private var runtimeIsolationLevel = "Mock isolated workspace"
+	@AppStorage(ApplicationSettingsKeys.runtimeIsolationLevel) private var runtimeIsolationLevelRaw = RuntimeIsolationLevel.localWorkspace
+		.rawValue
 	@AppStorage("reportAutoSave") private var reportAutoSave = true
 	@AppStorage("logRetentionDays") private var logRetentionDays = 30
+	@AppStorage(ApplicationSettingsKeys.logsDirectoryPath) private var logsDirectoryPath = ""
+	@AppStorage(ApplicationSettingsKeys.reportsDirectoryPath) private var reportsDirectoryPath = ""
 
 	var body: some View {
 		ScrollView {
@@ -96,7 +99,14 @@ struct SettingsContentView: View {
 					Toggle("Require confirmation before opening PRs", isOn: $requirePROpenConfirmation)
 					Toggle("Allow network access", isOn: $allowNetworkAccess)
 					Toggle("Allow filesystem write", isOn: $allowFilesystemWrite)
-					TextField("Runtime isolation level", text: $runtimeIsolationLevel)
+					Picker("Runtime isolation", selection: $runtimeIsolationLevelRaw) {
+						ForEach(RuntimeIsolationLevel.allCases) { level in
+							Text(level.title).tag(level.rawValue)
+						}
+					}
+					Text(selectedRuntimeIsolationLevel.detail)
+						.font(.caption)
+						.foregroundStyle(.secondary)
 				}
 				settingsSection("Concurrency") {
 					Text("Per-project queue concurrency is controlled from the Queue screen.")
@@ -104,9 +114,21 @@ struct SettingsContentView: View {
 				}
 				settingsSection("Reports") {
 					Toggle("Save reports to project history", isOn: $reportAutoSave)
+					pathField(
+						title: "Reports root",
+						path: $reportsDirectoryPath,
+						fallback: "Application Support/Auditorium/Projects/<project>/Reports",
+						choose: { chooseDirectory(for: $reportsDirectoryPath) }
+					)
 				}
 				settingsSection("Logs") {
 					Stepper("Retain logs for \(logRetentionDays) days", value: $logRetentionDays, in: 1...365)
+					pathField(
+						title: "Logs root",
+						path: $logsDirectoryPath,
+						fallback: "Application Support/Auditorium/Projects/<project>/Logs",
+						choose: { chooseDirectory(for: $logsDirectoryPath) }
+					)
 				}
 			}
 			.padding()
@@ -115,6 +137,10 @@ struct SettingsContentView: View {
 
 	private var runtimeProviderStatuses: [RuntimeProviderStatus] {
 		RuntimeDetectionService.runtimeProviderStatuses(from: runtimeHealth)
+	}
+
+	private var selectedRuntimeIsolationLevel: RuntimeIsolationLevel {
+		RuntimeIsolationLevel(rawValue: runtimeIsolationLevelRaw) ?? .localWorkspace
 	}
 
 	private var githubAuthenticationState: GitHubAuthenticationState {
@@ -184,6 +210,34 @@ struct SettingsContentView: View {
 					Text(provider)
 				}
 			}
+		}
+	}
+
+	private func pathField(title: String, path: Binding<String>, fallback: String, choose: @escaping () -> Void) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			HStack {
+				TextField(fallback, text: path)
+				Button(action: choose) {
+					Label("Choose", systemImage: "folder")
+				}
+			}
+			Text(
+				path.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+					? "Default: \(fallback)" : "\(title): \(path.wrappedValue)"
+			)
+			.font(.caption)
+			.foregroundStyle(.secondary)
+		}
+	}
+
+	private func chooseDirectory(for path: Binding<String>) {
+		let panel = NSOpenPanel()
+		panel.canChooseFiles = false
+		panel.canChooseDirectories = true
+		panel.allowsMultipleSelection = false
+		panel.canCreateDirectories = true
+		if panel.runModal() == .OK, let url = panel.url {
+			path.wrappedValue = url.path()
 		}
 	}
 

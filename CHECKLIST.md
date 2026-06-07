@@ -335,8 +335,8 @@ Acceptance gate:
 - [x] Enforce confirmation before opening PRs.
 - [x] Show Keychain storage explanation.
 - [x] Clear GitHub credentials.
-- [ ] Configure runtime isolation level.
-- [ ] Configure logs/reports paths.
+- [x] Configure runtime isolation level.
+- [x] Configure logs/reports paths.
 
 Acceptance gate:
 

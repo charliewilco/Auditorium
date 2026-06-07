@@ -72,6 +72,48 @@ struct AuditoriumTests {
 		#expect(state.items[1].url == URL(fileURLWithPath: "/tmp/custom-repository"))
 	}
 
+	@Test func applicationPathSettingsLoadTypedValuesFromDefaults() throws {
+		let suiteName = "AuditoriumTests-\(UUID().uuidString)"
+		let defaults = try #require(UserDefaults(suiteName: suiteName))
+		defer { defaults.removePersistentDomain(forName: suiteName) }
+		defaults.set(RuntimeIsolationLevel.mockOnly.rawValue, forKey: ApplicationSettingsKeys.runtimeIsolationLevel)
+		defaults.set("~/AuditoriumLogs", forKey: ApplicationSettingsKeys.logsDirectoryPath)
+		defaults.set("/tmp/AuditoriumReports", forKey: ApplicationSettingsKeys.reportsDirectoryPath)
+
+		let settings = ApplicationPathSettings.load(defaults: defaults)
+
+		#expect(settings.runtimeIsolationLevel == .mockOnly)
+		#expect(settings.logsDirectoryPath == "~/AuditoriumLogs")
+		#expect(settings.reportsDirectoryPath == "/tmp/AuditoriumReports")
+		#expect(
+			settings.logsDirectory(
+				defaultDirectory: URL(fileURLWithPath: "/default/logs"),
+				projectID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+			).path().contains("AuditoriumLogs/44444444-4444-4444-4444-444444444444")
+		)
+	}
+
+	@Test func workspaceServiceUsesConfiguredLogsAndReportsRoots() {
+		let projectID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+		let root = URL(fileURLWithPath: "/tmp/AuditoriumRoot")
+		let logsRoot = URL(fileURLWithPath: "/tmp/AuditoriumCustomLogs")
+		let reportsRoot = URL(fileURLWithPath: "/tmp/AuditoriumCustomReports")
+		let service = ApplicationWorkspaceService(rootDirectory: root) {
+			ApplicationPathSettings(
+				runtimeIsolationLevel: .localWorkspace,
+				logsDirectoryPath: logsRoot.path(),
+				reportsDirectoryPath: reportsRoot.path()
+			)
+		}
+
+		#expect(
+			service.workspacesDirectory(projectID: projectID)
+				== root.appending(path: "Projects").appending(path: projectID.uuidString).appending(path: "Workspaces")
+		)
+		#expect(service.logsDirectory(projectID: projectID) == logsRoot.appending(path: projectID.uuidString))
+		#expect(service.reportDirectory(projectID: projectID) == reportsRoot.appending(path: projectID.uuidString))
+	}
+
 	@Test func defaultWorkspaceCleanupPolicyPreservesTerminalWorkspaces() throws {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }
@@ -3113,6 +3155,30 @@ struct AuditoriumTests {
 		)
 
 		#expect(throws: RunSecurityPolicyError.filesystemWriteDisabled) {
+			try RunSecurityPolicy().validate(project: project, preferences: preferences)
+		}
+	}
+
+	@Test func runSecurityPolicyBlocksRuntimesOutsideIsolationLevel() throws {
+		let project = Project(
+			name: "Local Run",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .mockAgent
+		)
+		let preferences = RunSecurityPreferences(
+			allowNetworkAccess: true,
+			allowFilesystemWrite: true,
+			requireRunConfirmation: true,
+			requirePullRequestConfirmation: true,
+			runtimeIsolationLevel: .mockOnly
+		)
+
+		#expect(throws: RunSecurityPolicyError.runtimeIsolationDisallowsProvider(.mockOnly, .localWorkspace)) {
 			try RunSecurityPolicy().validate(project: project, preferences: preferences)
 		}
 	}
