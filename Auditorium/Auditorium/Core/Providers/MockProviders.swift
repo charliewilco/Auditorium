@@ -58,11 +58,11 @@ struct MockRuntimeProvider: RuntimeProvider {
 		let workspace = workspaceService.workspacePath(projectID: projectID, ticketExternalID: ticket.externalID)
 		try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
 		let branch = "auditorium/\(workspaceService.sanitize(ticket.externalID))-\(workspaceService.sanitize(ticket.title).prefix(32))"
-		return WorkspaceDescriptor(path: workspace, containerID: "mock-\(ticket.externalID.lowercased())", branchName: branch)
+		return WorkspaceDescriptor(path: workspace, runtimeID: "mock-\(ticket.externalID.lowercased())", branchName: branch)
 	}
 
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle {
-		RuntimeExecutionHandle(id: request.workspace.containerID, workspacePath: request.workspace.path)
+		RuntimeExecutionHandle(id: request.workspace.runtimeID, workspacePath: request.workspace.path)
 	}
 
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {}
@@ -73,12 +73,24 @@ struct MockCodexAgentProvider: AgentProvider {
 		let outcome = MockOutcomePolicy.outcome(for: request.ticket.externalID)
 		let steps: [AgentEvent] = [
 			AgentEvent(level: .info, category: .runtime, message: "Creating isolated workspace", summary: nil, outcome: nil),
-			AgentEvent(level: .info, category: .runtime, message: "Starting mock container \(request.workspace.containerID)", summary: nil, outcome: nil),
+			AgentEvent(
+				level: .info,
+				category: .runtime,
+				message: "Starting mock runtime \(request.workspace.runtimeID)",
+				summary: nil,
+				outcome: nil
+			),
 			AgentEvent(level: .info, category: .agent, message: "Reading \(request.ticket.externalID)", summary: nil, outcome: nil),
 			AgentEvent(level: .info, category: .agent, message: "Planning focused implementation", summary: nil, outcome: nil),
-			AgentEvent(level: .info, category: .agent, message: "Editing repository files in \(request.workspace.path.lastPathComponent)", summary: nil, outcome: nil),
+			AgentEvent(
+				level: .info,
+				category: .agent,
+				message: "Editing repository files in \(request.workspace.path.lastPathComponent)",
+				summary: nil,
+				outcome: nil
+			),
 			AgentEvent(level: .info, category: .tests, message: "Running relevant validation", summary: nil, outcome: nil),
-			finalEvent(outcome: outcome, request: request)
+			finalEvent(outcome: outcome, request: request),
 		]
 
 		return AsyncThrowingStream { continuation in

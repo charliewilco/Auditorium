@@ -329,7 +329,7 @@ final class TicketRunRecord {
 	var runID: UUID
 	var ticketID: UUID
 	var workspacePath: String
-	var containerID: String
+	var runtimeID: String
 	var branchName: String
 	var statusRaw: String
 	var startedAt: Date?
@@ -346,7 +346,7 @@ final class TicketRunRecord {
 		runID: UUID,
 		ticketID: UUID,
 		workspacePath: String = "",
-		containerID: String = "",
+		runtimeID: String = "",
 		branchName: String = "",
 		status: TicketRunStatus = .pending,
 		startedAt: Date? = nil,
@@ -362,7 +362,7 @@ final class TicketRunRecord {
 		self.runID = runID
 		self.ticketID = ticketID
 		self.workspacePath = workspacePath
-		self.containerID = containerID
+		self.runtimeID = runtimeID
 		self.branchName = branchName
 		self.statusRaw = status.rawValue
 		self.startedAt = startedAt
@@ -575,29 +575,29 @@ final class ProviderAccountRecord {
 
 struct WorkflowPolicy {
 	static let defaultMarkdown = """
-	---
-	concurrency: 3
-	max_retries: 2
-	handoff_status: "Needs Review"
-	update_issue_labels: false
-	branch_prefix: "auditorium"
-	run_tests: true
-	open_pull_request: true
-	---
-	You are an autonomous coding agent working on a single issue.
-	Your job:
-	1. Read the issue carefully.
-	2. Inspect the repository.
-	3. Create a focused implementation plan.
-	4. Make the smallest correct change.
-	5. Run relevant tests.
-	6. Fix failures.
-	7. Commit changes on a ticket-specific branch.
-	8. Open a pull request.
-	9. Leave a concise summary for human review.
-	Do not make unrelated changes.
-	Do not touch secrets.
-	Do not rewrite large areas unless the issue requires it.
-	When blocked, explain exactly what is missing.
-	"""
+		---
+		concurrency: 3
+		max_retries: 2
+		handoff_status: "Needs Review"
+		update_issue_labels: false
+		branch_prefix: "auditorium"
+		run_tests: true
+		open_pull_request: true
+		---
+		You are an autonomous coding agent working on a single issue.
+		Your job:
+		1. Read the issue carefully.
+		2. Inspect the repository.
+		3. Create a focused implementation plan.
+		4. Make the smallest correct change.
+		5. Run relevant tests.
+		6. Fix failures.
+		7. Commit changes on a ticket-specific branch.
+		8. Open a pull request.
+		9. Leave a concise summary for human review.
+		Do not make unrelated changes.
+		Do not touch secrets.
+		Do not rewrite large areas unless the issue requires it.
+		When blocked, explain exactly what is missing.
+		"""
 }

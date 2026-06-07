@@ -12,55 +12,11 @@ struct RuntimeDetectionService {
 			return staticChecks
 		}
 
-		let os = ProcessInfo.processInfo.operatingSystemVersion
-		let isAppleSilicon = RuntimeDetectionService.isAppleSilicon
-		let containerPath = await findExecutable(named: "container", extraPath: "/usr/local/bin/container")
-		let containerVersionOutput =
-			containerPath == nil ? nil : await commandOutput(containerPath!, arguments: ["system", "version", "--format", "json"])
-		let containerVersion = containerVersionOutput.flatMap(Self.containerCLIVersion(from:))
-		let containerStatus =
-			containerPath == nil ? nil : await commandOutput(containerPath!, arguments: ["system", "status", "--format", "json"])
 		let gitPath = await findExecutable(named: "git")
 		let codexPath = await findExecutable(named: "codex")
 		let ghPath = await findExecutable(named: "gh")
 
 		var checks: [RuntimeHealthCheck] = []
-		let appleState: RuntimeHealthState
-		let appleDetail: String
-		if !isAppleSilicon {
-			appleState = .unsupported
-			appleDetail = "Apple Container requires Apple silicon."
-		}
-		else if os.majorVersion < 26 {
-			appleState = .unsupported
-			appleDetail = "Apple Container is gated until macOS 26+."
-		}
-		else if containerPath == nil {
-			appleState = .needsSetup
-			appleDetail = "container CLI was not found."
-		}
-		else if containerVersionOutput == nil {
-			appleState = .unavailable
-			appleDetail = "container CLI exists at \(containerPath!), but `container system version --format json` did not respond."
-		}
-		else if containerStatus == nil {
-			appleState = .unavailable
-			appleDetail = Self.appleContainerServiceUnavailableDetail(path: containerPath!)
-		}
-		else {
-			appleState = .available
-			appleDetail = "container system service is running at \(containerPath!)."
-		}
-		checks.append(
-			RuntimeHealthCheck(
-				id: "apple-container",
-				name: "Apple Container",
-				state: appleState,
-				detail: appleDetail,
-				version: containerVersion
-			)
-		)
-
 		checks.append(check(for: "git", displayName: "Git", path: gitPath))
 		checks.append(check(for: "codex", displayName: "Codex CLI", path: codexPath))
 		checks.append(check(for: "gh", displayName: "GitHub CLI", path: ghPath))
@@ -192,25 +148,6 @@ struct RuntimeDetectionService {
 		}.value
 	}
 
-	static func containerCLIVersion(from json: String) -> String? {
-		struct Component: Decodable {
-			let appName: String
-			let version: String
-		}
-
-		guard let data = json.data(using: .utf8),
-			let components = try? JSONDecoder().decode([Component].self, from: data)
-		else {
-			return nil
-		}
-
-		return components.first(where: { $0.appName == "container" })?.version
-	}
-
-	static func appleContainerServiceUnavailableDetail(path: String) -> String {
-		"container CLI exists at \(path), but the system service did not respond. Start it manually with `container system start`; Auditorium will not start it automatically."
-	}
-
 	static func runtimeProviderStatuses(from checks: [RuntimeHealthCheck]) -> [RuntimeProviderStatus] {
 		RuntimeProviderKind.allCases.map { kind in
 			let detection = runtimeDetection(for: kind, checks: checks)
@@ -248,15 +185,11 @@ struct RuntimeDetectionService {
 		switch kind {
 		case .localWorkspace, .mockRuntime:
 			.implemented
-		case .appleContainer:
-			.unavailable
 		}
 	}
 
 	private static func implementationDetail(for kind: RuntimeProviderKind) -> String {
 		switch kind {
-		case .appleContainer:
-			"Apple Container execution is not implemented in v0."
 		case .localWorkspace:
 			"Implemented with local clone, branch, process, and file workspace execution."
 		case .mockRuntime:
@@ -264,11 +197,4 @@ struct RuntimeDetectionService {
 		}
 	}
 
-	static var isAppleSilicon: Bool {
-		#if arch(arm64)
-			return true
-		#else
-			return false
-		#endif
-	}
 }

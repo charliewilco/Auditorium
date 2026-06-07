@@ -1797,7 +1797,7 @@ struct AuditoriumTests {
 			runID: run.id,
 			ticketID: ticket.id,
 			workspacePath: "/tmp/auditorium/workspace",
-			containerID: "local",
+			runtimeID: "local",
 			branchName: "auditorium/issue-101",
 			status: .needsReview,
 			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/101",
@@ -1828,7 +1828,7 @@ struct AuditoriumTests {
 		#expect(state.queueState == "Position 3")
 		#expect(state.latestRunState == "Needs Review")
 		#expect(state.workspace == "/tmp/auditorium/workspace")
-		#expect(state.container == "local")
+		#expect(state.runtime == "local")
 		#expect(state.branch == "auditorium/issue-101")
 		#expect(state.pullRequest == "https://github.com/charliewilco/Auditorium/pull/101")
 		#expect(state.confidence == "91%")
@@ -1866,7 +1866,7 @@ struct AuditoriumTests {
 			runID: run.id,
 			ticketID: ticket.id,
 			workspacePath: "",
-			containerID: "local",
+			runtimeID: "local",
 			branchName: "auditorium/issue-102",
 			status: .running
 		)
@@ -2503,7 +2503,7 @@ struct AuditoriumTests {
 		let handleJSON = try #require(String(data: handleData, encoding: .utf8))
 
 		#expect(workspace.path == workspaceService.workspacePath(projectID: projectID, ticketExternalID: "ISSUE-42"))
-		#expect(workspace.containerID == "local-issue-42")
+		#expect(workspace.runtimeID == "local-issue-42")
 		#expect(workspace.branchName == "auditorium/issue-42-fix-local-runtime")
 		#expect(sourceProvider.clonePaths == [workspace.path])
 		#expect(sourceProvider.createdBranches.map { $0.name } == ["auditorium/issue-42-fix-local-runtime"])
@@ -3224,59 +3224,19 @@ struct AuditoriumTests {
 		let checks = await RuntimeDetectionService().detect()
 		let ids = Set(checks.map(\.id))
 
-		#expect(ids.contains("apple-container"))
 		#expect(ids.contains("git"))
 		#expect(ids.contains("codex"))
 		#expect(ids.contains("gh"))
 	}
 
-	@Test func appleContainerVersionParsingUsesCLIComponent() {
-		let json = """
-			[
-				{
-					"appName": "container",
-					"buildType": "release",
-					"commit": "abcdef1",
-					"version": "0.12.3"
-				},
-				{
-					"appName": "container-apiserver",
-					"buildType": "release",
-					"commit": "1234abc",
-					"version": "container-apiserver version 0.12.3"
-				}
-			]
-			"""
-
-		#expect(RuntimeDetectionService.containerCLIVersion(from: json) == "0.12.3")
-	}
-
-	@Test func appleContainerServiceGuidanceDoesNotAutoStart() {
-		let detail = RuntimeDetectionService.appleContainerServiceUnavailableDetail(path: "/usr/local/bin/container")
-
-		#expect(detail.contains("container system start"))
-		#expect(detail.contains("will not start it automatically"))
-	}
-
 	@Test func runtimeProviderStatusesSeparateDetectionFromImplementation() {
 		let statuses = RuntimeDetectionService.runtimeProviderStatuses(from: [
-			RuntimeHealthCheck(
-				id: "apple-container",
-				name: "Apple Container",
-				state: .available,
-				detail: "container system service is running.",
-				version: "0.12.3"
-			),
-			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil)
 		])
 
-		let appleContainer = statuses.first { $0.kind == .appleContainer }
 		let localWorkspace = statuses.first { $0.kind == .localWorkspace }
 		let mockRuntime = statuses.first { $0.kind == .mockRuntime }
 
-		#expect(appleContainer?.detection.state == .available)
-		#expect(appleContainer?.implementationState == .unavailable)
-		#expect(appleContainer?.isRunnable == false)
 		#expect(localWorkspace?.implementationState == .implemented)
 		#expect(localWorkspace?.isRunnable == true)
 		#expect(mockRuntime?.implementationState == .implemented)
@@ -3289,26 +3249,26 @@ struct AuditoriumTests {
 		#expect(health.state == .available)
 	}
 
-	@Test func unavailableAppleContainerBlocksWorkspaceCreation() async throws {
+	@Test func unavailableLocalWorkspaceBlocksWorkspaceCreation() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }
 		let workspace = ApplicationWorkspaceService(rootDirectory: root)
 		let project = Project(
-			name: "Container Preflight",
+			name: "Local Workspace Preflight",
 			repositoryProviderKind: .github,
-			repositoryName: "charlie/container-preflight",
-			repositoryURL: "https://github.com/charlie/container-preflight",
+			repositoryName: "charlie/workspace-preflight",
+			repositoryURL: "https://github.com/charlie/workspace-preflight",
 			defaultBranch: "main",
 			issueProviderKind: .githubIssues,
-			runtimeProviderKind: .appleContainer,
+			runtimeProviderKind: .localWorkspace,
 			agentProviderKind: .mockAgent
 		)
 		let ticket = TicketRecord(
 			provider: .githubIssues,
-			externalID: "CON-101",
-			title: "Run in Apple Container",
+			externalID: "RUN-101",
+			title: "Run in local workspace",
 			body: "Validate runtime preflight.",
 			status: .ready,
 			labels: ["runtime"],
@@ -3328,10 +3288,10 @@ struct AuditoriumTests {
 
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(
-				id: "apple-container",
-				name: "Apple Container",
+				id: "git",
+				name: "Git",
 				state: .needsSetup,
-				detail: "container CLI was not found.",
+				detail: "Git was not found.",
 				version: nil
 			)
 		])
@@ -3448,7 +3408,7 @@ extension AuditoriumTests {
 			webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
 			defaultBranch: "main"
 		)
-		let workspace = WorkspaceDescriptor(path: workspace, containerID: "local-test", branchName: "auditorium/cod-101")
+		let workspace = WorkspaceDescriptor(path: workspace, runtimeID: "local-test", branchName: "auditorium/cod-101")
 		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown)
 	}
 
@@ -3523,7 +3483,7 @@ extension AuditoriumTests {
 			runID: runID,
 			ticketID: ticketID,
 			workspacePath: "/tmp/auditorium/workspaces/101",
-			containerID: "mock-runtime",
+			runtimeID: "mock-runtime",
 			branchName: "auditorium/101-migrate-persisted-ticket",
 			status: .completed,
 			retryCount: 0,

@@ -687,7 +687,7 @@ private struct ScreenshotData {
 				ticketID: ticket.id,
 				workspacePath:
 					"~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Workspaces/\(ticket.externalID.lowercased())",
-				containerID: "mock-\(ticket.externalID.lowercased())",
+				runtimeID: "mock-\(ticket.externalID.lowercased())",
 				branchName:
 					"auditorium/\(ticket.externalID.lowercased())-\(ticket.title.lowercased().replacingOccurrences(of: " ", with: "-"))",
 				status: index == 2 ? .blocked : index == 3 ? .failed : .needsReview,
@@ -731,13 +731,6 @@ private struct ScreenshotData {
 			filePath: "~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Reports/run-\(run.id.uuidString).md"
 		)
 		let runtimeHealth = [
-			RuntimeHealthCheck(
-				id: "apple-container",
-				name: "Apple Container",
-				state: .unsupported,
-				detail: "Apple Container is gated until macOS 26+.",
-				version: nil
-			),
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
 			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/opt/homebrew/bin/codex", version: nil),
 			RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),

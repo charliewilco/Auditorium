@@ -64,7 +64,7 @@ struct PullRequestDescriptor: Sendable {
 
 struct WorkspaceDescriptor: Sendable {
 	let path: URL
-	let containerID: String
+	let runtimeID: String
 	let branchName: String
 }
 

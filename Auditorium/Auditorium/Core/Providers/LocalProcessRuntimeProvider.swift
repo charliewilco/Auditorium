@@ -28,7 +28,11 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 		let branchName = sourceProvider.ticketBranchName(for: ticket, prefix: branchPrefix)
 		try await sourceProvider.createBranch(named: branchName, in: workspace)
 		try FileManager.default.createDirectory(at: metadataDirectory(for: workspace), withIntermediateDirectories: true)
-		return WorkspaceDescriptor(path: workspace, containerID: "local-\(workspaceService.sanitize(ticket.externalID))", branchName: branchName)
+		return WorkspaceDescriptor(
+			path: workspace,
+			runtimeID: "local-\(workspaceService.sanitize(ticket.externalID))",
+			branchName: branchName
+		)
 	}
 
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle {
@@ -36,7 +40,7 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 		guard FileManager.default.fileExists(atPath: request.workspace.path.path()) else {
 			throw ProviderError.unavailable("Local workspace does not exist at \(request.workspace.path.path()).")
 		}
-		let handle = RuntimeExecutionHandle(id: request.workspace.containerID, workspacePath: request.workspace.path)
+		let handle = RuntimeExecutionHandle(id: request.workspace.runtimeID, workspacePath: request.workspace.path)
 		let metadata = LocalRuntimeHandleMetadata(
 			id: handle.id,
 			workspacePath: handle.workspacePath.path(),
@@ -56,7 +60,11 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {
 		try Task.checkCancellation()
 		try FileManager.default.createDirectory(at: metadataDirectory(for: handle.workspacePath), withIntermediateDirectories: true)
-		try "stopped\n".write(to: metadataDirectory(for: handle.workspacePath).appending(path: "runtime-stopped"), atomically: true, encoding: .utf8)
+		try "stopped\n".write(
+			to: metadataDirectory(for: handle.workspacePath).appending(path: "runtime-stopped"),
+			atomically: true,
+			encoding: .utf8
+		)
 	}
 
 	func runtimeHandlePath(for workspace: URL) -> URL {

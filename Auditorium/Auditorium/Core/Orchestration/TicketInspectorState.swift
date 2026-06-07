@@ -4,7 +4,7 @@ struct TicketInspectorState: Equatable {
 	let queueState: String
 	let latestRunState: String
 	let workspace: String
-	let container: String
+	let runtime: String
 	let branch: String
 	let pullRequest: String
 	let confidence: String
@@ -29,7 +29,7 @@ struct TicketInspectorState: Equatable {
 		queueState = queueItem.map { "Position \($0.position + 1)" } ?? "Not queued"
 		latestRunState = latestRun?.status.title ?? "No run"
 		workspace = latestRun?.workspacePath.isEmpty == false ? latestRun?.workspacePath ?? "None" : "None"
-		container = latestRun?.containerID.isEmpty == false ? latestRun?.containerID ?? "None" : "None"
+		runtime = latestRun?.runtimeID.isEmpty == false ? latestRun?.runtimeID ?? "None" : "None"
 		branch = latestRun?.branchName.isEmpty == false ? latestRun?.branchName ?? "None" : "None"
 		pullRequest = latestRun?.pullRequestURL ?? "None"
 		confidence = latestRun == nil ? "None" : "\(Int((latestRun?.confidence ?? 0) * 100))%"

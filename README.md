@@ -86,7 +86,7 @@ Working today:
 - SwiftData models exist for projects, repositories, issue trackers, tickets, queues, runs, ticket runs, pull requests, events, reports, and provider accounts.
 - Demo mode can seed a Burton Demo project with realistic tickets.
 - Mock orchestration can create ticket runs, stream events, generate fake PR URLs, and produce markdown reports.
-- Runtime detection checks Apple silicon, macOS version, Apple `container`, Git, Codex CLI, and GitHub CLI.
+- Runtime detection checks Git, Codex CLI, and GitHub CLI.
 - Provider protocols exist for source-code and issue-tracker adapters.
 - GitHub provider adapter shape exists.
 - `symphony` CLI can initialize workflows, run doctor checks, run mock issues, and perform the first real GitHub/Codex-oriented path.
@@ -97,7 +97,6 @@ Still in progress:
 - Real GitHub issue import in the Mac app.
 - Real GitHub repository clone, branch, push, and pull request creation from the app.
 - Production Codex process integration inside the Mac app.
-- Apple Container execution provider.
 - Full app-to-CLI handoff.
 - CI validation for every platform/runtime combination.
 
@@ -111,7 +110,7 @@ v0 is intentionally GitHub-only:
 - GitHub Issues
 - GitHub OAuth
 - Codex CLI as the primary agent
-- Apple Container-aware runtime detection
+- Local Workspace as the real execution runtime
 - Local SwiftData persistence
 - Keychain-backed credentials
 - Markdown reports
@@ -219,11 +218,7 @@ For `symphony`:
 - GitHub CLI (`gh`)
 - Codex CLI for real agent execution
 
-Optional runtime tooling:
-
-- Apple `container` CLI on supported Apple silicon systems
-
-Demo mode does not require network access, GitHub credentials, Codex, or Apple Container.
+Demo mode does not require network access, GitHub credentials, or Codex.
 
 ## Quick Start: macOS App
 
@@ -462,7 +457,6 @@ Auditorium should be safe by default:
 - SwiftData stores only provider metadata.
 - Demo mode requires no network.
 - Real runs should preflight runtime and agent availability before creating workspaces.
-- Apple Container support is gated behind supported macOS and Apple silicon checks.
 - The app should never force-push or auto-merge without explicit policy.
 - Reports should not include tokens, credentials, or private auth state.
 
@@ -560,9 +554,8 @@ The next useful implementation slices are:
 3. Add a provider registry/factory so the orchestrator never depends on concrete provider types.
 4. Wire a real GitHub repository provider path: clone, branch, commit, push, pull request.
 5. Implement `CodexCLIProcessAgentProvider` for the Mac app.
-6. Add Apple Container execution provider.
-7. Connect the Mac app to the `symphony` CLI for headless runs.
-8. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
+6. Connect the Mac app to the `symphony` CLI for headless runs.
+7. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
 
 Keep the product small and observable. The best v0 is not a general agent platform; it is a trustworthy GitHub issue-to-pull-request loop with excellent local inspection.
 

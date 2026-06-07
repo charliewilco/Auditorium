@@ -2,7 +2,7 @@
 
 Status: Draft v0
 
-Auditorium is a native, local-first macOS app for visual agent orchestration. It turns a repository plus an issue source into a queue of isolated coding-agent runs. The first production slice is GitHub-only: GitHub repositories, GitHub Issues, GitHub OAuth, local SwiftData persistence, Keychain secrets, Codex CLI agent execution, and an Apple Container-aware runtime path.
+Auditorium is a native, local-first macOS app for visual agent orchestration. It turns a repository plus an issue source into a queue of isolated coding-agent runs. The first production slice is GitHub-only: GitHub repositories, GitHub Issues, GitHub OAuth, local SwiftData persistence, Keychain secrets, Codex CLI agent execution, and a local workspace runtime path.
 
 Auditorium must also ship with a Rust command-line service named `symphony`. The CLI is the headless orchestration engine and must follow the intent and service model of the OpenAI Symphony service specification at `https://github.com/openai/symphony/blob/main/SPEC.md`, adapted to Auditorium's GitHub-first product.
 
@@ -179,7 +179,7 @@ v0 defaults:
 
 - Repository provider: GitHub
 - Issue provider: GitHub Issues
-- Runtime provider: Mock Runtime until Apple Container/local execution is complete
+- Runtime provider: Local Workspace for real runs; Mock Runtime for offline demo and test runs
 - Agent provider: Mock Agent until Codex process execution is complete
 
 ## Ticket
@@ -262,7 +262,7 @@ Required fields:
 - `runID`
 - `ticketID`
 - `workspacePath`
-- `containerID`
+- `runtimeID`
 - `branchName`
 - `status`
 - `startedAt`
@@ -313,7 +313,6 @@ Required stack:
 - Observation framework with `@Observable`
 - AppKit only for macOS-specific operations
 - macOS 15+ deployment target
-- Apple Container features gated behind macOS 26+ and Apple silicon checks
 
 Forbidden patterns:
 
@@ -430,26 +429,18 @@ Creation must use a transient draft object and commit SwiftData records only on 
 
 Runtime providers:
 
-- Apple Container
 - Local Workspace
 - Mock Runtime
 
 v0:
 
 - Mock Runtime must work offline.
-- Apple Container must be detected accurately but may remain execution-placeholder until implemented.
 - Local Workspace must support real v0 execution.
 
 Preflight:
 
 - Runtime preflight must happen before creating runs, ticket runs, or workspace directories.
-- Apple Container requires:
-	- Apple silicon
-	- macOS 26+
-	- `container` executable
-	- `container system version --format json`
-	- `container system status --format json`
-- Auditorium must not auto-start Apple Container services without explicit user action.
+- Local Workspace requires Git to be available before workspace creation.
 
 ## Agent Providers
 
@@ -663,7 +654,6 @@ Command behavior:
 	- Check GitHub authentication.
 	- Check Git.
 	- Check Codex CLI.
-	- Check Apple Container when requested.
 	- Print machine-readable JSON with `--json`.
 
 - `run`
@@ -851,7 +841,6 @@ Known incomplete areas:
 - Real GitHub API implementation.
 - Real Git clone/branch/commit/push implementation.
 - Real Codex `Process` runner.
-- Real Apple Container execution.
 - True bounded concurrency.
 - Workflow policy parser and live reload.
 - Retry policy enforcement.

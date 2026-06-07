@@ -41,7 +41,8 @@ final class Orchestrator {
 		activeTask = Task {
 			do {
 				try await execute(projectID: projectID, concurrency: concurrency, context: context)
-			} catch {
+			}
+			catch {
 				try? insertRunFailure(projectID: projectID, message: error.localizedDescription, context: context)
 			}
 		}
@@ -67,7 +68,12 @@ final class Orchestrator {
 		try await runtimeDetection.requireAvailableAgent(for: project.agentProviderKind)
 		if project.runtimeProviderKind == .localWorkspace, project.agentProviderKind == .codex {
 			if providerRegistry != nil || localWorkspaceSourceProvider != nil {
-				try await executeWithLocalWorkspaceCodex(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
+				try await executeWithLocalWorkspaceCodex(
+					project: project,
+					queueItems: queueItems,
+					concurrency: concurrency,
+					context: context
+				)
 				return
 			}
 			try await executeWithSymphony(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
@@ -79,15 +85,38 @@ final class Orchestrator {
 		guard project.agentProviderKind == .mockAgent else {
 			throw ProviderError.notImplemented("\(project.agentProviderKind.title) Agent Provider")
 		}
-		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: concurrency,
+			workflowPolicyMarkdown: project.workflowPolicyMarkdown
+		)
 		try workspaceService.ensureProjectLayout(projectID: projectID)
 
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
-		let run = RunRecord(projectID: projectID, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets.")
+		let run = RunRecord(
+			projectID: projectID,
+			status: .running,
+			totalTickets: plan.queueSnapshot.count,
+			summary: "Running \(plan.queueSnapshot.count) queued tickets."
+		)
 		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Run started with bounded concurrency \(plan.concurrency)."))
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .info,
+				category: .orchestration,
+				message: "Run started with bounded concurrency \(plan.concurrency)."
+			)
+		)
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .info,
+				category: .orchestration,
+				message: "Queue and workflow policy snapshotted for this run."
+			)
+		)
 		var ticketRuns: [TicketRunRecord] = []
 		for item in plan.queueSnapshot {
 			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
@@ -101,22 +130,42 @@ final class Orchestrator {
 			owner: String(project.repositoryName.split(separator: "/").first ?? "charlie"),
 			name: String(project.repositoryName.split(separator: "/").last ?? project.repositoryName[...]),
 			fullName: project.repositoryName,
-			cloneURL: URL(string: project.repositoryURL.hasSuffix(".git") ? project.repositoryURL : "\(project.repositoryURL).git") ?? URL(fileURLWithPath: project.repositoryURL),
+			cloneURL: URL(string: project.repositoryURL.hasSuffix(".git") ? project.repositoryURL : "\(project.repositoryURL).git")
+				?? URL(fileURLWithPath: project.repositoryURL),
 			webURL: URL(string: project.repositoryURL) ?? URL(fileURLWithPath: project.repositoryURL),
 			defaultBranch: project.defaultBranch
 		)
 		let runtime = MockRuntimeProvider(workspaceService: workspaceService, projectID: projectID)
 
 		for batch in plan.batches {
-			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) ticket runs."))
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					level: .info,
+					category: .orchestration,
+					message: "Dispatching batch of \(batch.count) ticket runs."
+				)
+			)
 			try ModelIntegrityValidator.save(context: context)
 			for item in batch {
 				try Task.checkCancellation()
 				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
-					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+					let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
+				else {
 					continue
 				}
-				try await processTicketWithRecovery(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: mockAgentProvider, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
+				try await processTicketWithRecovery(
+					project: project,
+					repository: repository,
+					ticket: ticket,
+					ticketRun: ticketRun,
+					run: run,
+					runtime: runtime,
+					agent: mockAgentProvider,
+					sourceProvider: mockSourceProvider,
+					context: context,
+					workflowPolicyMarkdown: plan.workflowPolicyMarkdown
+				)
 			}
 		}
 
@@ -135,15 +184,36 @@ final class Orchestrator {
 		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == projectID }
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
 		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
-		let markdown = reportGenerator.generate(project: project, run: run, ticketRuns: ticketRuns, tickets: finalTickets, pullRequests: prs, events: events)
+		let markdown = reportGenerator.generate(
+			project: project,
+			run: run,
+			ticketRuns: ticketRuns,
+			tickets: finalTickets,
+			pullRequests: prs,
+			events: events
+		)
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: projectID, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
-		context.insert(ReportRecord(projectID: projectID, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		context.insert(
+			ReportRecord(
+				projectID: projectID,
+				runID: run.id,
+				title: "Run \(run.id.uuidString.prefix(8))",
+				markdown: markdown,
+				filePath: reportURL.path()
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 	}
 
-	private func executeWithLocalWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
-		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
+	private func executeWithLocalWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext)
+		async throws
+	{
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: concurrency,
+			workflowPolicyMarkdown: project.workflowPolicyMarkdown
+		)
 		let sourceProvider = try await resolveLocalWorkspaceSourceProvider(project: project, context: context)
 		let repository = repositoryDescriptor(for: project)
 		let policy = try WorkflowPolicyParser().parse(plan.workflowPolicyMarkdown)
@@ -155,11 +225,30 @@ final class Orchestrator {
 			branchPrefix: policy.branchPrefix
 		)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
-		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex.")
+		let run = RunRecord(
+			projectID: project.id,
+			status: .running,
+			totalTickets: plan.queueSnapshot.count,
+			summary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex."
+		)
 		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Local Workspace Codex run started with bounded concurrency \(plan.concurrency)."))
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .info,
+				category: .orchestration,
+				message: "Local Workspace Codex run started with bounded concurrency \(plan.concurrency)."
+			)
+		)
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .info,
+				category: .orchestration,
+				message: "Queue and workflow policy snapshotted for this run."
+			)
+		)
 		var ticketRuns: [TicketRunRecord] = []
 		for item in plan.queueSnapshot {
 			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
@@ -169,12 +258,20 @@ final class Orchestrator {
 		try ModelIntegrityValidator.save(context: context)
 
 		for batch in plan.batches {
-			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) local ticket runs."))
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					level: .info,
+					category: .orchestration,
+					message: "Dispatching batch of \(batch.count) local ticket runs."
+				)
+			)
 			try ModelIntegrityValidator.save(context: context)
 			for item in batch {
 				try Task.checkCancellation()
 				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
-					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+					let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
+				else {
 					continue
 				}
 				try await processTicketWithRecovery(
@@ -208,24 +305,55 @@ final class Orchestrator {
 		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
 		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
-		let markdown = reportGenerator.generate(project: project, run: run, ticketRuns: ticketRuns, tickets: finalTickets, pullRequests: prs, events: events)
+		let markdown = reportGenerator.generate(
+			project: project,
+			run: run,
+			ticketRuns: ticketRuns,
+			tickets: finalTickets,
+			pullRequests: prs,
+			events: events
+		)
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
-		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		context.insert(
+			ReportRecord(
+				projectID: project.id,
+				runID: run.id,
+				title: "Run \(run.id.uuidString.prefix(8))",
+				markdown: markdown,
+				filePath: reportURL.path()
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 	}
 
 	private func executeWithSymphony(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
-		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: concurrency,
+			workflowPolicyMarkdown: project.workflowPolicyMarkdown
+		)
 		try workspaceService.ensureProjectLayout(projectID: project.id)
 		let workflowURL = workspaceService.projectDirectory(projectID: project.id).appending(path: "WORKFLOW.md")
 		try plan.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
-		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with symphony.")
+		let run = RunRecord(
+			projectID: project.id,
+			status: .running,
+			totalTickets: plan.queueSnapshot.count,
+			summary: "Running \(plan.queueSnapshot.count) queued tickets with symphony."
+		)
 		run.queueSnapshot = plan.queueSnapshot
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "symphony run started."))
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				level: .info,
+				category: .orchestration,
+				message: "Queue and workflow policy snapshotted for this run."
+			)
+		)
 		var ticketRuns: [TicketRunRecord] = []
 		for item in plan.queueSnapshot {
 			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
@@ -255,26 +383,30 @@ final class Orchestrator {
 					workflowPath: workflowURL,
 					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id),
 					onEvent: { event in
-						context.insert(RuntimeEventRecord(
-							runID: run.id,
-							ticketRunID: ticketRun.id,
-							timestamp: event.timestamp,
-							level: EventLevel(rawValue: event.level) ?? .info,
-							category: EventCategory(rawValue: event.category) ?? .orchestration,
-							message: event.message,
-							metadataJSON: event.metadataJSON
-						))
+						context.insert(
+							RuntimeEventRecord(
+								runID: run.id,
+								ticketRunID: ticketRun.id,
+								timestamp: event.timestamp,
+								level: EventLevel(rawValue: event.level) ?? .info,
+								category: EventCategory(rawValue: event.category) ?? .orchestration,
+								message: event.message,
+								metadataJSON: event.metadataJSON
+							)
+						)
 						try? ModelIntegrityValidator.save(context: context)
 					}
 				)
 				if result.events.isEmpty {
-					context.insert(RuntimeEventRecord(
-						runID: run.id,
-						ticketRunID: ticketRun.id,
-						level: .warning,
-						category: .orchestration,
-						message: "symphony finished without emitting structured events."
-					))
+					context.insert(
+						RuntimeEventRecord(
+							runID: run.id,
+							ticketRunID: ticketRun.id,
+							level: .warning,
+							category: .orchestration,
+							message: "symphony finished without emitting structured events."
+						)
+					)
 				}
 				if let summary = result.summary {
 					ticketRun.workspacePath = summary.workspacePath
@@ -285,42 +417,72 @@ final class Orchestrator {
 					if let pullRequestURL = summary.pullRequestURL {
 						ticket.status = .needsReview
 						ticketRun.status = .needsReview
-						context.insert(PullRequestRecord(
-							provider: project.repositoryProviderKind,
-							ticketRunID: ticketRun.id,
-							title: "\(ticket.externalID): \(ticket.title)",
-							url: pullRequestURL,
-							branchName: summary.branchName,
-							targetBranch: project.defaultBranch,
-							status: .open,
-							checksStatus: .pending
-						))
-					} else {
+						context.insert(
+							PullRequestRecord(
+								provider: project.repositoryProviderKind,
+								ticketRunID: ticketRun.id,
+								title: "\(ticket.externalID): \(ticket.title)",
+								url: pullRequestURL,
+								branchName: summary.branchName,
+								targetBranch: project.defaultBranch,
+								status: .open,
+								checksStatus: .pending
+							)
+						)
+					}
+					else {
 						ticket.status = .completed
 						ticketRun.status = .completed
 					}
 					if let markdown = try? String(contentsOf: URL(fileURLWithPath: summary.reportPath), encoding: .utf8) {
-						context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: summary.reportPath))
+						context.insert(
+							ReportRecord(
+								projectID: project.id,
+								runID: run.id,
+								title: "Run \(run.id.uuidString.prefix(8))",
+								markdown: markdown,
+								filePath: summary.reportPath
+							)
+						)
 					}
-				} else {
+				}
+				else {
 					ticket.status = .failed
 					ticketRun.status = .failed
 					ticketRun.failureReason = "symphony did not emit a run summary."
 				}
-			} catch ProcessCommandError.canceled {
+			}
+			catch ProcessCommandError.canceled {
 				ticket.status = .canceled
 				ticketRun.status = .canceled
 				ticketRun.failureReason = "Canceled by user."
 				ticket.updatedAt = .now
 				ticketRun.endedAt = .now
-				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .warning, category: .orchestration, message: "symphony run canceled."))
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						level: .warning,
+						category: .orchestration,
+						message: "symphony run canceled."
+					)
+				)
 				try cancelSymphonyRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
 				return
-			} catch {
+			}
+			catch {
 				ticket.status = .failed
 				ticketRun.status = .failed
 				ticketRun.failureReason = error.localizedDescription
-				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .error, category: .orchestration, message: error.localizedDescription))
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						level: .error,
+						category: .orchestration,
+						message: error.localizedDescription
+					)
+				)
 			}
 			ticket.updatedAt = .now
 			ticketRun.endedAt = .now
@@ -337,10 +499,25 @@ final class Orchestrator {
 		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
 		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
-		let markdown = reportGenerator.generate(project: project, run: run, ticketRuns: ticketRuns, tickets: finalTickets, pullRequests: prs, events: events)
+		let markdown = reportGenerator.generate(
+			project: project,
+			run: run,
+			ticketRuns: ticketRuns,
+			tickets: finalTickets,
+			pullRequests: prs,
+			events: events
+		)
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
-		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		context.insert(
+			ReportRecord(
+				projectID: project.id,
+				runID: run.id,
+				title: "Run \(run.id.uuidString.prefix(8))",
+				markdown: markdown,
+				filePath: reportURL.path()
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 	}
 
@@ -385,7 +562,8 @@ final class Orchestrator {
 			owner: String(project.repositoryName.split(separator: "/").first ?? "charlie"),
 			name: String(project.repositoryName.split(separator: "/").last ?? project.repositoryName[...]),
 			fullName: project.repositoryName,
-			cloneURL: URL(string: project.repositoryURL.hasSuffix(".git") ? project.repositoryURL : "\(project.repositoryURL).git") ?? URL(fileURLWithPath: project.repositoryURL),
+			cloneURL: URL(string: project.repositoryURL.hasSuffix(".git") ? project.repositoryURL : "\(project.repositoryURL).git")
+				?? URL(fileURLWithPath: project.repositoryURL),
 			webURL: URL(string: project.repositoryURL) ?? URL(fileURLWithPath: project.repositoryURL),
 			defaultBranch: project.defaultBranch
 		)
@@ -408,13 +586,21 @@ final class Orchestrator {
 		ticket.updatedAt = .now
 		ticketRun.status = .preparing
 		ticketRun.startedAt = .now
-		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .orchestration, message: "\(ticket.externalID) queued for execution."))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .info,
+				category: .orchestration,
+				message: "\(ticket.externalID) queued for execution."
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 
 		let descriptor = ticket.descriptor
 		let workspace = try await runtime.prepareWorkspace(for: descriptor, repository: repository)
 		ticketRun.workspacePath = workspace.path.path()
-		ticketRun.containerID = workspace.containerID
+		ticketRun.runtimeID = workspace.runtimeID
 		ticketRun.branchName = workspace.branchName
 		ticketRun.logPath = workspaceService.logsDirectory(projectID: project.id).appending(path: "\(ticket.externalID).log").path()
 		let manifestURL = try workspaceService.writeWorkspaceManifest(
@@ -433,17 +619,46 @@ final class Orchestrator {
 			),
 			workspace: workspace.path
 		)
-		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Workspace manifest written to \(manifestURL.path())."))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .info,
+				category: .runtime,
+				message: "Workspace manifest written to \(manifestURL.path())."
+			)
+		)
 		ticketRun.status = .running
-		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
-		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Runtime handle \(handle.id) started."))
+		let handle = try await runtime.startExecution(
+			RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown)
+		)
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .info,
+				category: .runtime,
+				message: "Runtime handle \(handle.id) started."
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 
-		let stream = try await agent.runAgent(AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
+		let stream = try await agent.runAgent(
+			AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: workflowPolicyMarkdown)
+		)
 		var finalOutcome: MockTicketOutcome?
 		var finalSummary = ""
 		for try await event in stream {
-			context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: event.level, category: event.category, message: event.message, metadataJSON: event.metadataJSON ?? "{}"))
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: event.level,
+					category: event.category,
+					message: event.message,
+					metadataJSON: event.metadataJSON ?? "{}"
+				)
+			)
 			if let logPath = event.logPath {
 				ticketRun.logPath = logPath
 			}
@@ -459,18 +674,45 @@ final class Orchestrator {
 		switch finalOutcome ?? .completed {
 		case .completed:
 			if commitAndPush {
-				let didCommit = try await sourceProvider.commitChanges(in: workspace.path, message: "\(ticket.externalID): \(ticket.title)")
+				let didCommit = try await sourceProvider.commitChanges(
+					in: workspace.path,
+					message: "\(ticket.externalID): \(ticket.title)"
+				)
 				if didCommit == false {
 					ticket.status = .completed
 					ticketRun.status = .completed
 					ticketRun.summary = finalSummary.isEmpty ? "Agent completed without file changes." : finalSummary
 					ticketRun.confidence = 0.72
-					context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .warning, category: .git, message: "Agent completed without file changes; no pull request was opened."))
+					context.insert(
+						RuntimeEventRecord(
+							runID: run.id,
+							ticketRunID: ticketRun.id,
+							level: .warning,
+							category: .git,
+							message: "Agent completed without file changes; no pull request was opened."
+						)
+					)
 					break
 				}
-				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .git, message: "Committed agent changes on \(workspace.branchName)."))
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						level: .info,
+						category: .git,
+						message: "Committed agent changes on \(workspace.branchName)."
+					)
+				)
 				try await sourceProvider.pushBranch(named: workspace.branchName, from: workspace.path)
-				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .git, message: "Pushed \(workspace.branchName)."))
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						level: .info,
+						category: .git,
+						message: "Pushed \(workspace.branchName)."
+					)
+				)
 			}
 			let pullRequestRequest = PullRequestRequest(
 				title: "\(ticket.externalID): \(ticket.title)",
@@ -486,7 +728,18 @@ final class Orchestrator {
 			ticketRun.pullRequestURL = pr.url.absoluteString
 			ticketRun.summary = finalSummary
 			ticketRun.confidence = 0.86
-			context.insert(PullRequestRecord(provider: sourceProvider.kind, ticketRunID: ticketRun.id, title: pr.title, url: pr.url.absoluteString, branchName: pr.branchName, targetBranch: pr.targetBranch, status: pr.status, checksStatus: pr.checksStatus))
+			context.insert(
+				PullRequestRecord(
+					provider: sourceProvider.kind,
+					ticketRunID: ticketRun.id,
+					title: pr.title,
+					url: pr.url.absoluteString,
+					branchName: pr.branchName,
+					targetBranch: pr.targetBranch,
+					status: pr.status,
+					checksStatus: pr.checksStatus
+				)
+			)
 		case .blocked:
 			ticket.status = .blocked
 			ticketRun.status = .blocked
@@ -533,11 +786,14 @@ final class Orchestrator {
 				workflowPolicyMarkdown: workflowPolicyMarkdown,
 				commitAndPush: commitAndPush
 			)
-		} catch is CancellationError {
+		}
+		catch is CancellationError {
 			throw CancellationError()
-		} catch ProcessCommandError.canceled(let executable, let arguments) {
+		}
+		catch ProcessCommandError.canceled(let executable, let arguments) {
 			throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
-		} catch {
+		}
+		catch {
 			markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
 			try ModelIntegrityValidator.save(context: context)
 		}
@@ -552,7 +808,15 @@ final class Orchestrator {
 		ticketRun.retryCount += 1
 		ticketRun.endedAt = .now
 		ticketRun.confidence = 0
-		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .error, category: .orchestration, message: "Ticket \(ticket.externalID) failed: \(message)"))
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .error,
+				category: .orchestration,
+				message: "Ticket \(ticket.externalID) failed: \(message)"
+			)
+		)
 	}
 
 	private func insertRunFailure(projectID: UUID, message: String, context: ModelContext) throws {

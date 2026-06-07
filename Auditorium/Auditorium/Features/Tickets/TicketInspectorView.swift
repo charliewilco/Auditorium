@@ -17,7 +17,12 @@ struct TicketInspectorView: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 16) {
 				if let ticket {
-					let inspectorState = TicketInspectorState(ticket: ticket, queueItem: queueItem, latestRun: latestRun, events: events)
+					let inspectorState = TicketInspectorState(
+						ticket: ticket,
+						queueItem: queueItem,
+						latestRun: latestRun,
+						events: events
+					)
 					header(ticket)
 					section("Ticket Metadata") {
 						LabeledContent("External ID", value: ticket.externalID)
@@ -30,7 +35,7 @@ struct TicketInspectorView: View {
 						LabeledContent("Queue", value: inspectorState.queueState)
 						LabeledContent("Latest Run", value: inspectorState.latestRunState)
 						LabeledContent("Workspace", value: inspectorState.workspace)
-						LabeledContent("Container", value: inspectorState.container)
+						LabeledContent("Runtime", value: inspectorState.runtime)
 						LabeledContent("Branch", value: inspectorState.branch)
 						LabeledContent("Pull Request", value: inspectorState.pullRequest)
 						LabeledContent("Confidence", value: inspectorState.confidence)
@@ -45,16 +50,22 @@ struct TicketInspectorView: View {
 						if events.isEmpty {
 							Text("No events yet.")
 								.foregroundStyle(.secondary)
-						} else {
+						}
+						else {
 							ForEach(events.prefix(10)) { event in
 								TimelineRow(event: event)
 							}
 						}
 					}
 					actions(ticket: ticket, inspectorState: inspectorState)
-				} else {
-					EmptyStateView(symbol: "sidebar.right", title: "No Ticket Selected", message: "Select a ticket to inspect orchestration state.")
-						.frame(height: 360)
+				}
+				else {
+					EmptyStateView(
+						symbol: "sidebar.right",
+						title: "No Ticket Selected",
+						message: "Select a ticket to inspect orchestration state."
+					)
+					.frame(height: 360)
 				}
 			}
 			.padding()
@@ -120,7 +131,15 @@ struct TicketInspectorView: View {
 					copy("\(ticket.externalID) \(ticket.status.title) \(latestRun?.summary ?? "")")
 				}
 				Button("Copy Markdown Status") {
-					copy(TicketStatusFormatter.markdownStatus(ticket: ticket, project: project, queueItem: queueItem, ticketRun: latestRun, events: events))
+					copy(
+						TicketStatusFormatter.markdownStatus(
+							ticket: ticket,
+							project: project,
+							queueItem: queueItem,
+							ticketRun: latestRun,
+							events: events
+						)
+					)
 				}
 			}
 			.buttonStyle(.bordered)

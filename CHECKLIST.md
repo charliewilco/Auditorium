@@ -170,19 +170,12 @@ Acceptance gate:
 
 ## 9. Runtime Detection And Runtime Providers
 
-- [x] Detect Apple silicon.
-- [x] Detect macOS version.
-- [x] Detect Apple `container` CLI.
-- [x] Check `container system version --format json`.
-- [x] Check `container system status --format json`.
 - [x] Detect Git.
 - [x] Detect Codex CLI.
 - [x] Detect GitHub CLI.
-- [x] Block unavailable Apple Container before workspace creation.
-- [ ] Implement Apple Container runtime execution.
+- [x] Block unavailable Local Workspace runtime before workspace creation.
 - [x] Implement Local Workspace runtime execution.
 - [x] Expose runtime provider implementation status separately from detection status.
-- [x] Add "start container service" guidance without auto-starting it.
 
 Acceptance gate:
 
@@ -292,7 +285,7 @@ Acceptance gate:
 - [x] Ticket inspector.
 - [x] Reports screen.
 - [x] Settings screen.
-- [ ] Replace mock-only text with real provider states.
+- [x] Replace mock-only text with real provider states.
 - [ ] Improve empty/error states.
 - [x] Add focused keyboard shortcut handling for all required commands.
 - [ ] Verify layout on multiple window sizes.
@@ -308,7 +301,7 @@ Acceptance gate:
 - [x] Show ticket metadata.
 - [x] Show queue state.
 - [x] Show latest run state.
-- [x] Show workspace/container/branch/PR fields.
+- [x] Show workspace/runtime/branch/PR fields.
 - [x] Show timeline events.
 - [x] Add queue/run/retry/open/copy actions.
 - [x] Wire all actions to real implementations.
@@ -424,7 +417,7 @@ Acceptance gate:
 - [x] Swift tests for provider normalization.
 - [x] Swift tests for source-provider injection in mock orchestration.
 - [x] Swift tests for runtime detection.
-- [x] Swift tests for Apple Container preflight.
+- [x] Swift tests for Local Workspace runtime preflight.
 - [x] Swift tests for Codex CLI preflight.
 - [x] Swift tests for Codex CLI process agent streaming, failure, and cancellation.
 - [x] Swift tests for injected agent event metadata and log path persistence.

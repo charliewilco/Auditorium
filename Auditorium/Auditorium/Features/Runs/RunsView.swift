@@ -26,9 +26,20 @@ struct RunsView: View {
 			.frame(minWidth: 260)
 		} detail: {
 			if let run = selectedRun {
-				RunDetailView(run: run, ticketRuns: ticketRuns.filter { $0.runID == run.id }, tickets: tickets, events: events.filter { $0.runID == run.id }, pullRequests: pullRequests)
-			} else {
-				EmptyStateView(symbol: "play.circle.fill", title: "No Run Selected", message: "Start a queue run to see live execution details.")
+				RunDetailView(
+					run: run,
+					ticketRuns: ticketRuns.filter { $0.runID == run.id },
+					tickets: tickets,
+					events: events.filter { $0.runID == run.id },
+					pullRequests: pullRequests
+				)
+			}
+			else {
+				EmptyStateView(
+					symbol: "play.circle.fill",
+					title: "No Run Selected",
+					message: "Start a queue run to see live execution details."
+				)
 			}
 		}
 		.navigationTitle("Runs")
@@ -81,7 +92,12 @@ struct RunDetailView: View {
 					StatCard(title: "Completed", value: "\(run.completedTickets)", symbol: "checkmark.circle.fill", tint: .green)
 					StatCard(title: "Failed", value: "\(run.failedTickets)", symbol: "xmark.octagon.fill", tint: .red)
 					StatCard(title: "Blocked", value: "\(run.blockedTickets)", symbol: "hand.raised.fill", tint: .yellow)
-					StatCard(title: "PRs Created", value: "\(run.pullRequestsCreated)", symbol: "arrow.triangle.pull", tint: .indigo)
+					StatCard(
+						title: "PRs Created",
+						value: "\(run.pullRequestsCreated)",
+						symbol: "arrow.triangle.pull",
+						tint: .indigo
+					)
 				}
 				pullRequestsSection
 				ticketExecutionList
@@ -99,7 +115,8 @@ struct RunDetailView: View {
 			if state.pullRequestRows.isEmpty {
 				Text("No pull requests have been recorded for this run.")
 					.foregroundStyle(.secondary)
-			} else {
+			}
+			else {
 				ForEach(state.pullRequestRows) { row in
 					HStack(alignment: .top, spacing: 12) {
 						Image(systemName: "arrow.triangle.pull")
@@ -144,9 +161,11 @@ struct RunDetailView: View {
 					VStack(alignment: .leading, spacing: 4) {
 						Text(ticket?.title ?? "Unknown Ticket")
 							.font(.callout.weight(.medium))
-						Text("\(ticketRun.branchName.isEmpty ? "No branch yet" : ticketRun.branchName) • \(ticketRun.containerID.isEmpty ? "No runtime yet" : ticketRun.containerID)")
-							.font(.caption)
-							.foregroundStyle(.secondary)
+						Text(
+							"\(ticketRun.branchName.isEmpty ? "No branch yet" : ticketRun.branchName) • \(ticketRun.runtimeID.isEmpty ? "No runtime yet" : ticketRun.runtimeID)"
+						)
+						.font(.caption)
+						.foregroundStyle(.secondary)
 					}
 					Spacer()
 					if let url = ticketRun.pullRequestURL, let link = URL(string: url) {
