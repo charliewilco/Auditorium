@@ -1379,6 +1379,12 @@ struct AuditoriumTests {
 		#expect(draft.issueTrackerURL.contains("github.com"))
 	}
 
+	@Test func projectSetupWizardShowsLocalizedCreationErrors() {
+		let message = ProjectSetupWizard.creationErrorMessage(for: ProjectCreationError.validation("Repository URL is required."))
+
+		#expect(message == "Repository URL is required.")
+	}
+
 	@Test func reportGenerationContainsCoreSections() throws {
 		let project = Project(
 			name: "Burton Demo",

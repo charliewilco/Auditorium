@@ -18,6 +18,7 @@ struct ProjectSetupWizard: View {
 	@State private var isLoadingRepositories = false
 	@State private var isLoadingIssueFilters = false
 	@State private var isCreating = false
+	@State private var creationErrorMessage: String?
 	@State private var oauthMessage = ""
 	@State private var isAuthorizingGitHub = false
 	@AppStorage("githubOAuthClientID") private var githubOAuthClientID = ""
@@ -44,6 +45,21 @@ struct ProjectSetupWizard: View {
 					.padding(.horizontal)
 					.padding(.top, 10)
 			}
+			if let creationErrorMessage {
+				VStack(alignment: .leading, spacing: 6) {
+					Label("Project could not be created", systemImage: "xmark.octagon")
+						.font(.subheadline.weight(.semibold))
+					Text(creationErrorMessage)
+					Button("Dismiss") {
+						self.creationErrorMessage = nil
+					}
+					.controlSize(.small)
+				}
+				.foregroundStyle(.red)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.padding(.horizontal)
+				.padding(.top, 10)
+			}
 			content
 				.padding()
 				.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -54,6 +70,7 @@ struct ProjectSetupWizard: View {
 				Button("Back") { step -= 1 }
 					.disabled(step == 0)
 				Button(step == steps.count - 1 ? "Create Project" : "Next") {
+					creationErrorMessage = nil
 					if step == steps.count - 1 {
 						Task { await createProject() }
 					}
@@ -489,10 +506,11 @@ struct ProjectSetupWizard: View {
 
 	private func createProject() async {
 		if let message = ProjectSetupStep.review.validationMessage(for: draft) {
-			NSAlert(error: ProjectCreationError.validation(message)).runModal()
+			creationErrorMessage = message
 			return
 		}
 		isCreating = true
+		creationErrorMessage = nil
 		defer { isCreating = false }
 		do {
 			let projectID = try services.projectCreation.createProject(
@@ -512,7 +530,17 @@ struct ProjectSetupWizard: View {
 			dismiss()
 		}
 		catch {
-			NSAlert(error: error).runModal()
+			creationErrorMessage = ProjectSetupWizard.creationErrorMessage(for: error)
 		}
+	}
+
+	static func creationErrorMessage(for error: any Error) -> String {
+		if let localizedError = error as? LocalizedError,
+			let description = localizedError.errorDescription,
+			description.isEmpty == false
+		{
+			return description
+		}
+		return error.localizedDescription
 	}
 }
