@@ -602,6 +602,62 @@ struct AuditoriumCoreTests {
 		#expect(issueTracker.providerAccountID == account.id)
 	}
 
+	@Test func projectCreationPersistsRealGitHubProjectWithoutDemoData() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let draft = ProjectDraft()
+		draft.name = "Auditorium"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.repositoryCredential = "gho_real_project"
+		draft.issueCredential = ""
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.issueFilterName = "Open GitHub Issues"
+		draft.issueTrackerURL = "https://github.com/charliewilco/Auditorium/issues"
+		draft.runtimeProviderKind = .localWorkspace
+		draft.agentProviderKind = .codex
+		draft.importDemoTickets = false
+		draft.importGitHubIssues = true
+
+		let projectID = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: workspace,
+			keychainService: keychain
+		)
+		let project = try #require(context.fetch(FetchDescriptor<Project>()).first)
+		let repository = try #require(context.fetch(FetchDescriptor<RepositoryRecord>()).first)
+		let issueTracker = try #require(context.fetch(FetchDescriptor<IssueTrackerRecord>()).first)
+		let account = try #require(context.fetch(FetchDescriptor<ProviderAccountRecord>()).first)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+
+		#expect(project.id == projectID)
+		#expect(project.repositoryProviderKind == .github)
+		#expect(project.issueProviderKind == .githubIssues)
+		#expect(project.runtimeProviderKind == .localWorkspace)
+		#expect(project.agentProviderKind == .codex)
+		#expect(repository.provider == .github)
+		#expect(repository.fullName == "charliewilco/Auditorium")
+		#expect(repository.defaultBranch == "main")
+		#expect(repository.providerAccountID == account.id)
+		#expect(issueTracker.provider == .githubIssues)
+		#expect(issueTracker.sourceIdentifier == "charliewilco/Auditorium")
+		#expect(issueTracker.webURL == "https://github.com/charliewilco/Auditorium/issues")
+		#expect(issueTracker.providerAccountID == account.id)
+		#expect(tickets.isEmpty)
+		#expect(try keychain.readSecret(account: account.keychainAccount) == "gho_real_project")
+		#expect(FileManager.default.fileExists(atPath: workspace.projectDirectory(projectID: projectID).path()))
+		for step in ProjectSetupStep.allCases {
+			#expect(step.validationMessage(for: draft) == nil)
+		}
+	}
+
 	@Test func oauthTokenMetadataNormalizesScopesAndExpiry() {
 		let issuedAt = Date(timeIntervalSince1970: 1_000)
 		let response = GitHubOAuthTokenResponse(

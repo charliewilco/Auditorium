@@ -132,7 +132,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] A user can create a real GitHub-backed project without mock data.
+- [x] A user can create a real GitHub-backed project without mock data.
 
 ## 7. Demo Mode
 
