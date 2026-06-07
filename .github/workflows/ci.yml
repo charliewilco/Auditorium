@@ -6,12 +6,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   swift:
     name: Swift package
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build
         run: swift build
       - name: Test
@@ -21,7 +24,7 @@ jobs:
     name: macOS app smoke
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build app target
         run: xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 
@@ -32,7 +35,7 @@ jobs:
       CARGO_HTTP_MULTIPLEXING: false
       CARGO_NET_RETRY: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Fetch dependencies
         run: cargo fetch --locked
