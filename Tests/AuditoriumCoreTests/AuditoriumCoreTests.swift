@@ -34,6 +34,42 @@ struct AuditoriumCoreTests {
 		#expect(policy.prompt == "Implement the issue.")
 	}
 
+	@Test func workflowPolicyParserRejectsInvalidBooleanValues() {
+		do {
+			_ = try WorkflowPolicyParser().parse(
+				"""
+				---
+				run_tests: maybe
+				---
+				Implement the issue.
+				"""
+			)
+		}
+		catch {
+			#expect(error.localizedDescription == "run_tests must be a boolean.")
+			return
+		}
+		Issue.record("Expected invalid boolean policy value to throw.")
+	}
+
+	@Test func workflowPolicyParserRejectsBlankBranchPrefix() {
+		do {
+			_ = try WorkflowPolicyParser().parse(
+				"""
+				---
+				branch_prefix: ""
+				---
+				Implement the issue.
+				"""
+			)
+		}
+		catch {
+			#expect(error.localizedDescription == "branch_prefix must not be empty.")
+			return
+		}
+		Issue.record("Expected blank branch prefix to throw.")
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(

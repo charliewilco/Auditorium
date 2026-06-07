@@ -29,12 +29,17 @@ struct WorkflowPolicyParser {
 		let values = parseFrontMatter(parts.frontMatter)
 		let concurrency = try intValue(values["concurrency"], defaultValue: 1, name: "concurrency", range: 1...16)
 		let maxRetries = try intValue(values["max_retries"], defaultValue: 0, name: "max_retries", range: 0...10)
-		let maxRetryBackoffMilliseconds = try intValue(values["max_retry_backoff_ms"], defaultValue: 300_000, name: "max_retry_backoff_ms", range: 0...600_000)
-		let branchPrefix = values["branch_prefix"]?.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? "auditorium"
-		let runTests = boolValue(values["run_tests"], defaultValue: true)
-		let openPullRequest = boolValue(values["open_pull_request"], defaultValue: true)
+		let maxRetryBackoffMilliseconds = try intValue(
+			values["max_retry_backoff_ms"],
+			defaultValue: 300_000,
+			name: "max_retry_backoff_ms",
+			range: 0...600_000
+		)
+		let branchPrefix = try stringValue(values["branch_prefix"], defaultValue: "auditorium", name: "branch_prefix")
+		let runTests = try boolValue(values["run_tests"], defaultValue: true, name: "run_tests")
+		let openPullRequest = try boolValue(values["open_pull_request"], defaultValue: true, name: "open_pull_request")
 		let handoffStatus = optionalString(values["handoff_status"])
-		let updateIssueLabels = boolValue(values["update_issue_labels"], defaultValue: false)
+		let updateIssueLabels = try boolValue(values["update_issue_labels"], defaultValue: false, name: "update_issue_labels")
 		return ParsedWorkflowPolicy(
 			concurrency: concurrency,
 			maxRetries: maxRetries,
@@ -66,7 +71,8 @@ struct WorkflowPolicyParser {
 			}
 			if inFrontMatter {
 				frontMatter.append(line)
-			} else {
+			}
+			else {
 				body.append(line)
 			}
 		}
@@ -97,11 +103,29 @@ struct WorkflowPolicyParser {
 		return value
 	}
 
-	private func boolValue(_ rawValue: String?, defaultValue: Bool) -> Bool {
+	private func stringValue(_ rawValue: String?, defaultValue: String, name: String) throws -> String {
 		guard let rawValue else {
 			return defaultValue
 		}
-		return ["true", "yes", "1"].contains(rawValue.lowercased())
+		let value = rawValue.trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespacesAndNewlines))
+		guard value.isEmpty == false else {
+			throw WorkflowPolicyParserError.invalidValue("\(name) must not be empty.")
+		}
+		return value
+	}
+
+	private func boolValue(_ rawValue: String?, defaultValue: Bool, name: String) throws -> Bool {
+		guard let rawValue else {
+			return defaultValue
+		}
+		switch rawValue.trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespacesAndNewlines)).lowercased() {
+		case "true", "yes", "1":
+			return true
+		case "false", "no", "0":
+			return false
+		default:
+			throw WorkflowPolicyParserError.invalidValue("\(name) must be a boolean.")
+		}
 	}
 
 	private func optionalString(_ rawValue: String?) -> String? {

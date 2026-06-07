@@ -965,38 +965,58 @@ pub fn resolve_config(
     let agent = mapping_value(&definition.config, "agent").and_then(|value| value.as_mapping());
     let codex = mapping_value(&definition.config, "codex").and_then(|value| value.as_mapping());
 
-    let tracker_kind = string_from_map(tracker, "kind").unwrap_or_else(|| "github".to_string());
+    let tracker_kind =
+        string_from_map(tracker, "tracker", "kind")?.unwrap_or_else(|| "github".to_string());
     if tracker_kind != "github" {
         return Err(SymphonyError::InvalidConfig(format!(
             "tracker.kind must be github for Auditorium v0, got {tracker_kind}"
         )));
     }
-    let workspace_root = string_from_map(workspace, "root")
+    let workspace_root = string_from_map(workspace, "workspace", "root")?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(".auditorium/symphony-workspaces"));
+    let branch_prefix = string_from_root(&definition.config, "branch_prefix")?
+        .unwrap_or_else(|| "auditorium".to_string());
+    let branch_prefix = branch_prefix.trim().trim_matches('/').to_string();
 
     let config = WorkflowConfig {
         tracker_kind,
-        active_states: string_array_from_map(tracker, "active_states")
+        active_states: string_array_from_map(tracker, "tracker", "active_states")?
             .unwrap_or_else(|| vec!["open".to_string()]),
-        terminal_states: string_array_from_map(tracker, "terminal_states")
+        terminal_states: string_array_from_map(tracker, "tracker", "terminal_states")?
             .unwrap_or_else(|| vec!["closed".to_string()]),
-        polling_interval_ms: int_from_map(polling, "interval_ms").unwrap_or(30_000),
+        polling_interval_ms: int_from_map(polling, "polling", "interval_ms")?.unwrap_or(30_000),
         workspace_root: absolute_path(&workspace_root, workflow_dir),
-        max_concurrent_agents: int_from_map(agent, "max_concurrent_agents").unwrap_or(3) as usize,
-        max_turns: int_from_map(agent, "max_turns").unwrap_or(1) as usize,
-        max_retry_backoff_ms: int_from_map(agent, "max_retry_backoff_ms").unwrap_or(300_000),
-        codex_command: string_from_map(codex, "command").unwrap_or_else(|| {
+        max_concurrent_agents: int_from_map(agent, "agent", "max_concurrent_agents")?.unwrap_or(3)
+            as usize,
+        max_turns: int_from_map(agent, "agent", "max_turns")?.unwrap_or(1) as usize,
+        max_retry_backoff_ms: int_from_map(agent, "agent", "max_retry_backoff_ms")?
+            .unwrap_or(300_000),
+        codex_command: string_from_map(codex, "codex", "command")?.unwrap_or_else(|| {
             "codex exec --json --sandbox workspace-write -c approval_policy=\"never\"".to_string()
         }),
-        branch_prefix: string_from_root(&definition.config, "branch_prefix")
-            .unwrap_or_else(|| "auditorium".to_string()),
-        max_retries: int_from_root(&definition.config, "max_retries").unwrap_or(2) as usize,
-        run_tests: bool_from_root(&definition.config, "run_tests").unwrap_or(true),
-        open_pull_request: bool_from_root(&definition.config, "open_pull_request").unwrap_or(true),
-        validation_command: string_from_map(validation, "command")
+        branch_prefix,
+        max_retries: int_from_root(&definition.config, "max_retries")?.unwrap_or(2) as usize,
+        run_tests: bool_from_root(&definition.config, "run_tests")?.unwrap_or(true),
+        open_pull_request: bool_from_root(&definition.config, "open_pull_request")?.unwrap_or(true),
+        validation_command: string_from_map(validation, "validation", "command")?
             .filter(|command| !command.trim().is_empty()),
     };
+    if config.active_states.is_empty() {
+        return Err(SymphonyError::InvalidConfig(
+            "tracker.active_states must include at least one state".to_string(),
+        ));
+    }
+    if config.terminal_states.is_empty() {
+        return Err(SymphonyError::InvalidConfig(
+            "tracker.terminal_states must include at least one state".to_string(),
+        ));
+    }
+    if config.polling_interval_ms == 0 {
+        return Err(SymphonyError::InvalidConfig(
+            "polling.interval_ms must be positive".to_string(),
+        ));
+    }
     if config.max_concurrent_agents == 0 {
         return Err(SymphonyError::InvalidConfig(
             "agent.max_concurrent_agents must be positive".to_string(),
@@ -1010,6 +1030,11 @@ pub fn resolve_config(
     if config.codex_command.trim().is_empty() {
         return Err(SymphonyError::InvalidConfig(
             "codex.command must not be empty".to_string(),
+        ));
+    }
+    if config.branch_prefix.is_empty() {
+        return Err(SymphonyError::InvalidConfig(
+            "branch_prefix must not be empty".to_string(),
         ));
     }
     if config.run_tests && config.validation_command.as_deref().is_none() {
@@ -1035,44 +1060,92 @@ fn mapping_value<'a>(mapping: &'a serde_yaml::Mapping, key: &str) -> Option<&'a 
     mapping.get(serde_yaml::Value::String(key.to_string()))
 }
 
-fn string_from_root(mapping: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    mapping_value(mapping, key)
-        .and_then(|value| value.as_str())
+fn string_from_root(
+    mapping: &serde_yaml::Mapping,
+    key: &str,
+) -> Result<Option<String>, SymphonyError> {
+    let Some(value) = mapping_value(mapping, key) else {
+        return Ok(None);
+    };
+    value
+        .as_str()
         .map(resolve_env_value)
+        .map(Some)
+        .ok_or_else(|| SymphonyError::InvalidConfig(format!("{key} must be a string")))
 }
 
-fn bool_from_root(mapping: &serde_yaml::Mapping, key: &str) -> Option<bool> {
-    mapping_value(mapping, key).and_then(|value| value.as_bool())
+fn bool_from_root(mapping: &serde_yaml::Mapping, key: &str) -> Result<Option<bool>, SymphonyError> {
+    let Some(value) = mapping_value(mapping, key) else {
+        return Ok(None);
+    };
+    value
+        .as_bool()
+        .map(Some)
+        .ok_or_else(|| SymphonyError::InvalidConfig(format!("{key} must be a boolean")))
 }
 
-fn int_from_root(mapping: &serde_yaml::Mapping, key: &str) -> Option<u64> {
-    mapping_value(mapping, key).and_then(yaml_u64)
+fn int_from_root(mapping: &serde_yaml::Mapping, key: &str) -> Result<Option<u64>, SymphonyError> {
+    let Some(value) = mapping_value(mapping, key) else {
+        return Ok(None);
+    };
+    yaml_u64(value).map(Some).ok_or_else(|| {
+        SymphonyError::InvalidConfig(format!("{key} must be a non-negative integer"))
+    })
 }
 
-fn string_from_map(mapping: Option<&serde_yaml::Mapping>, key: &str) -> Option<String> {
-    mapping
-        .and_then(|mapping| mapping_value(mapping, key))
-        .and_then(|value| value.as_str())
+fn string_from_map(
+    mapping: Option<&serde_yaml::Mapping>,
+    section: &str,
+    key: &str,
+) -> Result<Option<String>, SymphonyError> {
+    let Some(value) = mapping.and_then(|mapping| mapping_value(mapping, key)) else {
+        return Ok(None);
+    };
+    value
+        .as_str()
         .map(resolve_env_value)
+        .map(Some)
+        .ok_or_else(|| SymphonyError::InvalidConfig(format!("{section}.{key} must be a string")))
 }
 
-fn int_from_map(mapping: Option<&serde_yaml::Mapping>, key: &str) -> Option<u64> {
-    mapping
-        .and_then(|mapping| mapping_value(mapping, key))
-        .and_then(yaml_u64)
+fn int_from_map(
+    mapping: Option<&serde_yaml::Mapping>,
+    section: &str,
+    key: &str,
+) -> Result<Option<u64>, SymphonyError> {
+    let Some(value) = mapping.and_then(|mapping| mapping_value(mapping, key)) else {
+        return Ok(None);
+    };
+    yaml_u64(value).map(Some).ok_or_else(|| {
+        SymphonyError::InvalidConfig(format!("{section}.{key} must be a non-negative integer"))
+    })
 }
 
-fn string_array_from_map(mapping: Option<&serde_yaml::Mapping>, key: &str) -> Option<Vec<String>> {
-    mapping
-        .and_then(|mapping| mapping_value(mapping, key))
-        .and_then(|value| value.as_sequence())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .map(|value| value.to_lowercase())
-                .collect()
-        })
+fn string_array_from_map(
+    mapping: Option<&serde_yaml::Mapping>,
+    section: &str,
+    key: &str,
+) -> Result<Option<Vec<String>>, SymphonyError> {
+    let Some(value) = mapping.and_then(|mapping| mapping_value(mapping, key)) else {
+        return Ok(None);
+    };
+    let values = value.as_sequence().ok_or_else(|| {
+        SymphonyError::InvalidConfig(format!("{section}.{key} must be a string array"))
+    })?;
+    let mut strings = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        let string = value.as_str().ok_or_else(|| {
+            SymphonyError::InvalidConfig(format!("{section}.{key}[{index}] must be a string"))
+        })?;
+        let normalized = string.trim().to_lowercase();
+        if normalized.is_empty() {
+            return Err(SymphonyError::InvalidConfig(format!(
+                "{section}.{key}[{index}] must not be empty"
+            )));
+        }
+        strings.push(normalized);
+    }
+    Ok(Some(strings))
 }
 
 fn yaml_u64(value: &serde_yaml::Value) -> Option<u64> {
@@ -2203,6 +2276,142 @@ Body
     }
 
     #[test]
+    fn parses_body_only_workflow_with_bom() {
+        let workflow = parse_workflow("\u{feff}Handle {{ issue.identifier }}").unwrap();
+
+        assert!(workflow.config.is_empty());
+        assert_eq!(workflow.prompt_template, "Handle {{ issue.identifier }}");
+    }
+
+    #[test]
+    fn resolves_explicit_policy_values_and_trims_branch_prefix() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  kind: github
+  active_states: [" OPEN ", "Ready"]
+  terminal_states: [" CLOSED "]
+polling:
+  interval_ms: 125
+workspace:
+  root: ".auditorium/custom"
+agent:
+  max_concurrent_agents: 5
+  max_turns: 3
+  max_retry_backoff_ms: 9000
+codex:
+  command: "/usr/local/bin/codex exec"
+branch_prefix: "/tickets/"
+max_retries: 4
+run_tests: false
+open_pull_request: false
+validation:
+  command: "swift test"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/project/WORKFLOW.md")).unwrap();
+
+        assert_eq!(config.active_states, vec!["open", "ready"]);
+        assert_eq!(config.terminal_states, vec!["closed"]);
+        assert_eq!(config.polling_interval_ms, 125);
+        assert_eq!(
+            config.workspace_root,
+            PathBuf::from("/tmp/project/.auditorium/custom")
+        );
+        assert_eq!(config.max_concurrent_agents, 5);
+        assert_eq!(config.max_turns, 3);
+        assert_eq!(config.max_retry_backoff_ms, 9000);
+        assert_eq!(config.codex_command, "/usr/local/bin/codex exec");
+        assert_eq!(config.branch_prefix, "tickets");
+        assert_eq!(config.max_retries, 4);
+        assert!(!config.run_tests);
+        assert!(!config.open_pull_request);
+        assert_eq!(config.validation_command.as_deref(), Some("swift test"));
+    }
+
+    #[test]
+    fn rejects_invalid_policy_value_types() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  active_states: "open"
+polling:
+  interval_ms: -1
+run_tests: "yes"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        assert!(error
+            .to_string()
+            .contains("tracker.active_states must be a string array"));
+    }
+
+    #[test]
+    fn rejects_negative_numeric_policy_values() {
+        let workflow = parse_workflow(
+            r#"---
+polling:
+  interval_ms: -1
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        assert!(error
+            .to_string()
+            .contains("polling.interval_ms must be a non-negative integer"));
+    }
+
+    #[test]
+    fn rejects_empty_policy_values_that_would_break_dispatch() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  active_states: []
+branch_prefix: "/"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        assert!(error
+            .to_string()
+            .contains("tracker.active_states must include at least one state"));
+    }
+
+    #[test]
+    fn rejects_empty_branch_prefix_after_trimming_slashes() {
+        let workflow = parse_workflow(
+            r#"---
+branch_prefix: "/"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let error = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        assert!(error
+            .to_string()
+            .contains("branch_prefix must not be empty"));
+    }
+
+    #[test]
     fn command_line_preserves_quoted_arguments() {
         let parts = split_command_line(
             r#"codex exec --json --sandbox "workspace write" -c approval_policy=\"never\""#,
@@ -2359,6 +2568,28 @@ Body
                 .collect::<Vec<_>>(),
             vec!["#1", "#2"]
         );
+    }
+
+    #[test]
+    fn dispatch_batch_returns_empty_when_capacity_is_saturated() {
+        let workflow = parse_workflow(
+            r#"---
+agent:
+  max_concurrent_agents: 2
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let items = vec![
+            scheduler_item("#1", "open", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#2", "open", SchedulerRunState::Pending, 0, 0),
+        ];
+
+        let selected = dispatch_batch(&items, &config, 2, 1);
+
+        assert!(selected.is_empty());
     }
 
     #[test]

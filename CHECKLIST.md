@@ -348,7 +348,7 @@ Acceptance gate:
 - [x] Use workflow policy in mock prompts.
 - [ ] Add workflow editor UI.
 - [x] Parse YAML front matter.
-- [~] Validate policy values.
+- [x] Validate policy values.
 - [~] Snapshot policy per run.
 - [x] Read repository-owned `WORKFLOW.md`.
 - [x] Support live reload in `symphony` CLI.
