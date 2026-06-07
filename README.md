@@ -432,6 +432,13 @@ The intended project layout is:
 
 Workspace paths are deterministic and sanitize ticket identifiers for filesystem safety.
 
+Local workspace runtime reuse policy:
+
+- Each ticket maps to one deterministic workspace path under the project `Workspaces/` directory.
+- Preparing a local runtime workspace calls the source provider's `cloneOrUpdate` operation for that path, so an existing workspace is updated in place instead of silently discarded.
+- Preparing a workspace creates or checks out the deterministic ticket branch through the source provider before agent execution starts.
+- Terminal and canceled workspaces are retained for inspection in v0. Automated cleanup should be added only behind an explicit user action or documented retention setting.
+
 ## Security Model
 
 Auditorium should be safe by default:

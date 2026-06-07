@@ -182,7 +182,7 @@ Acceptance gate:
 - [x] Block unavailable Apple Container before workspace creation.
 - [ ] Implement Apple Container runtime execution.
 - [ ] Implement Docker runtime execution.
-- [ ] Implement Local Workspace runtime execution.
+- [x] Implement Local Workspace runtime execution.
 - [ ] Expose runtime provider implementation status separately from detection status.
 - [ ] Add "start container service" guidance without auto-starting it.
 
@@ -238,8 +238,8 @@ Acceptance gate:
 - [x] Create deterministic ticket workspace paths.
 - [x] Sanitize ticket IDs.
 - [x] Add workspace path tests.
-- [ ] Clone/update repository into workspace or project repository area.
-- [ ] Decide and document workspace reuse policy.
+- [x] Clone/update repository into workspace or project repository area.
+- [x] Decide and document workspace reuse policy.
 - [ ] Add cleanup policy for canceled/terminal issues.
 - [x] Add workspace manifest per ticket run.
 - [ ] Add Finder reveal for project/repo/workspace paths.
@@ -428,6 +428,7 @@ Acceptance gate:
 - [x] Swift tests for Codex CLI process agent streaming, failure, and cancellation.
 - [x] Swift tests for injected agent event metadata and log path persistence.
 - [x] Swift tests for Generic CLI agent command parsing and process execution.
+- [x] Swift tests for Local Workspace runtime clone, branch, start, and stop behavior.
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.

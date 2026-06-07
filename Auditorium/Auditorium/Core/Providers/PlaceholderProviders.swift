@@ -249,9 +249,3 @@ struct DockerRuntimeProvider: RuntimeProvider {
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle { throw ProviderError.notImplemented("Docker Runtime Provider") }
 	func stopExecution(handle: RuntimeExecutionHandle) async throws { throw ProviderError.notImplemented("Docker Runtime Provider") }
 }
-
-struct LocalProcessRuntimeProvider: RuntimeProvider {
-	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor { throw ProviderError.notImplemented("Local Process Runtime Provider") }
-	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle { throw ProviderError.notImplemented("Local Process Runtime Provider") }
-	func stopExecution(handle: RuntimeExecutionHandle) async throws { throw ProviderError.notImplemented("Local Process Runtime Provider") }
-}

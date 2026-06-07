@@ -1367,6 +1367,61 @@ struct AuditoriumTests {
 		#expect(log.contains("generic-err"))
 	}
 
+	@Test func localProcessRuntimeClonesRepositoryCreatesBranchAndWritesHandle() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspaceService = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = UUID()
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let runtime = LocalProcessRuntimeProvider(
+			workspaceService: workspaceService,
+			projectID: projectID,
+			sourceProvider: sourceProvider,
+			branchPrefix: "auditorium"
+		)
+		let ticket = TicketDescriptor(
+			provider: .githubIssues,
+			externalID: "ISSUE-42",
+			title: "Fix Local Runtime",
+			body: "Create a real local workspace.",
+			status: .ready,
+			labels: ["runtime"],
+			assignee: nil,
+			priority: .medium,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/42"),
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			blockedBy: []
+		)
+		let repository = RepositoryDescriptor(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: URL(string: "https://github.com/charliewilco/Auditorium.git")!,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
+			defaultBranch: "main"
+		)
+
+		let workspace = try await runtime.prepareWorkspace(for: ticket, repository: repository)
+		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: ticket, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown))
+		try await runtime.stopExecution(handle: handle)
+		let handleData = try Data(contentsOf: runtime.runtimeHandlePath(for: workspace.path))
+		let handleJSON = try #require(String(data: handleData, encoding: .utf8))
+
+		#expect(workspace.path == workspaceService.workspacePath(projectID: projectID, ticketExternalID: "ISSUE-42"))
+		#expect(workspace.containerID == "local-issue-42")
+		#expect(workspace.branchName == "auditorium/issue-42-fix-local-runtime")
+		#expect(sourceProvider.clonePaths == [workspace.path])
+		#expect(sourceProvider.createdBranches.map { $0.name } == ["auditorium/issue-42-fix-local-runtime"])
+		#expect(sourceProvider.createdBranches.map { $0.repositoryPath } == [workspace.path])
+		#expect(handle.id == "local-issue-42")
+		#expect(handle.workspacePath == workspace.path)
+		#expect(handleJSON.contains(#""ticketExternalID" : "ISSUE-42""#))
+		#expect(FileManager.default.fileExists(atPath: workspace.path.appending(path: ".auditorium/runtime-stopped").path()))
+	}
+
 	@Test func orchestratorPersistsSymphonyEventsWhileProcessRuns() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -2052,6 +2107,8 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 	let kind: RepositoryProviderKind
 	let authentication = ProviderAuthenticationDescriptor(method: .none, displayName: "Static Source", oauth: nil)
 	private(set) var createdPullRequestTitles: [String] = []
+	private(set) var clonePaths: [URL] = []
+	private(set) var createdBranches: [(name: String, repositoryPath: URL)] = []
 
 	init(kind: RepositoryProviderKind) {
 		self.kind = kind
@@ -2062,7 +2119,12 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 	}
 
 	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		clonePaths.append(path)
 		try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+	}
+
+	func createBranch(named branchName: String, in repositoryPath: URL) async throws {
+		createdBranches.append((branchName, repositoryPath))
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
