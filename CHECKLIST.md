@@ -65,7 +65,7 @@ Acceptance gate:
 - [x] Model OAuth scopes.
 - [x] Store secret material through Keychain service.
 - [x] Persist only account metadata in SwiftData.
-- [~] Allow pasted access token as temporary bootstrap.
+- [x] Allow pasted access token as temporary bootstrap.
 - [x] Implement GitHub OAuth device flow or native callback flow.
 - [x] Store and refresh OAuth token metadata safely.
 - [x] Validate granted scopes.

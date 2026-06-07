@@ -1371,6 +1371,47 @@ struct AuditoriumTests {
 		#expect(try keychain.readSecret(account: keychainAccount) == nil)
 	}
 
+	@Test func pastedGitHubTokenBootstrapsSharedRepositoryAndIssueCredentials() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let draft = ProjectDraft()
+		draft.name = "Manual Token Bootstrap"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.repositoryCredential = " ghp_bootstrap_token "
+		draft.issueCredential = ""
+		draft.importDemoTickets = false
+
+		let projectID = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root),
+			keychainService: keychain
+		)
+		let account = try #require(context.fetch(FetchDescriptor<ProviderAccountRecord>()).first)
+		let repository = try #require(context.fetch(FetchDescriptor<RepositoryRecord>()).first)
+		let issueTracker = try #require(context.fetch(FetchDescriptor<IssueTrackerRecord>()).first)
+
+		#expect(account.providerKindRaw == RepositoryProviderKind.github.rawValue)
+		#expect(account.displayName == "GitHub OAuth for charliewilco/Auditorium")
+		#expect(account.oauthClientID.isEmpty)
+		#expect(account.grantedScopesRaw.isEmpty)
+		#expect(account.tokenType.isEmpty)
+		#expect(repository.projectID == projectID)
+		#expect(repository.providerAccountID == account.id)
+		#expect(issueTracker.projectID == projectID)
+		#expect(issueTracker.providerAccountID == account.id)
+		#expect(try keychain.readSecret(account: account.keychainAccount) == "ghp_bootstrap_token")
+		#expect(ProjectSetupStep.repositoryCredentials.validationMessage(for: draft) == nil)
+		#expect(ProjectSetupStep.issueCredentials.validationMessage(for: draft) == nil)
+	}
+
 	@Test func githubIssueImportRequiresCredentialsBeforeProviderCall() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -3991,9 +4032,10 @@ extension AuditoriumTests {
 		return root
 	}
 
-	fileprivate func makeAgentRunRequest(workspace: URL, title: String, policyMarkdown: String = WorkflowPolicy.defaultMarkdown)
+	fileprivate func makeAgentRunRequest(workspace: URL, title: String, policyMarkdown: String? = nil)
 		-> AgentRunRequest
 	{
+		let resolvedPolicyMarkdown = policyMarkdown ?? WorkflowPolicy.defaultMarkdown
 		let ticket = TicketDescriptor(
 			provider: .githubIssues,
 			externalID: "COD-101",
@@ -4019,7 +4061,7 @@ extension AuditoriumTests {
 			defaultBranch: "main"
 		)
 		let workspace = WorkspaceDescriptor(path: workspace, runtimeID: "local-test", branchName: "auditorium/cod-101")
-		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: policyMarkdown)
+		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: resolvedPolicyMarkdown)
 	}
 
 	fileprivate func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {
