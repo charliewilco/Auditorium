@@ -14,7 +14,7 @@ agent:
   max_turns: 1
   max_retry_backoff_ms: 300000
 codex:
-  command: "codex exec --json --sandbox workspace-write --ask-for-approval never"
+  command: "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
 branch_prefix: "auditorium"
 max_retries: 2
 run_tests: true

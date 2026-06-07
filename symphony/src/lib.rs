@@ -28,7 +28,7 @@ agent:
   max_turns: 1
   max_retry_backoff_ms: 300000
 codex:
-  command: "codex exec --json --sandbox workspace-write --ask-for-approval never"
+  command: "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
 branch_prefix: "auditorium"
 run_tests: true
 open_pull_request: true
@@ -536,7 +536,7 @@ pub fn resolve_config(
         max_turns: int_from_map(agent, "max_turns").unwrap_or(1) as usize,
         max_retry_backoff_ms: int_from_map(agent, "max_retry_backoff_ms").unwrap_or(300_000),
         codex_command: string_from_map(codex, "command").unwrap_or_else(|| {
-            "codex exec --json --sandbox workspace-write --ask-for-approval never".to_string()
+            "codex exec --json --sandbox workspace-write -c approval_policy=\"never\"".to_string()
         }),
         branch_prefix: string_from_root(&definition.config, "branch_prefix")
             .unwrap_or_else(|| "auditorium".to_string()),
