@@ -15,10 +15,41 @@ extension IssueTrackerProvider {
 final class GitHubRepositoryProvider: SourceCodeProvider {
 	let kind = RepositoryProviderKind.github
 	let authentication = ProviderAuthenticationDescriptor(method: .oauth, displayName: "GitHub OAuth", oauth: GitHubOAuth.descriptor)
+	private let client: GitHubAPIClient?
 
-	func listRepositories() async throws -> [RepositoryDescriptor] { throw ProviderError.notImplemented("GitHub Repository Provider") }
-	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws { throw ProviderError.notImplemented("GitHub Repository Provider") }
-	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor { throw ProviderError.notImplemented("GitHub Repository Provider") }
+	init(token: String? = nil, client: GitHubAPIClient? = nil) {
+		if let client {
+			self.client = client
+		} else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+			self.client = GitHubAPIClient(token: token)
+		} else {
+			self.client = nil
+		}
+	}
+
+	func listRepositories() async throws -> [RepositoryDescriptor] {
+		try await requireClient().listRepositories()
+	}
+
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		if FileManager.default.fileExists(atPath: path.appending(path: ".git").path()) {
+			_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["fetch", "--all", "--prune"], workingDirectory: path)
+			return
+		}
+		try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+		_ = try await ProcessCommand.run(executable: "/usr/bin/env", arguments: ["gh", "repo", "clone", repository.fullName, path.path()])
+	}
+
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		try await requireClient().createPullRequest(request)
+	}
+
+	private func requireClient() throws -> GitHubAPIClient {
+		guard let client else {
+			throw ProviderError.unavailable("GitHub credentials are required.")
+		}
+		return client
+	}
 }
 
 struct GitLabRepositoryProvider: SourceCodeProvider {
@@ -56,10 +87,56 @@ struct GenericGitRepositoryProvider: SourceCodeProvider {
 final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 	let kind = IssueProviderKind.githubIssues
 	let authentication = ProviderAuthenticationDescriptor(method: .oauth, displayName: "GitHub OAuth", oauth: GitHubOAuth.descriptor)
+	private let repositoryFullName: String?
+	private let client: GitHubAPIClient?
 
-	func listTickets(projectID: String) async throws -> [TicketDescriptor] { throw ProviderError.notImplemented("GitHub Issue Tracker Provider") }
-	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws { throw ProviderError.notImplemented("GitHub Issue Tracker Provider") }
-	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("GitHub Issue Tracker Provider") }
+	init(repositoryFullName: String? = nil, token: String? = nil, client: GitHubAPIClient? = nil) {
+		self.repositoryFullName = repositoryFullName
+		if let client {
+			self.client = client
+		} else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+			self.client = GitHubAPIClient(token: token)
+		} else {
+			self.client = nil
+		}
+	}
+
+	func listTickets(projectID: String) async throws -> [TicketDescriptor] {
+		try await requireClient().listIssues(repositoryFullName: resolvedRepository(projectID: projectID))
+	}
+
+	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {
+		if status == .completed || status == .canceled {
+			throw ProviderError.unavailable("Auditorium v0 does not automatically close GitHub issues.")
+		}
+	}
+
+	func addComment(ticketID: String, body: String) async throws {
+		let parts = ticketID.split(separator: "#")
+		let repository = parts.count == 2 ? String(parts[0]) : repositoryFullName
+		let issueNumber = parts.count == 2 ? String(parts[1]) : ticketID
+		guard let repository else {
+			throw ProviderError.unavailable("A GitHub repository is required to comment on issue \(ticketID).")
+		}
+		try await requireClient().addComment(repositoryFullName: repository, issueNumber: issueNumber, body: body)
+	}
+
+	private func resolvedRepository(projectID: String) throws -> String {
+		if let repositoryFullName {
+			return repositoryFullName
+		}
+		guard projectID.contains("/") else {
+			throw ProviderError.unavailable("GitHub Issues provider needs an OWNER/NAME repository identifier.")
+		}
+		return projectID
+	}
+
+	private func requireClient() throws -> GitHubAPIClient {
+		guard let client else {
+			throw ProviderError.unavailable("GitHub credentials are required.")
+		}
+		return client
+	}
 }
 
 typealias GitHubIssueProvider = GitHubIssueTrackerProvider

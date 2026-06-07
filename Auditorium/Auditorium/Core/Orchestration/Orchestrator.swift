@@ -6,16 +6,19 @@ final class Orchestrator {
 	private let workspaceService: ApplicationWorkspaceService
 	private let runtimeDetection: RuntimeDetectionService
 	private let reportGenerator: ReportGenerator
+	private let symphonyRunner: SymphonyCLIProcessRunner
 	private var activeTask: Task<Void, Never>?
 
 	init(
 		workspaceService: ApplicationWorkspaceService,
 		runtimeDetection: RuntimeDetectionService,
-		reportGenerator: ReportGenerator
+		reportGenerator: ReportGenerator,
+		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner()
 	) {
 		self.workspaceService = workspaceService
 		self.runtimeDetection = runtimeDetection
 		self.reportGenerator = reportGenerator
+		self.symphonyRunner = symphonyRunner
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
@@ -47,6 +50,10 @@ final class Orchestrator {
 		}
 		try await runtimeDetection.requireAvailableRuntime(for: project.runtimeProviderKind)
 		try await runtimeDetection.requireAvailableAgent(for: project.agentProviderKind)
+		if project.runtimeProviderKind == .localWorkspace, project.agentProviderKind == .codex {
+			try await executeWithSymphony(project: project, queueItems: queueItems, context: context)
+			return
+		}
 		guard project.runtimeProviderKind == .mockRuntime else {
 			throw ProviderError.notImplemented("\(project.runtimeProviderKind.title) Runtime Provider")
 		}
@@ -107,6 +114,118 @@ final class Orchestrator {
 		run.reportMarkdown = markdown
 		context.insert(ReportRecord(projectID: projectID, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
 		try context.save()
+	}
+
+	private func executeWithSymphony(project: Project, queueItems: [QueueItemRecord], context: ModelContext) async throws {
+		try workspaceService.ensureProjectLayout(projectID: project.id)
+		let workflowURL = workspaceService.projectDirectory(projectID: project.id).appending(path: "WORKFLOW.md")
+		try project.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+		let run = RunRecord(projectID: project.id, status: .running, totalTickets: queueItems.count, summary: "Running \(queueItems.count) queued tickets with symphony.")
+		context.insert(run)
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "symphony run started."))
+		var ticketRuns: [TicketRunRecord] = []
+		for item in queueItems {
+			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
+			context.insert(ticketRun)
+			ticketRuns.append(ticketRun)
+		}
+		try context.save()
+
+		for ticketRun in ticketRuns {
+			try Task.checkCancellation()
+			guard let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+				continue
+			}
+			ticket.status = .running
+			ticketRun.status = .running
+			ticketRun.startedAt = .now
+			try context.save()
+
+			do {
+				let issueNumber = try githubIssueNumber(from: ticket.externalID)
+				let result = try await symphonyRunner.run(
+					repository: project.repositoryName,
+					issueNumber: issueNumber,
+					workflowPath: workflowURL,
+					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id)
+				)
+				for event in result.events {
+					context.insert(RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						timestamp: event.timestamp,
+						level: EventLevel(rawValue: event.level) ?? .info,
+						category: EventCategory(rawValue: event.category) ?? .orchestration,
+						message: event.message,
+						metadataJSON: event.metadataJSON
+					))
+				}
+				if let summary = result.summary {
+					ticketRun.workspacePath = summary.workspacePath
+					ticketRun.branchName = summary.branchName
+					ticketRun.pullRequestURL = summary.pullRequestURL
+					ticketRun.summary = "symphony finished with status \(summary.status)."
+					ticketRun.logPath = summary.reportPath
+					if let pullRequestURL = summary.pullRequestURL {
+						ticket.status = .needsReview
+						ticketRun.status = .needsReview
+						context.insert(PullRequestRecord(
+							provider: project.repositoryProviderKind,
+							ticketRunID: ticketRun.id,
+							title: "\(ticket.externalID): \(ticket.title)",
+							url: pullRequestURL,
+							branchName: summary.branchName,
+							targetBranch: project.defaultBranch,
+							status: .open,
+							checksStatus: .pending
+						))
+					} else {
+						ticket.status = .completed
+						ticketRun.status = .completed
+					}
+					if let markdown = try? String(contentsOf: URL(fileURLWithPath: summary.reportPath), encoding: .utf8) {
+						context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: summary.reportPath))
+					}
+				} else {
+					ticket.status = .failed
+					ticketRun.status = .failed
+					ticketRun.failureReason = "symphony did not emit a run summary."
+				}
+			} catch {
+				ticket.status = .failed
+				ticketRun.status = .failed
+				ticketRun.failureReason = error.localizedDescription
+				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .error, category: .orchestration, message: error.localizedDescription))
+			}
+			ticket.updatedAt = .now
+			ticketRun.endedAt = .now
+			try context.save()
+		}
+
+		run.completedTickets = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
+		run.failedTickets = ticketRuns.filter { $0.status == .failed }.count
+		run.blockedTickets = ticketRuns.filter { $0.status == .blocked }.count
+		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
+		run.endedAt = .now
+		run.status = run.failedTickets == 0 ? .completed : .completedWithFailures
+		run.summary = "symphony completed \(run.completedTickets) tickets and failed \(run.failedTickets)."
+		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
+		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
+		let markdown = reportGenerator.generate(project: project, run: run, ticketRuns: ticketRuns, tickets: finalTickets, pullRequests: prs, events: events)
+		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
+		run.reportMarkdown = markdown
+		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		try context.save()
+	}
+
+	private func githubIssueNumber(from externalID: String) throws -> Int {
+		let digits = externalID.filter(\.isNumber)
+		guard let issueNumber = Int(digits) else {
+			throw ProviderError.unavailable("GitHub issue external ID must contain an issue number.")
+		}
+		return issueNumber
 	}
 
 	private func processTicket(

@@ -9,6 +9,7 @@ struct QueueScreen: View {
 	let dryRun: () -> Void
 	let clearQueue: () -> Void
 	let removeItem: (QueueItemRecord) -> Void
+	let toggleItem: (QueueItemRecord, Bool) -> Void
 	let moveItems: (IndexSet, Int) -> Void
 
 	var body: some View {
@@ -20,7 +21,7 @@ struct QueueScreen: View {
 				List {
 					ForEach(queueItems) { item in
 						if let ticket = tickets.first(where: { $0.id == item.ticketID }) {
-							QueueRow(ticket: ticket, item: item, remove: { removeItem(item) })
+							QueueRow(ticket: ticket, item: item, toggle: { toggleItem(item, $0) }, remove: { removeItem(item) })
 								.onTapGesture {
 									appState.inspectTicket(ticket.id)
 								}
@@ -71,12 +72,14 @@ struct QueueScreen: View {
 struct QueueRow: View {
 	let ticket: TicketRecord
 	let item: QueueItemRecord
+	let toggle: (Bool) -> Void
 	let remove: () -> Void
 
 	var body: some View {
 		HStack(spacing: 12) {
-			Image(systemName: item.isEnabled ? "checkmark.circle.fill" : "circle")
-				.foregroundStyle(item.isEnabled ? .green : .secondary)
+			Toggle("Enabled", isOn: Binding(get: { item.isEnabled }, set: toggle))
+				.labelsHidden()
+				.toggleStyle(.checkbox)
 			VStack(alignment: .leading, spacing: 4) {
 				Text("\(ticket.externalID) \(ticket.title)")
 					.font(.headline)

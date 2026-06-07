@@ -1,3 +1,5 @@
+import AppKit
+import SwiftData
 import SwiftUI
 
 struct SettingsSceneView: View {
@@ -15,6 +17,9 @@ struct SettingsSceneView: View {
 
 struct SettingsContentView: View {
 	let runtimeHealth: [RuntimeHealthCheck]
+	@Environment(\.modelContext) private var modelContext
+	@Environment(\.appServices) private var services
+	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
@@ -31,8 +36,18 @@ struct SettingsContentView: View {
 				settingsSection("Accounts") {
 					Text("Credential metadata is stored in SwiftData. Secret values are stored in Keychain under co.charliewil.Auditorium.")
 						.foregroundStyle(.secondary)
-					Button("Clear Credentials") {}
-						.disabled(true)
+					if providerAccounts.isEmpty {
+						Text("No connected provider accounts.")
+							.foregroundStyle(.secondary)
+					} else {
+						ForEach(providerAccounts) { account in
+							LabeledContent(account.displayName, value: account.providerKindRaw)
+						}
+					}
+					Button("Clear GitHub Credentials", role: .destructive) {
+						clearGitHubCredentials()
+					}
+					.disabled(providerAccounts.isEmpty)
 				}
 				settingsSection("Repository Providers") {
 					providerList(RepositoryProviderKind.allCases.map(\.title))
@@ -99,6 +114,14 @@ struct SettingsContentView: View {
 					Text(provider)
 				}
 			}
+		}
+	}
+
+	private func clearGitHubCredentials() {
+		do {
+			try services.providerRegistry.clearGitHubCredentials(context: modelContext)
+		} catch {
+			NSAlert(error: error).runModal()
 		}
 	}
 }

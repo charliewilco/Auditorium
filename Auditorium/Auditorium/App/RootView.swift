@@ -96,7 +96,7 @@ struct RootView: View {
 		case .tickets:
 			TicketBrowserView(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, addToQueue: addTicketsToQueue)
 		case .queue:
-			QueueScreen(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runQueue: runQueue, dryRun: dryRun, clearQueue: clearQueue, removeItem: removeQueueItem, moveItems: moveQueueItems)
+			QueueScreen(project: selectedProject, tickets: projectTickets, queueItems: projectQueueItems, runQueue: runQueue, dryRun: dryRun, clearQueue: clearQueue, removeItem: removeQueueItem, toggleItem: toggleQueueItem, moveItems: moveQueueItems)
 		case .runs:
 			RunsView(runs: projectRuns, ticketRuns: ticketRuns, tickets: projectTickets, events: events, pullRequests: pullRequests)
 		case .reports:
@@ -190,6 +190,10 @@ struct RootView: View {
 
 	private func removeQueueItem(_ item: QueueItemRecord) {
 		try? QueueService().removeQueueItem(item, context: modelContext)
+	}
+
+	private func toggleQueueItem(_ item: QueueItemRecord, isEnabled: Bool) {
+		try? QueueService().setQueueItem(item, isEnabled: isEnabled, context: modelContext)
 	}
 
 	private func moveQueueItems(_ offsets: IndexSet, _ destination: Int) {

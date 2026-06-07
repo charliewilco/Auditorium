@@ -130,6 +130,70 @@ struct AuditoriumTests {
 		#expect(issueTrackerProvider.authentication.oauth?.scopes.contains("repo") == true)
 	}
 
+	@Test func githubRepositoryProviderListsRepositoriesFromAPI() async throws {
+		let payload = """
+		[
+			{
+				"name": "Auditorium",
+				"full_name": "charliewilco/Auditorium",
+				"clone_url": "https://github.com/charliewilco/Auditorium.git",
+				"html_url": "https://github.com/charliewilco/Auditorium",
+				"default_branch": "main",
+				"owner": { "login": "charliewilco" }
+			}
+		]
+		"""
+		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
+		let provider = GitHubRepositoryProvider(client: client)
+
+		let repositories = try await provider.listRepositories()
+
+		#expect(repositories.map(\.fullName) == ["charliewilco/Auditorium"])
+		#expect(repositories.first?.defaultBranch == "main")
+	}
+
+	@Test func githubIssueProviderNormalizesIssuesAndSkipsPullRequests() async throws {
+		let payload = """
+		[
+			{
+				"id": 123,
+				"node_id": "I_kwDO",
+				"number": 42,
+				"title": "Implement runner",
+				"body": "Ship the flow",
+				"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+				"state": "open",
+				"labels": [{ "name": "agent" }],
+				"assignees": [{ "login": "charliewilco" }],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z"
+			},
+			{
+				"id": 124,
+				"number": 43,
+				"title": "A pull request",
+				"body": "",
+				"html_url": "https://github.com/charliewilco/Auditorium/pull/43",
+				"state": "open",
+				"labels": [],
+				"assignees": [],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z",
+				"pull_request": {}
+			}
+		]
+		"""
+		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
+		let provider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: client)
+
+		let tickets = try await provider.listTickets(projectID: "ignored")
+
+		#expect(tickets.count == 1)
+		#expect(tickets.first?.externalID == "42")
+		#expect(tickets.first?.labels == ["agent"])
+		#expect(tickets.first?.assignee == "charliewilco")
+	}
+
 	@Test func projectDraftDefaultsToGitHubForSourceAndIssues() {
 		let draft = ProjectDraft()
 
@@ -173,6 +237,31 @@ struct AuditoriumTests {
 		#expect(markdown.contains("## Pull Requests"))
 		#expect(markdown.contains("BUR-101"))
 		#expect(markdown.contains("https://example.com/pr/101"))
+	}
+
+	@Test func workflowPolicyParserReadsFrontMatter() throws {
+		let policy = try WorkflowPolicyParser().parse(WorkflowPolicy.defaultMarkdown)
+
+		#expect(policy.concurrency == 3)
+		#expect(policy.maxRetries == 2)
+		#expect(policy.branchPrefix == "auditorium")
+		#expect(policy.runTests)
+		#expect(policy.openPullRequest)
+		#expect(policy.prompt.contains("autonomous coding agent"))
+	}
+
+	@Test func symphonyRunnerDecodesEventsAndSummary() throws {
+		let output = """
+		{"level":"info","category":"orchestration","message":"run_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#42"}}
+		{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"/tmp/work","branch_name":"auditorium/issue-42","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/1","report_path":"/tmp/report.md"}
+		"""
+
+		let result = try SymphonyCLIProcessRunner().decode(output: output)
+
+		#expect(result.events.count == 1)
+		#expect(result.events.first?.message == "run_started")
+		#expect(result.summary?.branchName == "auditorium/issue-42")
+		#expect(result.summary?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/1")
 	}
 
 	@Test func runtimeDetectionReturnsExpectedChecks() async {
@@ -321,5 +410,27 @@ struct AuditoriumTests {
 		#expect(try context.fetch(FetchDescriptor<TicketRunRecord>()).isEmpty)
 		#expect(try context.fetch(FetchDescriptor<RunRecord>()).isEmpty)
 		#expect(!FileManager.default.fileExists(atPath: workspace.workspacesDirectory(projectID: project.id).path()))
+	}
+}
+
+private struct MockGitHubTransport: GitHubAPITransport {
+	let payload: String
+	let statusCode: Int
+	let headers: [String: String]
+
+	init(payload: String, statusCode: Int = 200, headers: [String: String] = [:]) {
+		self.payload = payload
+		self.statusCode = statusCode
+		self.headers = headers
+	}
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		let response = HTTPURLResponse(
+			url: request.url ?? URL(string: "https://api.github.com")!,
+			statusCode: statusCode,
+			httpVersion: nil,
+			headerFields: headers
+		)!
+		return (Data(payload.utf8), response)
 	}
 }

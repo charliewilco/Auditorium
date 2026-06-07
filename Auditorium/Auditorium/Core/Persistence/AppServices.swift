@@ -6,6 +6,11 @@ struct AppServices {
 	let runtimeDetection = RuntimeDetectionService()
 	let reportGenerator = ReportGenerator()
 	let projectCreation = ProjectCreationService()
+	let symphony = SymphonyCLIProcessRunner()
+
+	var providerRegistry: ProviderRegistry {
+		ProviderRegistry(keychainService: keychain)
+	}
 }
 
 private struct AppServicesKey: EnvironmentKey {

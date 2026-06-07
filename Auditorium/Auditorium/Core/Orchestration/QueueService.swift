@@ -49,6 +49,11 @@ struct QueueService {
 		try context.save()
 	}
 
+	func setQueueItem(_ item: QueueItemRecord, isEnabled: Bool, context: ModelContext) throws {
+		item.isEnabled = isEnabled
+		try context.save()
+	}
+
 	func clearQueue(projectID: UUID, context: ModelContext) throws {
 		let items = try context.fetch(FetchDescriptor<QueueItemRecord>()).filter { $0.projectID == projectID }
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
