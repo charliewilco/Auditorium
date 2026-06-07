@@ -69,13 +69,13 @@ struct SettingsContentView: View {
 					.disabled(providerAccounts.isEmpty)
 				}
 				settingsSection("Repository Providers") {
-					providerList(RepositoryProviderKind.allCases.map(\.title))
+					providerList(ProviderStateSummaries.repositoryProviders())
 				}
 				settingsSection("Issue Providers") {
-					providerList(IssueProviderKind.allCases.map(\.title))
+					providerList(ProviderStateSummaries.issueProviders())
 				}
 				settingsSection("Agent Providers") {
-					providerList(AgentProviderKind.allCases.map(\.title))
+					providerList(ProviderStateSummaries.agentProviders())
 				}
 				settingsSection("Runtime Providers") {
 					SymphonyDoctorStatusView(status: symphonyDoctorStatus)
@@ -211,14 +211,25 @@ struct SettingsContentView: View {
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
 
-	private func providerList(_ providers: [String]) -> some View {
-		LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
-			ForEach(providers, id: \.self) { provider in
-				HStack {
-					Image(systemName: "checkmark.circle")
+	private func providerList(_ providers: [ProviderStateSummary]) -> some View {
+		LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], alignment: .leading, spacing: 8) {
+			ForEach(providers) { provider in
+				VStack(alignment: .leading, spacing: 6) {
+					HStack(alignment: .firstTextBaseline, spacing: 8) {
+						Image(systemName: provider.isAvailable ? "checkmark.circle.fill" : "circle.slash")
+							.foregroundStyle(implementationStatusTint(provider.state))
+						Text(provider.title)
+							.font(.subheadline.weight(.medium))
+						Spacer()
+						StatusBadge(title: provider.state.title, tint: implementationStatusTint(provider.state))
+					}
+					Text(provider.detail)
+						.font(.caption)
 						.foregroundStyle(.secondary)
-					Text(provider)
+						.fixedSize(horizontal: false, vertical: true)
 				}
+				.padding(8)
+				.background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
 			}
 		}
 	}

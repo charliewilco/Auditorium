@@ -504,6 +504,34 @@ struct AuditoriumCoreTests {
 		#expect(options.first { $0.title == "@octo" }?.subtitle == "1 assigned issue")
 	}
 
+	@Test func providerStateSummariesExposeV0ProviderAvailability() {
+		let repositoryProviders = ProviderStateSummaries.repositoryProviders()
+		let issueProviders = ProviderStateSummaries.issueProviders()
+		let agentProviders = ProviderStateSummaries.agentProviders()
+
+		#expect(repositoryProviders.first { $0.id == RepositoryProviderKind.github.id }?.state == .implemented)
+		#expect(repositoryProviders.first { $0.id == RepositoryProviderKind.gitlab.id }?.state == .unavailable)
+		#expect(repositoryProviders.first { $0.id == RepositoryProviderKind.gitlab.id }?.detail.contains("GitHub-only") == true)
+		#expect(issueProviders.first { $0.id == IssueProviderKind.githubIssues.id }?.state == .implemented)
+		#expect(issueProviders.first { $0.id == IssueProviderKind.linear.id }?.state == .unavailable)
+		#expect(issueProviders.first { $0.id == IssueProviderKind.imported.id }?.state == .unavailable)
+		#expect(agentProviders.first { $0.id == AgentProviderKind.codex.id }?.state == .implemented)
+		#expect(agentProviders.first { $0.id == AgentProviderKind.genericCLI.id }?.state == .implemented)
+		#expect(agentProviders.first { $0.id == AgentProviderKind.mockAgent.id }?.state == .implemented)
+	}
+
+	@Test func providerRuntimeSummariesSeparateDetectionFromImplementation() {
+		let statuses = ProviderStateSummaries.runtimeProviders(from: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil)
+		])
+
+		let localWorkspace = statuses.first { $0.kind == .localWorkspace }
+		let mockRuntime = statuses.first { $0.kind == .mockRuntime }
+
+		#expect(localWorkspace?.isRunnable == true)
+		#expect(mockRuntime?.isRunnable == true)
+	}
+
 	@Test func githubCredentialSelectionOnlyIncludesAccountsWithSecrets() throws {
 		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
 		let connected = ProviderAccountRecord(

@@ -23,16 +23,24 @@ struct ProjectDashboardView: View {
 				}
 				statsGrid
 				HStack(alignment: .top, spacing: 16) {
-					summaryPanel("Repository", symbol: "shippingbox", rows: [
-						("Name", project?.repositoryName ?? "No project"),
-						("Provider", project?.repositoryProviderKind.title ?? "Unknown"),
-						("Default Branch", project?.defaultBranch ?? "Unknown")
-					])
-					summaryPanel("Issue Source", symbol: "ticket", rows: [
-						("Provider", project?.issueProviderKind.title ?? "Unknown"),
-						("Open Tickets", "\(tickets.filter { $0.status != .completed }.count)"),
-						("Queued", "\(queueItems.count)")
-					])
+					summaryPanel(
+						"Repository",
+						symbol: "shippingbox",
+						rows: [
+							("Name", project?.repositoryName ?? "No project"),
+							("Provider", project?.repositoryProviderKind.title ?? "Unknown"),
+							("Default Branch", project?.defaultBranch ?? "Unknown"),
+						]
+					)
+					summaryPanel(
+						"Issue Source",
+						symbol: "ticket",
+						rows: [
+							("Provider", project?.issueProviderKind.title ?? "Unknown"),
+							("Open Tickets", "\(tickets.filter { $0.status != .completed }.count)"),
+							("Queued", "\(queueItems.count)"),
+						]
+					)
 				}
 				workspaceLocationsPanel
 				HStack(alignment: .top, spacing: 16) {
@@ -55,20 +63,32 @@ struct ProjectDashboardView: View {
 					.foregroundStyle(.secondary)
 			}
 			Spacer()
-			StatusBadge(title: project?.runtimeProviderKind.title ?? "Mock Runtime", tint: .green)
+			StatusBadge(title: project?.runtimeProviderKind.title ?? "No Runtime", tint: project == nil ? .secondary : .green)
 		}
 	}
 
 	private var statsGrid: some View {
-		let completedToday = runs.filter { Calendar.current.isDateInToday($0.startedAt) && ($0.status == .completed || $0.status == .completedWithFailures) }.count
+		let completedToday = runs.filter {
+			Calendar.current.isDateInToday($0.startedAt) && ($0.status == .completed || $0.status == .completedWithFailures)
+		}.count
 		let successRate = runs.isEmpty ? "0%" : "\(Int((Double(runs.filter { $0.status == .completed }.count) / Double(runs.count)) * 100))%"
 		return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
 			StatCard(title: "Open Tickets", value: "\(tickets.filter { $0.status != .completed }.count)", symbol: "ticket", tint: .blue)
-			StatCard(title: "Queued Tickets", value: "\(queueItems.count)", symbol: "text.line.first.and.arrowtriangle.forward", tint: .purple)
+			StatCard(
+				title: "Queued Tickets",
+				value: "\(queueItems.count)",
+				symbol: "text.line.first.and.arrowtriangle.forward",
+				tint: .purple
+			)
 			StatCard(title: "Running Agents", value: "\(ticketRuns.filter { $0.status == .running }.count)", symbol: "cpu", tint: .orange)
 			StatCard(title: "Completed Today", value: "\(completedToday)", symbol: "checkmark.circle.fill", tint: .green)
 			StatCard(title: "PRs Created", value: "\(pullRequests.count)", symbol: "arrow.triangle.pull", tint: .indigo)
-			StatCard(title: "Failed Runs", value: "\(runs.filter { $0.status == .failed || $0.status == .completedWithFailures }.count)", symbol: "xmark.octagon.fill", tint: .red)
+			StatCard(
+				title: "Failed Runs",
+				value: "\(runs.filter { $0.status == .failed || $0.status == .completedWithFailures }.count)",
+				symbol: "xmark.octagon.fill",
+				tint: .red
+			)
 			StatCard(title: "Avg Completion", value: "6m", symbol: "clock", tint: .teal)
 			StatCard(title: "Success Rate", value: successRate, symbol: "chart.line.uptrend.xyaxis", tint: .green)
 		}
@@ -112,7 +132,8 @@ struct ProjectDashboardView: View {
 						}
 					}
 				}
-			} else {
+			}
+			else {
 				Text("No project selected.")
 					.foregroundStyle(.secondary)
 			}
@@ -179,8 +200,12 @@ struct ProjectDashboardView: View {
 				}
 			}
 			if pullRequests.isEmpty {
-				Text("Completed demo tickets will create fake pull request links.")
-					.foregroundStyle(.secondary)
+				Text(
+					project == nil
+						? "Select a project to review pull requests."
+						: "Completed runs that open pull requests will appear here."
+				)
+				.foregroundStyle(.secondary)
 			}
 		}
 		.padding()

@@ -162,7 +162,7 @@ struct ProviderRegistry {
 			]
 		default:
 			return [
-				ProviderCapability(id: "placeholder", title: "Provider placeholder", isSupported: false)
+				ProviderCapability(id: "unavailable-v0", title: "Not available in v0", isSupported: false)
 			]
 		}
 	}
