@@ -179,6 +179,27 @@ struct AuditoriumTests {
 		#expect(issueTrackerProvider.authentication.oauth?.scopes.contains("repo") == true)
 	}
 
+	@Test func githubAuthenticationStateReflectsKeychainBackedConnection() {
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub OAuth for charliewilco/Auditorium",
+			keychainAccount: "project-github-oauth"
+		)
+
+		let connected = GitHubAuthenticationState(providerAccounts: [account]) { keychainAccount in
+			keychainAccount == "project-github-oauth" ? "gho_token" : nil
+		}
+		let missingSecret = GitHubAuthenticationState(providerAccounts: [account]) { _ in nil }
+		let disconnected = GitHubAuthenticationState(providerAccounts: []) { _ in "unused" }
+
+		#expect(connected.status == .connected)
+		#expect(connected.isConnected)
+		#expect(connected.displayName == "GitHub OAuth for charliewilco/Auditorium")
+		#expect(connected.detail.contains("Keychain"))
+		#expect(missingSecret.status == .missingSecret)
+		#expect(disconnected.status == .disconnected)
+	}
+
 	@Test func githubRepositoryProviderListsRepositoriesFromAPI() async throws {
 		let payload = """
 		[

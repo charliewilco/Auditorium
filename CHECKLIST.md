@@ -52,7 +52,7 @@ Acceptance gate:
 - [x] Add tests proving GitHub providers use the repeatable protocol shape.
 - [x] Add provider registry/factory so orchestration does not instantiate concrete providers directly.
 - [x] Add provider capability model for supported operations.
-- [~] Distinguish detected, authenticated, authorized, and implemented provider states in UI.
+- [x] Distinguish detected, authenticated, authorized, and implemented provider states in UI.
 
 Acceptance gate:
 
@@ -70,13 +70,13 @@ Acceptance gate:
 - [ ] Store and refresh OAuth token metadata safely.
 - [x] Validate granted scopes.
 - [~] Detect missing or insufficient GitHub credentials before import/run.
-- [~] Add Settings UI for connected GitHub account.
+- [x] Add Settings UI for connected GitHub account.
 - [x] Add clear credentials action.
 - [x] Add tests for Keychain-backed account lifecycle.
 
 Acceptance gate:
 
-- [~] A user can connect GitHub without manually pasting a token.
+- [x] A user can connect GitHub without manually pasting a token.
 - [x] Repository and issue APIs can share one GitHub account.
 - [x] Clearing the account removes Keychain secrets and SwiftData metadata.
 
@@ -327,13 +327,13 @@ Acceptance gate:
 ## 17. Settings And Security
 
 - [x] Show runtime health.
-- [~] Show account/provider sections.
+- [x] Show account/provider sections.
 - [~] Include security preference toggles.
 - [x] Enforce network access toggle.
 - [x] Enforce filesystem write toggle.
 - [x] Enforce confirmation before starting runs.
 - [x] Enforce confirmation before opening PRs.
-- [ ] Show Keychain storage explanation.
+- [x] Show Keychain storage explanation.
 - [x] Clear GitHub credentials.
 - [ ] Configure runtime isolation level.
 - [ ] Configure logs/reports paths.
@@ -455,7 +455,7 @@ Acceptance gate:
 
 ## 24. v0 Final Acceptance
 
-- [~] User authenticates GitHub.
+- [x] User authenticates GitHub.
 - [x] User selects GitHub repository.
 - [x] User imports GitHub Issues.
 - [x] User queues issues.

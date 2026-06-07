@@ -38,6 +38,7 @@ struct SettingsContentView: View {
 					Text("Credential metadata is stored in SwiftData. Secret values are stored in Keychain under co.charliewil.Auditorium.")
 						.foregroundStyle(.secondary)
 					TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
+					githubAccountStateView
 					if providerAccounts.isEmpty {
 						Text("No connected provider accounts.")
 							.foregroundStyle(.secondary)
@@ -93,6 +94,43 @@ struct SettingsContentView: View {
 				}
 			}
 			.padding()
+		}
+	}
+
+	private var githubAuthenticationState: GitHubAuthenticationState {
+		GitHubAuthenticationState(providerAccounts: providerAccounts) { account in
+			try services.keychain.readSecret(account: account)
+		}
+	}
+
+	private var githubAccountStateView: some View {
+		let state = githubAuthenticationState
+		return HStack {
+			VStack(alignment: .leading, spacing: 4) {
+				Text(state.displayName)
+					.font(.subheadline.weight(.semibold))
+				Text(state.detail)
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
+			Spacer()
+			StatusBadge(title: githubStatusTitle(state.status), tint: githubStatusTint(state.status))
+		}
+	}
+
+	private func githubStatusTitle(_ status: GitHubAuthenticationState.Status) -> String {
+		switch status {
+		case .disconnected: "Disconnected"
+		case .missingSecret: "Needs Repair"
+		case .connected: "Connected"
+		}
+	}
+
+	private func githubStatusTint(_ status: GitHubAuthenticationState.Status) -> Color {
+		switch status {
+		case .disconnected: .secondary
+		case .missingSecret: .orange
+		case .connected: .green
 		}
 	}
 
