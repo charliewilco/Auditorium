@@ -2,7 +2,7 @@
 	<img src="./.github/icon.png" alt="pink app icon" width="96" />
 </p>
 
-# Auditorium
+<h1 align="center">Auditorium</h1>
 
 Auditorium is a native, local-first macOS control plane for coding agents.
 
