@@ -22,8 +22,8 @@ Legend:
 
 Acceptance gate:
 
-- [~] Documented commands build in the working tree; fresh-clone verification remains.
-- [ ] CI proves the documented commands stay valid.
+- [x] Documented commands build in the working tree and in fresh CI checkout.
+- [x] CI proves the documented commands stay valid.
 
 ## 1. Domain Model And SwiftData
 
@@ -450,7 +450,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] CI validates app and CLI on every PR.
+- [x] CI validates app and CLI on every PR.
 - [ ] Release build can be signed and launched on a clean Mac.
 
 ## 24. v0 Final Acceptance
