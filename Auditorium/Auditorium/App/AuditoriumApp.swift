@@ -9,7 +9,9 @@ struct AuditoriumApp: App {
 
 	init() {
 		do {
-			modelContainer = try AppSchema.makeModelContainer(inMemory: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
+			let environment = ProcessInfo.processInfo.environment
+			let shouldUseEphemeralStore = environment["XCTestConfigurationFilePath"] != nil || environment["CI"] == "true"
+			modelContainer = try AppSchema.makeModelContainer(inMemory: shouldUseEphemeralStore)
 		} catch {
 			fatalError("Could not create ModelContainer: \(error)")
 		}
