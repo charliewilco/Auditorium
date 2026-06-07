@@ -2212,6 +2212,7 @@ struct AuditoriumTests {
 		#expect(sourceProvider.commitPaths == [workspacePath])
 		#expect(sourceProvider.pushedBranches == ["auditorium/101-wire-local-codex"])
 		#expect(sourceProvider.createdPullRequestTitles == ["101: Wire Local Codex"])
+		#expect(sourceProvider.createdPullRequests.allSatisfy { $0.allowsAutoMerge == false })
 		#expect(ticket.status == .needsReview)
 		#expect(ticketRun.status == .needsReview)
 		#expect(ticketRun.workspacePath == workspacePath.path())
@@ -2223,6 +2224,68 @@ struct AuditoriumTests {
 		#expect(events.contains { $0.message == "Committed agent changes on auditorium/101-wire-local-codex." })
 		#expect(events.contains { $0.message == "Pushed auditorium/101-wire-local-codex." })
 		#expect(FileManager.default.fileExists(atPath: workspace.workspaceManifestPath(workspace: workspacePath).path()))
+	}
+
+	@Test func pullRequestReviewPolicyRejectsAutoMergeRequests() throws {
+		let repository = RepositoryDescriptor(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: URL(string: "https://github.com/charliewilco/Auditorium.git")!,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
+			defaultBranch: "main"
+		)
+		let request = PullRequestRequest(
+			title: "101: Review only",
+			body: "Body",
+			branchName: "auditorium/101",
+			targetBranch: "main",
+			repository: repository,
+			allowsAutoMerge: true
+		)
+		var didReject = false
+
+		do {
+			try PullRequestReviewPolicy().validate(request)
+		} catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
+			didReject = true
+		}
+
+		#expect(PullRequestReviewPolicy.allowsAutoMergeInV0 == false)
+		#expect(didReject)
+	}
+
+	@Test func githubAPIClientRejectsAutoMergePullRequestRequestsBeforeNetwork() async throws {
+		let transport = RecordingGitHubTransport(responses: [])
+		let client = GitHubAPIClient(token: "token", transport: transport)
+		let repository = RepositoryDescriptor(
+			provider: .github,
+			owner: "charliewilco",
+			name: "Auditorium",
+			fullName: "charliewilco/Auditorium",
+			cloneURL: URL(string: "https://github.com/charliewilco/Auditorium.git")!,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
+			defaultBranch: "main"
+		)
+		let request = PullRequestRequest(
+			title: "101: Review only",
+			body: "Body",
+			branchName: "auditorium/101",
+			targetBranch: "main",
+			repository: repository,
+			allowsAutoMerge: true
+		)
+		var didReject = false
+
+		do {
+			_ = try await client.createPullRequest(request)
+		} catch ProviderError.unavailable(let message) where message.contains("never auto-merges") {
+			didReject = true
+		}
+
+		#expect(didReject)
+		#expect(await transport.requestedURLs().isEmpty)
 	}
 
 	@Test func localWorkspaceCodexRunWithoutFileChangesCompletesWithoutPullRequest() async throws {
@@ -2988,6 +3051,7 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 	let commitsChanges: Bool
 	let failingPullRequestTitles: Set<String>
 	private(set) var createdPullRequestTitles: [String] = []
+	private(set) var createdPullRequests: [PullRequestRequest] = []
 	private(set) var clonePaths: [URL] = []
 	private(set) var createdBranches: [(name: String, repositoryPath: URL)] = []
 	private(set) var commitPaths: [URL] = []
@@ -3026,6 +3090,7 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 			throw ProviderError.unavailable("Pull request failed for \(request.title)")
 		}
 		createdPullRequestTitles.append(request.title)
+		createdPullRequests.append(request)
 		return PullRequestDescriptor(
 			title: request.title,
 			url: URL(string: "https://example.com/\(request.repository.fullName)/pull/source-provider")!,

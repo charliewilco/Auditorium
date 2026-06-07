@@ -469,13 +469,15 @@ final class Orchestrator {
 				try await sourceProvider.pushBranch(named: workspace.branchName, from: workspace.path)
 				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .git, message: "Pushed \(workspace.branchName)."))
 			}
-			let pr = try await sourceProvider.createPullRequest(PullRequestRequest(
+			let pullRequestRequest = PullRequestRequest(
 				title: "\(ticket.externalID): \(ticket.title)",
 				body: finalSummary,
 				branchName: workspace.branchName,
 				targetBranch: project.defaultBranch,
 				repository: repository
-			))
+			)
+			try PullRequestReviewPolicy().validate(pullRequestRequest)
+			let pr = try await sourceProvider.createPullRequest(pullRequestRequest)
 			ticket.status = .needsReview
 			ticketRun.status = .needsReview
 			ticketRun.pullRequestURL = pr.url.absoluteString

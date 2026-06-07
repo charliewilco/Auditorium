@@ -259,7 +259,7 @@ Acceptance gate:
 - [x] Store `PullRequestRecord`.
 - [x] Surface PR in run detail and ticket inspector.
 - [x] Add PR to markdown report.
-- [ ] Never auto-merge in v0.
+- [x] Never auto-merge in v0.
 
 Acceptance gate:
 
@@ -444,6 +444,7 @@ Acceptance gate:
 - [x] Swift tests for run-detail pull request visibility.
 - [x] Swift tests for interrupted run reconciliation on app relaunch.
 - [x] Swift tests for offline demo state, reset cleanup, and full mock run.
+- [x] Swift tests for pull request human-review-only policy.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.

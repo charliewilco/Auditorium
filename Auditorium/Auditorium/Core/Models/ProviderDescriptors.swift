@@ -34,6 +34,23 @@ struct PullRequestRequest: Sendable {
 	let branchName: String
 	let targetBranch: String
 	let repository: RepositoryDescriptor
+	let allowsAutoMerge: Bool
+
+	init(
+		title: String,
+		body: String,
+		branchName: String,
+		targetBranch: String,
+		repository: RepositoryDescriptor,
+		allowsAutoMerge: Bool = false
+	) {
+		self.title = title
+		self.body = body
+		self.branchName = branchName
+		self.targetBranch = targetBranch
+		self.repository = repository
+		self.allowsAutoMerge = allowsAutoMerge
+	}
 }
 
 struct PullRequestDescriptor: Sendable {

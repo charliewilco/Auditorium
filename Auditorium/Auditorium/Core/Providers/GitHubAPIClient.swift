@@ -78,6 +78,7 @@ struct GitHubAPIClient: Sendable {
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		try PullRequestReviewPolicy().validate(request)
 		let payload = [
 			"title": request.title,
 			"body": request.body,
