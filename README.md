@@ -1,6 +1,6 @@
-<h1 align="center">
-	<img src="./.github/icon.png" alt="pink app icon" width="72" />
-</h1>
+<p align="center">
+	<img src="./.github/icon.png" alt="pink app icon" width="96" />
+</p>
 
 # Auditorium
 
