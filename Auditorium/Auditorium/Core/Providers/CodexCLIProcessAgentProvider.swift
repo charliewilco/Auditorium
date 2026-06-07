@@ -29,8 +29,8 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 						},
 						allowsNonZeroExit: true
 					)
-					try writeLog(result, workspacePath: request.workspace.path)
-					continuation.yield(Self.finalEvent(result: result))
+					let logURL = try writeLog(result, workspacePath: request.workspace.path)
+					continuation.yield(Self.finalEvent(result: result, logURL: logURL))
 					continuation.finish()
 				} catch {
 					continuation.finish(throwing: error)
@@ -54,9 +54,10 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 		"""
 	}
 
-	private func writeLog(_ result: ProcessResult, workspacePath: URL) throws {
+	private func writeLog(_ result: ProcessResult, workspacePath: URL) throws -> URL {
 		let logDirectory = workspacePath.appending(path: ".auditorium")
 		try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+		let logURL = logDirectory.appending(path: "codex.log")
 		let log = """
 		# Codex CLI Log
 
@@ -68,17 +69,19 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 		## stderr
 		\(result.standardError)
 		"""
-		try log.write(to: logDirectory.appending(path: "codex.log"), atomically: true, encoding: .utf8)
+		try log.write(to: logURL, atomically: true, encoding: .utf8)
+		return logURL
 	}
 
-	private static func finalEvent(result: ProcessResult) -> AgentEvent {
+	private static func finalEvent(result: ProcessResult, logURL: URL) -> AgentEvent {
 		if result.exitCode == 0 {
 			return AgentEvent(
 				level: .success,
 				category: .agent,
 				message: "codex_completed",
 				summary: "Codex CLI completed successfully.",
-				outcome: .completed
+				outcome: .completed,
+				logPath: logURL.path()
 			)
 		}
 		return AgentEvent(
@@ -86,7 +89,8 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 			category: .agent,
 			message: "codex_failed",
 			summary: "Codex CLI exited with status \(result.exitCode).",
-			outcome: .failed
+			outcome: .failed,
+			logPath: logURL.path()
 		)
 	}
 }

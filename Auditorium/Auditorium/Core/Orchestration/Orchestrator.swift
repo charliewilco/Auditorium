@@ -8,6 +8,7 @@ final class Orchestrator {
 	private let reportGenerator: ReportGenerator
 	private let symphonyRunner: SymphonyCLIProcessRunner
 	private let mockSourceProvider: any SourceCodeProvider
+	private let mockAgentProvider: any AgentProvider
 	private var activeTask: Task<Void, Never>?
 
 	init(
@@ -15,13 +16,15 @@ final class Orchestrator {
 		runtimeDetection: RuntimeDetectionService,
 		reportGenerator: ReportGenerator,
 		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner(),
-		mockSourceProvider: (any SourceCodeProvider)? = nil
+		mockSourceProvider: (any SourceCodeProvider)? = nil,
+		mockAgentProvider: (any AgentProvider)? = nil
 	) {
 		self.workspaceService = workspaceService
 		self.runtimeDetection = runtimeDetection
 		self.reportGenerator = reportGenerator
 		self.symphonyRunner = symphonyRunner
 		self.mockSourceProvider = mockSourceProvider ?? MockGitHubRepositoryProvider()
+		self.mockAgentProvider = mockAgentProvider ?? MockCodexAgentProvider()
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
@@ -89,7 +92,6 @@ final class Orchestrator {
 			defaultBranch: project.defaultBranch
 		)
 		let runtime = MockRuntimeProvider(workspaceService: workspaceService, projectID: projectID)
-		let agent = MockCodexAgentProvider()
 
 		for batch in plan.batches {
 			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) ticket runs."))
@@ -100,7 +102,7 @@ final class Orchestrator {
 					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 					continue
 				}
-				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: agent, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
+				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: mockAgentProvider, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
 			}
 		}
 
@@ -330,7 +332,10 @@ final class Orchestrator {
 		var finalOutcome: MockTicketOutcome?
 		var finalSummary = ""
 		for try await event in stream {
-			context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: event.level, category: event.category, message: event.message))
+			context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: event.level, category: event.category, message: event.message, metadataJSON: event.metadataJSON ?? "{}"))
+			if let logPath = event.logPath {
+				ticketRun.logPath = logPath
+			}
 			if let summary = event.summary {
 				finalSummary = summary
 			}

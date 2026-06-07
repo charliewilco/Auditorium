@@ -1268,6 +1268,7 @@ struct AuditoriumTests {
 		#expect(messages.contains("codex_stdout: prompt-ok"))
 		#expect(messages.contains("codex_stderr: stderr-line"))
 		#expect(events.last?.outcome == .completed)
+		#expect(events.last?.logPath == root.appending(path: ".auditorium/codex.log").path())
 		#expect(log.contains("Exit code: 0"))
 		#expect(log.contains("prompt-ok"))
 		#expect(log.contains("stderr-line"))
@@ -1292,6 +1293,7 @@ struct AuditoriumTests {
 		#expect(events.last?.message == "codex_failed")
 		#expect(events.last?.summary == "Codex CLI exited with status 7.")
 		#expect(events.last?.outcome == .failed)
+		#expect(events.last?.logPath == root.appending(path: ".auditorium/codex.log").path())
 	}
 
 	@Test func codexAgentProviderCancelsRunningProcessWhenStreamConsumerCancels() async throws {
@@ -1513,6 +1515,64 @@ struct AuditoriumTests {
 		#expect(pullRequest.provider == .genericGit)
 		#expect(pullRequest.url == "https://example.com/local/protocol-source/pull/source-provider")
 		#expect(sourceProvider.createdPullRequestTitles == ["SRC-101: Use injected source provider"])
+	}
+
+	@Test func mockOrchestratorPersistsInjectedAgentMetadataAndLogPath() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let logPath = root.appending(path: "codex.log").path()
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(level: .info, category: .agent, message: "agent streamed output", metadataJSON: #"{"stream":"stdout"}"#),
+			AgentEvent(level: .success, category: .agent, message: "agent completed", summary: "Agent finished through injected provider.", outcome: .completed, logPath: logPath)
+		])
+		let project = Project(
+			name: "Injected Agent",
+			repositoryProviderKind: .github,
+			repositoryName: "local/injected-agent",
+			repositoryURL: "file:///tmp/injected-agent",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "AGT-101",
+			title: "Persist injected agent events",
+			body: "The orchestrator should persist agent metadata and log paths.",
+			status: .ready,
+			labels: ["agent"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/102",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockSourceProvider: sourceProvider,
+			mockAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let agentEvent = try #require(context.fetch(FetchDescriptor<RuntimeEventRecord>()).first { $0.message == "agent streamed output" })
+
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.logPath == logPath)
+		#expect(agentEvent.metadataJSON == #"{"stream":"stdout"}"#)
 	}
 
 	@Test func processCommandCancelsRunningProcess() async {
@@ -1965,6 +2025,19 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 			status: .open,
 			checksStatus: .passed
 		)
+	}
+}
+
+private struct StaticAgentProvider: AgentProvider {
+	let events: [AgentEvent]
+
+	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
+		AsyncThrowingStream { continuation in
+			for event in events {
+				continuation.yield(event)
+			}
+			continuation.finish()
+		}
 	}
 }
 

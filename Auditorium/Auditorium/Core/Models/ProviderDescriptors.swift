@@ -74,14 +74,36 @@ struct AgentEvent: Sendable {
 	let category: EventCategory
 	let message: String
 	let summary: String?
-	let outcome: MockTicketOutcome?
+	let outcome: AgentRunOutcome?
+	let metadataJSON: String?
+	let logPath: String?
+
+	init(
+		level: EventLevel,
+		category: EventCategory,
+		message: String,
+		summary: String? = nil,
+		outcome: AgentRunOutcome? = nil,
+		metadataJSON: String? = nil,
+		logPath: String? = nil
+	) {
+		self.level = level
+		self.category = category
+		self.message = message
+		self.summary = summary
+		self.outcome = outcome
+		self.metadataJSON = metadataJSON
+		self.logPath = logPath
+	}
 }
 
-enum MockTicketOutcome: String, Sendable {
+enum AgentRunOutcome: String, Sendable {
 	case completed
 	case failed
 	case blocked
 }
+
+typealias MockTicketOutcome = AgentRunOutcome
 
 struct RuntimeHealthCheck: Identifiable, Sendable {
 	let id: String
