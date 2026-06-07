@@ -2225,10 +2225,21 @@ struct AuditoriumTests {
 	}
 
 	@Test func processCommandCancelsRunningProcess() async {
+		var lines: [String] = []
 		let task = Task {
-			try await ProcessCommand.run(executable: "/bin/sh", arguments: ["-lc", "sleep 5"])
+			try await ProcessCommand.runStreaming(
+				executable: "/bin/sh",
+				arguments: ["-lc", "printf 'ready\\n'; sleep 30"],
+				onStandardOutputLine: { line in
+					lines.append(line)
+				}
+			)
 		}
-		try? await Task.sleep(nanoseconds: 200_000_000)
+		let deadline = Date().addingTimeInterval(5)
+		while lines.contains("ready") == false, Date() < deadline {
+			try? await Task.sleep(nanoseconds: 50_000_000)
+		}
+		#expect(lines.contains("ready"))
 		task.cancel()
 		var didCancel = false
 
