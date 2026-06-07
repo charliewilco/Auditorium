@@ -254,7 +254,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Completed ticket runs show real GitHub PR URLs.
+- [x] Completed ticket runs show real GitHub PR URLs.
 
 ## 14. Reports
 
@@ -399,6 +399,7 @@ Acceptance gate:
 Acceptance gate:
 
 - [~] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
+	- App coordinator now invokes `symphony` for Local Workspace + Codex, passes stored GitHub credentials through the process environment, persists streamed events before process exit, and stores real PR URLs from CLI summaries. A full manual UI run against GitHub is still tracked in final acceptance.
 
 ## 22. Testing
 

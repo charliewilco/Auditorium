@@ -29,7 +29,8 @@ final class AppRunCoordinator {
 			mockSourceProvider: mockSourceProvider,
 			mockAgentProvider: mockAgentProvider,
 			localWorkspaceSourceProvider: localWorkspaceSourceProvider,
-			codexAgentProvider: codexAgentProvider
+			codexAgentProvider: codexAgentProvider,
+			usesSymphonyForLocalWorkspaceCodex: true
 		)
 	}
 

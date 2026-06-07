@@ -55,4 +55,4 @@ docs/acceptance/REAL_GITHUB_FLOW_MARKER.md | 1 +
 
 ## Still Not Proven By This Evidence
 
-This run proves the headless `symphony` real GitHub issue-to-PR path and deterministic workspace. It does not prove the macOS app UI can complete the full flow, update the inspector live, or verify report copy/export/reveal actions; those remain tracked in `CHECKLIST.md`.
+This run proves the headless `symphony` real GitHub issue-to-PR path and deterministic workspace. Swift coverage now also proves the app coordinator invokes `symphony`, passes stored GitHub credentials to the process, persists streamed events, and stores the summary PR URL. It does not prove the macOS app UI can complete the full real GitHub flow or verify report copy/export/reveal actions; those remain tracked in `CHECKLIST.md`.

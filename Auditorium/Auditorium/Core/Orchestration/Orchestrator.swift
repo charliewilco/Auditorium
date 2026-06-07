@@ -12,6 +12,7 @@ final class Orchestrator {
 	private let mockAgentProvider: any AgentProvider
 	private let localWorkspaceSourceProvider: (any SourceCodeProvider)?
 	private let codexAgentProvider: any AgentProvider
+	private let usesSymphonyForLocalWorkspaceCodex: Bool
 	private var activeTask: Task<Void, Never>?
 
 	init(
@@ -23,7 +24,8 @@ final class Orchestrator {
 		mockSourceProvider: (any SourceCodeProvider)? = nil,
 		mockAgentProvider: (any AgentProvider)? = nil,
 		localWorkspaceSourceProvider: (any SourceCodeProvider)? = nil,
-		codexAgentProvider: (any AgentProvider)? = nil
+		codexAgentProvider: (any AgentProvider)? = nil,
+		usesSymphonyForLocalWorkspaceCodex: Bool = false
 	) {
 		self.workspaceService = workspaceService
 		self.runtimeDetection = runtimeDetection
@@ -34,6 +36,7 @@ final class Orchestrator {
 		self.mockAgentProvider = mockAgentProvider ?? MockCodexAgentProvider()
 		self.localWorkspaceSourceProvider = localWorkspaceSourceProvider
 		self.codexAgentProvider = codexAgentProvider ?? CodexCLIProcessAgentProvider()
+		self.usesSymphonyForLocalWorkspaceCodex = usesSymphonyForLocalWorkspaceCodex
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
@@ -71,7 +74,7 @@ final class Orchestrator {
 		try await runtimeDetection.requireAvailableRuntime(for: project.runtimeProviderKind)
 		try await runtimeDetection.requireAvailableAgent(for: project.agentProviderKind)
 		if project.runtimeProviderKind == .localWorkspace, project.agentProviderKind == .codex {
-			if providerRegistry != nil || localWorkspaceSourceProvider != nil {
+			if usesSymphonyForLocalWorkspaceCodex == false, providerRegistry != nil || localWorkspaceSourceProvider != nil {
 				try await executeWithLocalWorkspaceCodex(
 					project: project,
 					queueItems: queueItems,
@@ -392,11 +395,13 @@ final class Orchestrator {
 
 			do {
 				let issueNumber = try githubIssueNumber(from: ticket.externalID)
+				let environment = try await symphonyEnvironment(project: project, context: context)
 				let result = try await symphonyRunner.run(
 					repository: project.repositoryName,
 					issueNumber: issueNumber,
 					workflowPath: workflowURL,
 					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id),
+					environment: environment,
 					onEvent: { event in
 						context.insert(
 							RuntimeEventRecord(
@@ -534,6 +539,19 @@ final class Orchestrator {
 			)
 		)
 		try ModelIntegrityValidator.save(context: context)
+	}
+
+	private func symphonyEnvironment(project: Project, context: ModelContext) async throws -> [String: String] {
+		guard let providerRegistry else { return [:] }
+		let token = try await providerRegistry.requireGitHubToken(
+			for: project,
+			context: context,
+			operation: "running GitHub source-code operations"
+		)
+		return [
+			"GH_TOKEN": token,
+			"GITHUB_TOKEN": token,
+		]
 	}
 
 	private func cancelRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {

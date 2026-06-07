@@ -2702,6 +2702,119 @@ struct AuditoriumTests {
 		#expect(reports.contains { $0.filePath == reportPath })
 	}
 
+	@Test func appRunCoordinatorUsesSymphonyWithStoredGitHubToken() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let fakeSymphony = root.appending(path: "fake-symphony")
+		let reportPath = root.appending(path: "report.md").path()
+		let workspacePath = root.appending(path: "workspace").path()
+		let argumentsPath = root.appending(path: "symphony-arguments.txt").path()
+		let script = """
+			#!/bin/sh
+			if [ "$GH_TOKEN" != "gho_from_keychain" ]; then
+				echo "missing GH_TOKEN" >&2
+				exit 43
+			fi
+			printf '%s\\n' "$@" > '\(argumentsPath)'
+			mkdir -p '\(workspacePath)'
+			printf '# App Symphony Report\\n' > '\(reportPath)'
+			printf '%s\\n' '{"level":"info","category":"agent","message":"app_symphony_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"8"}}'
+			printf '%s\\n' '{"run_id":"run-8","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-8","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/8","report_path":"\(reportPath)"}'
+			"""
+		try script.write(to: fakeSymphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path())
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub",
+			keychainAccount: "app-symphony-\(UUID().uuidString)",
+			grantedScopesRaw: "repo read:user"
+		)
+		try keychain.storeSecret("gho_from_keychain", account: account.keychainAccount)
+		defer { try? keychain.deleteSecret(account: account.keychainAccount) }
+		let project = Project(
+			name: "App Symphony",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "8",
+			title: "Use symphony",
+			body: "Verify app coordinator invokes symphony.",
+			status: .ready,
+			labels: ["app"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/8",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(account)
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: "https://github.com/charliewilco/Auditorium.git",
+				webURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				providerAccountID: account.id,
+				projectID: project.id
+			)
+		)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let coordinator = AppRunCoordinator(
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root.appending(path: "app")),
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			symphonyRunner: SymphonyCLIProcessRunner(executablePath: fakeSymphony.path()),
+			providerRegistry: ProviderRegistry(keychainService: keychain)
+		)
+
+		coordinator.startQueue(project: project, concurrency: 1, context: context)
+		let deadline = Date().addingTimeInterval(15)
+		var run: RunRecord?
+		while Date() < deadline {
+			run = try context.fetch(FetchDescriptor<RunRecord>()).first
+			if run?.status == .completed {
+				break
+			}
+			await Task.yield()
+			try await Task.sleep(nanoseconds: 25_000_000)
+		}
+		let finalRun = try #require(run)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let arguments = try String(contentsOfFile: argumentsPath, encoding: .utf8)
+
+		#expect(finalRun.status == .completed)
+		#expect(finalRun.pullRequestsCreated == 1)
+		#expect(ticket.status == .needsReview)
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/8")
+		#expect(events.contains { $0.message == "app_symphony_started" })
+		#expect(arguments.contains("symphony\nrun\n"))
+	}
+
 	@Test func localWorkspaceCodexOrchestratorCommitsPushesAndStoresPullRequest() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

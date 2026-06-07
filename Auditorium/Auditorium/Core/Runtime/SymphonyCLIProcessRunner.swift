@@ -22,10 +22,12 @@ struct SymphonyCLIEvent: Decodable, Sendable, Equatable {
 		message = try container.decode(String.self, forKey: .message)
 		timestamp = try container.decode(Date.self, forKey: .timestamp)
 		if let metadata = try? container.decode([String: String].self, forKey: .metadata),
-		   let data = try? JSONEncoder().encode(metadata),
-		   let json = String(data: data, encoding: .utf8) {
+			let data = try? JSONEncoder().encode(metadata),
+			let json = String(data: data, encoding: .utf8)
+		{
 			metadataJSON = json
-		} else {
+		}
+		else {
 			metadataJSON = "{}"
 		}
 	}
@@ -113,6 +115,7 @@ struct SymphonyCLIProcessRunner {
 		workflowPath: URL,
 		workspaceRoot: URL,
 		mock: Bool = false,
+		environment: [String: String] = [:],
 		onEvent: (@MainActor (SymphonyCLIEvent) async -> Void)? = nil
 	) async throws -> SymphonyRunResult {
 		var arguments = [
@@ -126,16 +129,21 @@ struct SymphonyCLIProcessRunner {
 			workflowPath.path(),
 			"--workspace-root",
 			workspaceRoot.path(),
-			"--json"
+			"--json",
 		]
 		if mock {
 			arguments.append("--mock")
 		}
-		let result = try await ProcessCommand.runStreaming(executable: executablePath, arguments: arguments, onStandardOutputLine: { line in
-			if let event = try? decodeEvent(line: line) {
-				await onEvent?(event)
+		let result = try await ProcessCommand.runStreaming(
+			executable: executablePath,
+			arguments: arguments,
+			environment: environment.isEmpty ? nil : environment,
+			onStandardOutputLine: { line in
+				if let event = try? decodeEvent(line: line) {
+					await onEvent?(event)
+				}
 			}
-		})
+		)
 		return try decode(output: result.standardOutput)
 	}
 
@@ -143,7 +151,7 @@ struct SymphonyCLIProcessRunner {
 		var arguments = [
 			"symphony",
 			"doctor",
-			"--json"
+			"--json",
 		]
 		if let workflowPath {
 			arguments.append(contentsOf: ["--workflow", workflowPath.path()])
@@ -156,7 +164,8 @@ struct SymphonyCLIProcessRunner {
 				allowsNonZeroExit: true
 			)
 			return decodeDoctor(output: result.standardOutput, exitCode: result.exitCode, stderr: result.standardError)
-		} catch {
+		}
+		catch {
 			return SymphonyDoctorStatus(
 				state: .error,
 				detail: "Unable to launch symphony doctor: \(error.localizedDescription)",
@@ -181,7 +190,8 @@ struct SymphonyCLIProcessRunner {
 			let data = Data(line.utf8)
 			if let event = try? decoder.decode(SymphonyCLIEvent.self, from: data) {
 				events.append(event)
-			} else if let runSummary = try? decoder.decode(SymphonyRunSummary.self, from: data) {
+			}
+			else if let runSummary = try? decoder.decode(SymphonyRunSummary.self, from: data) {
 				summary = runSummary
 			}
 		}
@@ -190,7 +200,8 @@ struct SymphonyCLIProcessRunner {
 
 	func decodeDoctor(output: String, exitCode: Int32, stderr: String) -> SymphonyDoctorStatus {
 		guard let data = output.data(using: .utf8),
-			  let payload = try? JSONDecoder().decode(SymphonyDoctorPayload.self, from: data) else {
+			let payload = try? JSONDecoder().decode(SymphonyDoctorPayload.self, from: data)
+		else {
 			return SymphonyDoctorStatus(
 				state: .error,
 				detail: "symphony doctor returned unreadable output\(exitCode == 0 ? "." : " and exited with \(exitCode).")",
@@ -213,9 +224,11 @@ struct SymphonyCLIProcessRunner {
 		let detail: String
 		if state == .available {
 			detail = "symphony doctor passed \(checks.count) checks."
-		} else if failingChecks.isEmpty {
+		}
+		else if failingChecks.isEmpty {
 			detail = "symphony doctor exited with \(exitCode)."
-		} else {
+		}
+		else {
 			detail = "symphony doctor found \(failingChecks.count) failing checks."
 		}
 

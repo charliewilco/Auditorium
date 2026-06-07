@@ -348,6 +348,7 @@ struct RootView: View {
 			workspaceService: services.workspace,
 			runtimeDetection: services.runtimeDetection,
 			reportGenerator: services.reportGenerator,
+			symphonyRunner: services.symphony,
 			providerRegistry: services.providerRegistry
 		)
 		runCoordinator = coordinator

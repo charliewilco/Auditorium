@@ -67,7 +67,8 @@ private final class ProcessExitBox: @unchecked Sendable {
 			lock.withLock {
 				if let status {
 					continuation.resume(returning: status)
-				} else {
+				}
+				else {
 					self.continuation = continuation
 				}
 			}
@@ -94,6 +95,7 @@ enum ProcessCommand {
 		executable: String,
 		arguments: [String],
 		workingDirectory: URL? = nil,
+		environment: [String: String]? = nil,
 		onStandardOutputLine: (@MainActor (String) async -> Void)? = nil,
 		onStandardErrorLine: (@MainActor (String) async -> Void)? = nil,
 		allowsNonZeroExit: Bool = false
@@ -111,11 +113,19 @@ enum ProcessCommand {
 			if let workingDirectory {
 				process.currentDirectoryURL = workingDirectory
 			}
+			if let environment {
+				var mergedEnvironment = ProcessInfo.processInfo.environment
+				for (key, value) in environment {
+					mergedEnvironment[key] = value
+				}
+				process.environment = mergedEnvironment
+			}
 			exitBox.observe(process)
 			do {
 				try process.run()
 				cancellationBox.setProcess(process)
-			} catch {
+			}
+			catch {
 				throw ProcessCommandError.launchFailed(error.localizedDescription)
 			}
 
@@ -128,7 +138,12 @@ enum ProcessCommand {
 				throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
 			}
 			guard allowsNonZeroExit || result.exitCode == 0 else {
-				throw ProcessCommandError.failed(executable: executable, arguments: arguments, exitCode: result.exitCode, stderr: result.standardError)
+				throw ProcessCommandError.failed(
+					executable: executable,
+					arguments: arguments,
+					exitCode: result.exitCode,
+					stderr: result.standardError
+				)
 			}
 			return result
 		} onCancel: {
@@ -144,7 +159,8 @@ enum ProcessCommand {
 			if byte == 10 {
 				try await emitLine(lineBuffer, onLine: onLine)
 				lineBuffer.removeAll(keepingCapacity: true)
-			} else {
+			}
+			else {
 				lineBuffer.append(byte)
 			}
 		}
