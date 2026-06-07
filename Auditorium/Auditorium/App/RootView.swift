@@ -16,6 +16,10 @@ struct RootView: View {
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
 	@State private var orchestrator: Orchestrator?
+	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
+	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
+	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
+	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
 
 	var selectedProject: Project? {
 		guard let id = appState.selectedProjectID else { return nil }
@@ -168,9 +172,28 @@ struct RootView: View {
 	}
 
 	private func runQueue() {
-		guard let projectID = appState.selectedProjectID else { return }
+		guard let project = selectedProject else { return }
+		let preferences = RunSecurityPreferences(
+			allowNetworkAccess: allowNetworkAccess,
+			allowFilesystemWrite: allowFilesystemWrite,
+			requireRunConfirmation: requireRunConfirmation,
+			requirePullRequestConfirmation: requirePROpenConfirmation
+		)
+		let policy = RunSecurityPolicy()
+		do {
+			try policy.validate(project: project, preferences: preferences)
+		} catch {
+			NSAlert(error: error).runModal()
+			return
+		}
+		if preferences.requireRunConfirmation, confirm(title: "Start Run?", message: "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items.") == false {
+			return
+		}
+		if preferences.requirePullRequestConfirmation, policy.wouldOpenPullRequest(project: project), confirm(title: "Allow Pull Requests?", message: "This workflow may push branches and open GitHub pull requests.") == false {
+			return
+		}
 		appState.selectedDestination = .runs
-		orchestrator?.runQueue(projectID: projectID, concurrency: appState.queueConcurrency, context: modelContext)
+		orchestrator?.runQueue(projectID: project.id, concurrency: appState.queueConcurrency, context: modelContext)
 	}
 
 	private func dryRun() {
@@ -203,5 +226,14 @@ struct RootView: View {
 
 	private func revealReport(_ report: ReportRecord) {
 		NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: report.filePath)])
+	}
+
+	private func confirm(title: String, message: String) -> Bool {
+		let alert = NSAlert()
+		alert.messageText = title
+		alert.informativeText = message
+		alert.addButton(withTitle: "Continue")
+		alert.addButton(withTitle: "Cancel")
+		return alert.runModal() == .alertFirstButtonReturn
 	}
 }

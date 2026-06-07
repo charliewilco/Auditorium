@@ -435,6 +435,73 @@ struct AuditoriumTests {
 		#expect(didCancel)
 	}
 
+	@Test func runSecurityPolicyBlocksRealRunsWhenNetworkIsDisabled() throws {
+		let project = Project(
+			name: "Real Run",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let preferences = RunSecurityPreferences(
+			allowNetworkAccess: false,
+			allowFilesystemWrite: true,
+			requireRunConfirmation: true,
+			requirePullRequestConfirmation: true
+		)
+
+		#expect(throws: RunSecurityPolicyError.networkAccessDisabled) {
+			try RunSecurityPolicy().validate(project: project, preferences: preferences)
+		}
+	}
+
+	@Test func runSecurityPolicyAllowsOfflineMockRunWithoutNetwork() throws {
+		let project = Project(
+			name: "Mock Run",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let preferences = RunSecurityPreferences(
+			allowNetworkAccess: false,
+			allowFilesystemWrite: true,
+			requireRunConfirmation: true,
+			requirePullRequestConfirmation: true
+		)
+
+		try RunSecurityPolicy().validate(project: project, preferences: preferences)
+	}
+
+	@Test func runSecurityPolicyBlocksRunsWhenFilesystemWritesAreDisabled() throws {
+		let project = Project(
+			name: "No Writes",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let preferences = RunSecurityPreferences(
+			allowNetworkAccess: true,
+			allowFilesystemWrite: false,
+			requireRunConfirmation: true,
+			requirePullRequestConfirmation: true
+		)
+
+		#expect(throws: RunSecurityPolicyError.filesystemWriteDisabled) {
+			try RunSecurityPolicy().validate(project: project, preferences: preferences)
+		}
+	}
+
 	@Test func runtimeDetectionReturnsExpectedChecks() async {
 		let checks = await RuntimeDetectionService().detect()
 		let ids = Set(checks.map(\.id))

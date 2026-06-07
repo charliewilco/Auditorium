@@ -329,10 +329,10 @@ Acceptance gate:
 - [x] Show runtime health.
 - [~] Show account/provider sections.
 - [~] Include security preference toggles.
-- [ ] Enforce network access toggle.
-- [ ] Enforce filesystem write toggle.
-- [ ] Enforce confirmation before starting runs.
-- [ ] Enforce confirmation before opening PRs.
+- [x] Enforce network access toggle.
+- [x] Enforce filesystem write toggle.
+- [x] Enforce confirmation before starting runs.
+- [x] Enforce confirmation before opening PRs.
 - [ ] Show Keychain storage explanation.
 - [x] Clear GitHub credentials.
 - [ ] Configure runtime isolation level.
@@ -340,7 +340,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Settings reflect real enforced behavior, not only UI state.
+- [~] Settings reflect real enforced behavior, not only UI state.
 
 ## 18. `WORKFLOW.md`
 
@@ -461,8 +461,8 @@ Acceptance gate:
 - [ ] User queues issues.
 - [ ] User reorders queue.
 - [ ] User starts run.
-- [ ] Runtime preflight passes or blocks with actionable reason.
-- [ ] Codex preflight passes or blocks with actionable reason.
+- [x] Runtime preflight passes or blocks with actionable reason.
+- [x] Codex preflight passes or blocks with actionable reason.
 - [x] Real Codex run processes one issue.
 - [x] Workspace is created deterministically.
 - [x] Ticket branch is created.
