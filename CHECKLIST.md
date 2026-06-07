@@ -257,7 +257,7 @@ Acceptance gate:
 - [x] Push branch.
 - [x] Open GitHub pull request.
 - [x] Store `PullRequestRecord`.
-- [ ] Surface PR in run detail and ticket inspector.
+- [x] Surface PR in run detail and ticket inspector.
 - [x] Add PR to markdown report.
 - [ ] Never auto-merge in v0.
 
@@ -440,6 +440,7 @@ Acceptance gate:
 - [x] Swift tests for bounded concurrency.
 - [x] Swift tests for per-ticket failure recovery and continued queue execution.
 - [x] Swift tests for ticket inspector action availability and markdown status timeline.
+- [x] Swift tests for run-detail pull request visibility.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.

@@ -1358,6 +1358,75 @@ struct AuditoriumTests {
 		#expect(markdown.contains("- Wrote patch at"))
 	}
 
+	@Test func runDetailStateSurfacesPullRequestReviewRows() {
+		let runID = UUID()
+		let firstTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "201",
+			title: "Show PR state",
+			body: "Body",
+			status: .needsReview,
+			labels: ["pr"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/201",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: UUID()
+		)
+		let secondTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "202",
+			title: "No PR yet",
+			body: "Body",
+			status: .running,
+			labels: ["pr"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/202",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: UUID()
+		)
+		let firstTicketRun = TicketRunRecord(
+			runID: runID,
+			ticketID: firstTicket.id,
+			branchName: "auditorium/issue-201",
+			status: .needsReview,
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/201"
+		)
+		let secondTicketRun = TicketRunRecord(
+			runID: runID,
+			ticketID: secondTicket.id,
+			branchName: "auditorium/issue-202",
+			status: .running
+		)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: firstTicketRun.id,
+			title: "Fix PR visibility",
+			url: "https://github.com/charliewilco/Auditorium/pull/201",
+			branchName: "auditorium/issue-201",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .failed
+		)
+
+		let state = RunDetailState(ticketRuns: [firstTicketRun, secondTicketRun], tickets: [firstTicket, secondTicket], pullRequests: [pullRequest])
+
+		#expect(state.pullRequestRows.count == 1)
+		let row = state.pullRequestRows[0]
+		#expect(row.ticketExternalID == "201")
+		#expect(row.ticketTitle == "Show PR state")
+		#expect(row.pullRequestTitle == "Fix PR visibility")
+		#expect(row.url == "https://github.com/charliewilco/Auditorium/pull/201")
+		#expect(row.statusText == "Open")
+		#expect(row.checksStatusText == "Failed")
+		#expect(row.routeText == "auditorium/issue-201 -> main")
+	}
+
 	@Test func workflowPolicyParserReadsFrontMatter() throws {
 		let policy = try WorkflowPolicyParser().parse(WorkflowPolicy.defaultMarkdown)
 

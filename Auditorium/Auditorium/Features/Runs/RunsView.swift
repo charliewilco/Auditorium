@@ -58,6 +58,10 @@ struct RunDetailView: View {
 		return Double(done) / Double(run.totalTickets)
 	}
 
+	var state: RunDetailState {
+		RunDetailState(ticketRuns: ticketRuns, tickets: tickets, pullRequests: pullRequests)
+	}
+
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 18) {
@@ -79,11 +83,54 @@ struct RunDetailView: View {
 					StatCard(title: "Blocked", value: "\(run.blockedTickets)", symbol: "hand.raised.fill", tint: .yellow)
 					StatCard(title: "PRs Created", value: "\(run.pullRequestsCreated)", symbol: "arrow.triangle.pull", tint: .indigo)
 				}
+				pullRequestsSection
 				ticketExecutionList
 				timeline
 				reportPreview
 			}
 			.padding()
+		}
+	}
+
+	private var pullRequestsSection: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			Text("Pull Requests")
+				.font(.headline)
+			if state.pullRequestRows.isEmpty {
+				Text("No pull requests have been recorded for this run.")
+					.foregroundStyle(.secondary)
+			} else {
+				ForEach(state.pullRequestRows) { row in
+					HStack(alignment: .top, spacing: 12) {
+						Image(systemName: "arrow.triangle.pull")
+							.foregroundStyle(.indigo)
+							.frame(width: 20)
+						VStack(alignment: .leading, spacing: 4) {
+							Text("\(row.ticketExternalID): \(row.pullRequestTitle)")
+								.font(.callout.weight(.medium))
+							Text(row.ticketTitle)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+							Text(row.routeText)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+						}
+						Spacer()
+						VStack(alignment: .trailing, spacing: 6) {
+							Text(row.statusText)
+								.font(.caption.weight(.medium))
+							Text("Checks: \(row.checksStatusText)")
+								.font(.caption)
+								.foregroundStyle(.secondary)
+							if let url = URL(string: row.url) {
+								Link("Open PR", destination: url)
+							}
+						}
+					}
+					.padding(10)
+					.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+				}
+			}
 		}
 	}
 
