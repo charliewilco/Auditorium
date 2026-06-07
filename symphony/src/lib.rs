@@ -295,7 +295,21 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
     clone_or_update_repo(&options.repo, &repo_path).await?;
     git(&repo_path, &["checkout", default_branch.as_str()]).await?;
     git(&repo_path, &["pull", "--ff-only"]).await?;
-    git(&repo_path, &["checkout", "-B", branch_name.as_str()]).await?;
+    if remote_branch_exists(&repo_path, &branch_name).await {
+        let remote_branch = format!("origin/{branch_name}");
+        git(
+            &repo_path,
+            &[
+                "checkout",
+                "-B",
+                branch_name.as_str(),
+                remote_branch.as_str(),
+            ],
+        )
+        .await?;
+    } else {
+        git(&repo_path, &["checkout", "-B", branch_name.as_str()]).await?;
+    }
     emit(
         options.json,
         "info",
@@ -310,10 +324,13 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
     }
 
     let changed = command_stdout("git", &["status", "--porcelain"], Some(&repo_path)).await?;
-    let changed_files = parse_changed_files(&changed);
+    let uncommitted_files = parse_changed_files(&changed);
+    let committed_files = committed_changed_files(&repo_path, &default_branch).await?;
+    let changed_files = merge_changed_files(&committed_files, &uncommitted_files);
+    let branch_has_commits = branch_has_commits(&repo_path, &default_branch).await?;
     let mut validation_output = None;
     let mut pr_url = None;
-    let status = if changed.trim().is_empty() {
+    let status = if changed.trim().is_empty() && !branch_has_commits {
         emit(
             options.json,
             "warning",
@@ -322,6 +339,38 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             json!({}),
         )?;
         "completed_no_changes"
+    } else if changed.trim().is_empty() && branch_has_commits {
+        if config.run_tests {
+            if let Some(command) = &config.validation_command {
+                let validation = run_validation(command, &repo_path).await?;
+                validation_output = Some(validation);
+                emit(
+                    options.json,
+                    "success",
+                    "validation",
+                    "validation_passed",
+                    json!({ "command": command }),
+                )?;
+            }
+        }
+        if config.open_pull_request {
+            pr_url = existing_pull_request_url(&options.repo, &branch_name).await?;
+            if pr_url.is_none() {
+                git(&repo_path, &["push", "-u", "origin", branch_name.as_str()]).await?;
+                pr_url = Some(
+                    create_pull_request(&options.repo, &issue, &branch_name, &default_branch)
+                        .await?,
+                );
+            }
+            emit(
+                options.json,
+                "success",
+                "pullRequest",
+                "pull_request_reconciled",
+                json!({ "url": pr_url }),
+            )?;
+        }
+        "completed"
     } else if options.dry_run {
         emit(
             options.json,
@@ -357,31 +406,9 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             json!({ "branch": branch_name }),
         )?;
         if config.open_pull_request {
-            let body = format!(
-                "Automated Auditorium run for {}.\n\nIssue: {}\n",
-                issue.identifier,
-                issue.url.clone().unwrap_or_default()
+            pr_url = Some(
+                create_pull_request(&options.repo, &issue, &branch_name, &default_branch).await?,
             );
-            let url = command_stdout(
-                "gh",
-                &[
-                    "pr",
-                    "create",
-                    "--repo",
-                    options.repo.as_str(),
-                    "--title",
-                    message.as_str(),
-                    "--body",
-                    body.as_str(),
-                    "--base",
-                    default_branch.as_str(),
-                    "--head",
-                    branch_name.as_str(),
-                ],
-                Some(&repo_path),
-            )
-            .await?;
-            pr_url = Some(url.trim().to_string());
             emit(
                 options.json,
                 "success",
@@ -913,6 +940,120 @@ fn parse_changed_files(status_porcelain: &str) -> Vec<String> {
         .collect()
 }
 
+fn merge_changed_files(committed: &[String], uncommitted: &[String]) -> Vec<String> {
+    let mut files = committed.to_vec();
+    for file in uncommitted {
+        if !files.contains(file) {
+            files.push(file.clone());
+        }
+    }
+    files
+}
+
+async fn remote_branch_exists(repo_path: &Path, branch_name: &str) -> bool {
+    let remote_branch = format!("origin/{branch_name}");
+    command_stdout(
+        "git",
+        &["rev-parse", "--verify", remote_branch.as_str()],
+        Some(repo_path),
+    )
+    .await
+    .is_ok()
+}
+
+async fn branch_has_commits(repo_path: &Path, base_branch: &str) -> Result<bool, SymphonyError> {
+    let base = format!("origin/{base_branch}..HEAD");
+    let output = command_stdout(
+        "git",
+        &["rev-list", "--count", base.as_str()],
+        Some(repo_path),
+    )
+    .await?;
+    Ok(output.trim().parse::<usize>().unwrap_or(0) > 0)
+}
+
+async fn committed_changed_files(
+    repo_path: &Path,
+    base_branch: &str,
+) -> Result<Vec<String>, SymphonyError> {
+    let base = format!("origin/{base_branch}...HEAD");
+    let output = command_stdout(
+        "git",
+        &["diff", "--name-only", base.as_str()],
+        Some(repo_path),
+    )
+    .await?;
+    Ok(output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
+}
+
+async fn existing_pull_request_url(
+    repo: &str,
+    branch_name: &str,
+) -> Result<Option<String>, SymphonyError> {
+    let output = command_stdout(
+        "gh",
+        &[
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--head",
+            branch_name,
+            "--state",
+            "open",
+            "--json",
+            "url",
+        ],
+        None,
+    )
+    .await?;
+    #[derive(Deserialize)]
+    struct PullRequestListItem {
+        url: String,
+    }
+    let pull_requests: Vec<PullRequestListItem> = serde_json::from_str(&output)?;
+    Ok(pull_requests.into_iter().next().map(|pr| pr.url))
+}
+
+async fn create_pull_request(
+    repo: &str,
+    issue: &NormalizedIssue,
+    branch_name: &str,
+    default_branch: &str,
+) -> Result<String, SymphonyError> {
+    let title = format!("{}: {}", issue.identifier, issue.title);
+    let body = format!(
+        "Automated Auditorium run for {}.\n\nIssue: {}\n",
+        issue.identifier,
+        issue.url.clone().unwrap_or_default()
+    );
+    let url = command_stdout(
+        "gh",
+        &[
+            "pr",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            title.as_str(),
+            "--body",
+            body.as_str(),
+            "--base",
+            default_branch,
+            "--head",
+            branch_name,
+        ],
+        None,
+    )
+    .await?;
+    Ok(url.trim().to_string())
+}
+
 async fn run_validation(command: &str, repo_path: &Path) -> Result<String, SymphonyError> {
     let output = Command::new("/bin/sh")
         .arg("-lc")
@@ -1155,5 +1296,18 @@ Body
         let files = parse_changed_files(" M README.md\n?? src/main.rs\nR  old.rs -> new.rs\n");
 
         assert_eq!(files, vec!["README.md", "src/main.rs", "new.rs"]);
+    }
+
+    #[test]
+    fn merges_committed_and_uncommitted_changed_files() {
+        let files = merge_changed_files(
+            &["README.md".to_string(), "symphony/src/lib.rs".to_string()],
+            &["README.md".to_string(), "WORKFLOW.md".to_string()],
+        );
+
+        assert_eq!(
+            files,
+            vec!["README.md", "symphony/src/lib.rs", "WORKFLOW.md"]
+        );
     }
 }

@@ -250,15 +250,15 @@ Acceptance gate:
 
 ## 13. Git And Pull Requests
 
-- [ ] Create branch per ticket.
+- [x] Create branch per ticket.
 - [ ] Apply agent file changes.
-- [ ] Detect changed files.
-- [ ] Commit changes with deterministic message.
-- [ ] Push branch.
-- [ ] Open GitHub pull request.
+- [x] Detect changed files.
+- [x] Commit changes with deterministic message.
+- [x] Push branch.
+- [x] Open GitHub pull request.
 - [ ] Store `PullRequestRecord`.
 - [ ] Surface PR in run detail and ticket inspector.
-- [ ] Add PR to markdown report.
+- [x] Add PR to markdown report.
 - [ ] Never auto-merge in v0.
 
 Acceptance gate:
@@ -381,14 +381,14 @@ Acceptance gate:
 
 - [x] `cargo test` passes.
 - [x] `symphony doctor --json` works.
-- [ ] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER` can complete one issue.
+- [x] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER` can complete one issue.
 
 ## 20. `symphony` CLI Commands
 
 - [x] `symphony init`
 - [x] `symphony doctor`
 - [x] `symphony doctor --json`
-- [~] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
+- [x] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
 - [~] `symphony daemon --project PROJECT_ID`
 - [x] `symphony report --run RUN_ID`
 
@@ -463,16 +463,16 @@ Acceptance gate:
 - [ ] User starts run.
 - [ ] Runtime preflight passes or blocks with actionable reason.
 - [ ] Codex preflight passes or blocks with actionable reason.
-- [ ] Real Codex run processes one issue.
-- [ ] Workspace is created deterministically.
-- [ ] Ticket branch is created.
-- [ ] Changes are committed.
-- [ ] Pull request is opened.
+- [x] Real Codex run processes one issue.
+- [x] Workspace is created deterministically.
+- [x] Ticket branch is created.
+- [x] Changes are committed.
+- [x] Pull request is opened.
 - [ ] Live events appear in UI.
 - [ ] Ticket inspector reflects current state.
-- [ ] Markdown report is generated and saved.
+- [x] Markdown report is generated and saved.
 - [x] `symphony doctor` works.
-- [ ] `symphony run` works.
+- [x] `symphony run` works.
 - [x] Swift tests pass.
 - [x] Rust tests pass.
 - [x] macOS app builds cleanly.
