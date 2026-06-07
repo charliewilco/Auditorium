@@ -51,7 +51,7 @@ final class Orchestrator {
 		try await runtimeDetection.requireAvailableRuntime(for: project.runtimeProviderKind)
 		try await runtimeDetection.requireAvailableAgent(for: project.agentProviderKind)
 		if project.runtimeProviderKind == .localWorkspace, project.agentProviderKind == .codex {
-			try await executeWithSymphony(project: project, queueItems: queueItems, context: context)
+			try await executeWithSymphony(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
 			return
 		}
 		guard project.runtimeProviderKind == .mockRuntime else {
@@ -60,14 +60,16 @@ final class Orchestrator {
 		guard project.agentProviderKind == .mockAgent else {
 			throw ProviderError.notImplemented("\(project.agentProviderKind.title) Agent Provider")
 		}
+		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
 		try workspaceService.ensureProjectLayout(projectID: projectID)
 
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
-		let run = RunRecord(projectID: projectID, status: .running, totalTickets: queueItems.count, summary: "Running \(queueItems.count) queued tickets.")
+		let run = RunRecord(projectID: projectID, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets.")
 		context.insert(run)
-		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Run started with concurrency \(max(1, concurrency))."))
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Run started with bounded concurrency \(plan.concurrency)."))
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
 		var ticketRuns: [TicketRunRecord] = []
-		for item in queueItems {
+		for item in plan.queueSnapshot {
 			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
 			context.insert(ticketRun)
 			ticketRuns.append(ticketRun)
@@ -86,12 +88,17 @@ final class Orchestrator {
 		let runtime = MockRuntimeProvider(workspaceService: workspaceService, projectID: projectID)
 		let agent = MockCodexAgentProvider()
 
-		for ticketRun in ticketRuns {
-			try Task.checkCancellation()
-			guard let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
-				continue
+		for batch in plan.batches {
+			context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Dispatching batch of \(batch.count) ticket runs."))
+			try context.save()
+			for item in batch {
+				try Task.checkCancellation()
+				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
+					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+					continue
+				}
+				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: agent, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
 			}
-			try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: agent, context: context)
 		}
 
 		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -116,16 +123,18 @@ final class Orchestrator {
 		try context.save()
 	}
 
-	private func executeWithSymphony(project: Project, queueItems: [QueueItemRecord], context: ModelContext) async throws {
+	private func executeWithSymphony(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
+		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
 		try workspaceService.ensureProjectLayout(projectID: project.id)
 		let workflowURL = workspaceService.projectDirectory(projectID: project.id).appending(path: "WORKFLOW.md")
-		try project.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
+		try plan.workflowPolicyMarkdown.write(to: workflowURL, atomically: true, encoding: .utf8)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
-		let run = RunRecord(projectID: project.id, status: .running, totalTickets: queueItems.count, summary: "Running \(queueItems.count) queued tickets with symphony.")
+		let run = RunRecord(projectID: project.id, status: .running, totalTickets: plan.queueSnapshot.count, summary: "Running \(plan.queueSnapshot.count) queued tickets with symphony.")
 		context.insert(run)
 		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "symphony run started."))
+		context.insert(RuntimeEventRecord(runID: run.id, level: .info, category: .orchestration, message: "Queue and workflow policy snapshotted for this run."))
 		var ticketRuns: [TicketRunRecord] = []
-		for item in queueItems {
+		for item in plan.queueSnapshot {
 			let ticketRun = TicketRunRecord(runID: run.id, ticketID: item.ticketID)
 			context.insert(ticketRun)
 			ticketRuns.append(ticketRun)
@@ -275,7 +284,8 @@ final class Orchestrator {
 		run: RunRecord,
 		runtime: MockRuntimeProvider,
 		agent: MockCodexAgentProvider,
-		context: ModelContext
+		context: ModelContext,
+		workflowPolicyMarkdown: String
 	) async throws {
 		ticket.status = .running
 		ticket.updatedAt = .now
@@ -291,11 +301,11 @@ final class Orchestrator {
 		ticketRun.branchName = workspace.branchName
 		ticketRun.logPath = workspaceService.logsDirectory(projectID: project.id).appending(path: "\(ticket.externalID).log").path()
 		ticketRun.status = .running
-		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: project.workflowPolicyMarkdown))
+		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
 		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Runtime handle \(handle.id) started."))
 		try context.save()
 
-		let stream = try await agent.runAgent(AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: project.workflowPolicyMarkdown))
+		let stream = try await agent.runAgent(AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
 		var finalOutcome: MockTicketOutcome?
 		var finalSummary = ""
 		for try await event in stream {

@@ -3,6 +3,7 @@ import Foundation
 struct ParsedWorkflowPolicy: Sendable, Equatable {
 	let concurrency: Int
 	let maxRetries: Int
+	let maxRetryBackoffMilliseconds: Int
 	let branchPrefix: String
 	let runTests: Bool
 	let openPullRequest: Bool
@@ -26,12 +27,14 @@ struct WorkflowPolicyParser {
 		let values = parseFrontMatter(parts.frontMatter)
 		let concurrency = try intValue(values["concurrency"], defaultValue: 1, name: "concurrency", range: 1...16)
 		let maxRetries = try intValue(values["max_retries"], defaultValue: 0, name: "max_retries", range: 0...10)
+		let maxRetryBackoffMilliseconds = try intValue(values["max_retry_backoff_ms"], defaultValue: 300_000, name: "max_retry_backoff_ms", range: 0...600_000)
 		let branchPrefix = values["branch_prefix"]?.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? "auditorium"
 		let runTests = boolValue(values["run_tests"], defaultValue: true)
 		let openPullRequest = boolValue(values["open_pull_request"], defaultValue: true)
 		return ParsedWorkflowPolicy(
 			concurrency: concurrency,
 			maxRetries: maxRetries,
+			maxRetryBackoffMilliseconds: maxRetryBackoffMilliseconds,
 			branchPrefix: branchPrefix,
 			runTests: runTests,
 			openPullRequest: openPullRequest,

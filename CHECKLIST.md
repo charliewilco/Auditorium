@@ -217,12 +217,12 @@ Acceptance gate:
 - [x] Persist runtime events.
 - [x] Generate report after mock run.
 - [x] Block run before records/workspaces when runtime or agent preflight fails.
-- [~] Accept concurrency value.
-- [ ] Enforce bounded concurrency.
-- [ ] Implement retry policy from workflow.
+- [x] Accept concurrency value.
+- [~] Enforce bounded concurrency.
+- [~] Implement retry policy from workflow.
 - [~] Implement cancellation state transitions.
 - [ ] Implement per-ticket failure recovery.
-- [ ] Snapshot queue and workflow policy per run.
+- [x] Snapshot queue and workflow policy per run.
 - [ ] Reconcile run state on app relaunch.
 - [ ] Move real long-running work out of SwiftUI views and into isolated services/actors.
 
@@ -424,9 +424,9 @@ Acceptance gate:
 - [x] Swift tests for GitHub adapter shape.
 - [x] Swift tests for run creation count.
 - [x] Swift tests for ticket status transitions.
-- [ ] Swift tests for retry behavior.
+- [x] Swift tests for retry behavior.
 - [x] Swift tests for cancellation.
-- [ ] Swift tests for bounded concurrency.
+- [x] Swift tests for bounded concurrency.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [ ] UI smoke tests that are not template-only.

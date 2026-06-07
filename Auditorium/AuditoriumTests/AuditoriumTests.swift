@@ -516,10 +516,89 @@ struct AuditoriumTests {
 
 		#expect(policy.concurrency == 3)
 		#expect(policy.maxRetries == 2)
+		#expect(policy.maxRetryBackoffMilliseconds == 300_000)
 		#expect(policy.branchPrefix == "auditorium")
 		#expect(policy.runTests)
 		#expect(policy.openPullRequest)
 		#expect(policy.prompt.contains("autonomous coding agent"))
+	}
+
+	@Test func workflowPolicyParserReadsRetryBackoff() throws {
+		let policy = try WorkflowPolicyParser().parse("""
+		---
+		concurrency: 4
+		max_retries: 3
+		max_retry_backoff_ms: 8000
+		---
+		Prompt
+		""")
+
+		#expect(policy.concurrency == 4)
+		#expect(policy.maxRetries == 3)
+		#expect(policy.maxRetryBackoffMilliseconds == 8_000)
+	}
+
+	@Test func orchestrationPlanSnapshotsEnabledQueueIntoBoundedBatches() {
+		let projectID = UUID()
+		let firstTicketID = UUID()
+		let secondTicketID = UUID()
+		let thirdTicketID = UUID()
+		let disabledTicketID = UUID()
+		let queueItems = [
+			QueueItemRecord(ticketID: thirdTicketID, projectID: projectID, position: 30, priority: .low),
+			QueueItemRecord(ticketID: disabledTicketID, projectID: projectID, position: 5, priority: .high, isEnabled: false),
+			QueueItemRecord(ticketID: firstTicketID, projectID: projectID, position: 10, priority: .high, concurrencyGroup: "ui"),
+			QueueItemRecord(ticketID: secondTicketID, projectID: projectID, position: 20, priority: .medium, concurrencyGroup: "backend")
+		]
+
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: 2,
+			workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown
+		)
+
+		#expect(plan.concurrency == 2)
+		#expect(plan.workflowPolicyMarkdown == WorkflowPolicy.defaultMarkdown)
+		#expect(plan.queueSnapshot.map(\.ticketID) == [firstTicketID, secondTicketID, thirdTicketID])
+		#expect(plan.queueSnapshot.map(\.concurrencyGroup) == ["ui", "backend", "default"])
+		#expect(plan.batches.map { $0.map(\.ticketID) } == [[firstTicketID, secondTicketID], [thirdTicketID]])
+	}
+
+	@Test func orchestrationPlanUsesWorkflowConcurrencyWhenRunOverrideIsInvalid() {
+		let projectID = UUID()
+		let queueItems = [
+			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 0, priority: .medium),
+			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 1, priority: .medium),
+			QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 2, priority: .medium)
+		]
+		let policy = """
+		---
+		concurrency: 3
+		max_retries: 1
+		max_retry_backoff_ms: 16000
+		---
+		Prompt
+		"""
+
+		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: 0, workflowPolicyMarkdown: policy)
+
+		#expect(plan.concurrency == 3)
+		#expect(plan.batches.count == 1)
+		#expect(plan.retryPolicy == RetryPolicy(maxRetries: 1, maxRetryBackoffMilliseconds: 16_000))
+	}
+
+	@Test func retryPolicyRetriesOnlyFailedRunsWithinLimit() {
+		let policy = RetryPolicy(maxRetries: 2, maxRetryBackoffMilliseconds: 8_000)
+
+		#expect(policy.shouldRetry(status: .failed, retryCount: 0))
+		#expect(policy.shouldRetry(status: .failed, retryCount: 1))
+		#expect(policy.shouldRetry(status: .failed, retryCount: 2) == false)
+		#expect(policy.shouldRetry(status: .blocked, retryCount: 0) == false)
+		#expect(policy.shouldRetry(status: .canceled, retryCount: 0) == false)
+		#expect(policy.shouldRetry(status: .completed, retryCount: 0) == false)
+		#expect(policy.backoffMilliseconds(for: 0) == 1_000)
+		#expect(policy.backoffMilliseconds(for: 1) == 2_000)
+		#expect(policy.backoffMilliseconds(for: 10) == 8_000)
 	}
 
 	@Test func symphonyRunnerDecodesEventsAndSummary() throws {
