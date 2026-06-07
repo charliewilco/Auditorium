@@ -398,3 +398,87 @@ fn daemon_polls_project_state_and_persists_scheduler_plan() {
     assert_eq!(persisted["dispatches"][0]["issue_number"], 1);
     assert_eq!(persisted["dispatches"][1]["issue_number"], 3);
 }
+
+#[test]
+fn daemon_execution_mode_runs_mock_dispatches_and_updates_project_state() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let bin_dir = tempdir.path().join("bin");
+    write_fake_daemon_toolchain(&bin_dir);
+
+    symphony()
+        .args(["init", "--workflow"])
+        .arg(&workflow)
+        .assert()
+        .success();
+
+    let project_dir = tempdir
+        .path()
+        .join(".auditorium")
+        .join("symphony-workspaces")
+        .join("projects")
+        .join("project-123");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(
+        project_dir.join("project-state.json"),
+        r##"{
+  "project": "project-123",
+  "repository": "acme/app",
+  "issue_query": "label:ready",
+  "execute_dispatches": true,
+  "mock": true,
+  "no_pr": true,
+  "runs": [
+    {"issue_identifier":"#2","run_state":"running","retry_count":0,"not_before_tick":0},
+    {"issue_identifier":"#3","run_state":"failed","retry_count":1,"not_before_tick":1},
+    {"issue_identifier":"#4","run_state":"blocked","retry_count":0,"not_before_tick":0}
+  ]
+}"##,
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args(["daemon", "--project", "project-123", "--workflow"])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "daemon_dispatch_started"
+            && value["metadata"]["issue"] == "#1"));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "daemon_dispatch_completed"
+            && value["metadata"]["issue"] == "#3"));
+
+    let state: Value =
+        serde_json::from_str(&fs::read_to_string(project_dir.join("project-state.json")).unwrap())
+            .unwrap();
+    let runs = state["runs"].as_array().unwrap();
+    let issue_1 = runs
+        .iter()
+        .find(|run| run["issue_identifier"] == "#1")
+        .unwrap();
+    let issue_3 = runs
+        .iter()
+        .find(|run| run["issue_identifier"] == "#3")
+        .unwrap();
+
+    assert_eq!(issue_1["run_state"], "completed");
+    assert_eq!(issue_1["retry_count"], 0);
+    assert_eq!(issue_3["run_state"], "completed");
+    assert_eq!(issue_3["retry_count"], 1);
+    assert!(tempdir
+        .path()
+        .join(".auditorium")
+        .join("symphony-workspaces")
+        .join("reports")
+        .is_dir());
+}

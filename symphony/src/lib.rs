@@ -163,6 +163,14 @@ pub struct DaemonProjectState {
     #[serde(default)]
     pub issue_query: Option<String>,
     #[serde(default)]
+    pub execute_dispatches: bool,
+    #[serde(default)]
+    pub mock: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub no_pr: bool,
+    #[serde(default)]
     pub runs: Vec<DaemonRunState>,
 }
 
@@ -174,6 +182,8 @@ pub struct DaemonRunState {
     pub retry_count: usize,
     #[serde(default)]
     pub not_before_tick: u64,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -198,6 +208,12 @@ pub struct SchedulerDispatch {
     pub issue_number: u64,
     pub repo: String,
     pub retry_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulerDispatchOutcome {
+    Succeeded,
+    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -666,7 +682,7 @@ async fn daemon_scheduler_plan(
     tick: u64,
     config: &WorkflowConfig,
 ) -> Result<Option<SchedulerPlan>, SymphonyError> {
-    let Some(project_state) = load_daemon_project_state(config, &options.project).await? else {
+    let Some(mut project_state) = load_daemon_project_state(config, &options.project).await? else {
         return Ok(None);
     };
     let Some(repository) = project_state.repository.as_deref() else {
@@ -682,7 +698,100 @@ async fn daemon_scheduler_plan(
         config,
     );
     write_scheduler_plan(config, &options.project, &plan).await?;
+    execute_scheduler_dispatches(options, config, &mut project_state, &plan).await?;
     Ok(Some(plan))
+}
+
+async fn execute_scheduler_dispatches(
+    options: &DaemonOptions,
+    config: &WorkflowConfig,
+    project_state: &mut DaemonProjectState,
+    plan: &SchedulerPlan,
+) -> Result<(), SymphonyError> {
+    if !project_state.execute_dispatches {
+        return Ok(());
+    }
+
+    for dispatch in &plan.dispatches {
+        emit(
+            options.json,
+            "info",
+            "orchestration",
+            "daemon_dispatch_started",
+            json!({
+                "project": &project_state.project,
+                "issue": &dispatch.issue_identifier,
+                "repo": &dispatch.repo,
+                "retryCount": dispatch.retry_count
+            }),
+        )?;
+        record_dispatch_started(project_state, dispatch);
+        write_daemon_project_state(config, &options.project, project_state).await?;
+
+        let result = run_issue(RunOptions {
+            repo: dispatch.repo.clone(),
+            issue: dispatch.issue_number,
+            workflow: options.workflow.clone(),
+            workspace_root: Some(config.workspace_root.clone()),
+            json: options.json,
+            mock: project_state.mock,
+            dry_run: project_state.dry_run,
+            no_pr: project_state.no_pr,
+        })
+        .await;
+
+        match result {
+            Ok(()) => {
+                record_dispatch_result(
+                    project_state,
+                    dispatch,
+                    SchedulerDispatchOutcome::Succeeded,
+                    config,
+                    plan.tick,
+                    None,
+                );
+                emit(
+                    options.json,
+                    "success",
+                    "orchestration",
+                    "daemon_dispatch_completed",
+                    json!({
+                        "project": &project_state.project,
+                        "issue": &dispatch.issue_identifier,
+                        "repo": &dispatch.repo
+                    }),
+                )?;
+            }
+            Err(error) => {
+                let code = error.code();
+                let message = error.to_string();
+                record_dispatch_result(
+                    project_state,
+                    dispatch,
+                    SchedulerDispatchOutcome::Failed,
+                    config,
+                    plan.tick,
+                    Some(message.clone()),
+                );
+                emit(
+                    options.json,
+                    "warning",
+                    "orchestration",
+                    "daemon_dispatch_failed",
+                    json!({
+                        "project": &project_state.project,
+                        "issue": &dispatch.issue_identifier,
+                        "repo": &dispatch.repo,
+                        "code": code,
+                        "error": message
+                    }),
+                )?;
+            }
+        }
+        write_daemon_project_state(config, &options.project, project_state).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn print_report(
@@ -736,6 +845,19 @@ async fn load_daemon_project_state(
         )));
     }
     Ok(Some(state))
+}
+
+async fn write_daemon_project_state(
+    config: &WorkflowConfig,
+    project: &str,
+    state: &DaemonProjectState,
+) -> Result<PathBuf, SymphonyError> {
+    let path = daemon_project_state_path(config, project);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(state)?).await?;
+    Ok(path)
 }
 
 async fn write_scheduler_plan(
@@ -1467,6 +1589,68 @@ pub fn plan_scheduler_tick(
     }
 }
 
+pub fn record_dispatch_started(state: &mut DaemonProjectState, dispatch: &SchedulerDispatch) {
+    let run = daemon_run_state_mut(state, &dispatch.issue_identifier);
+    run.run_state = SchedulerRunState::Running;
+    run.last_error = None;
+}
+
+pub fn record_dispatch_result(
+    state: &mut DaemonProjectState,
+    dispatch: &SchedulerDispatch,
+    outcome: SchedulerDispatchOutcome,
+    config: &WorkflowConfig,
+    tick: u64,
+    error: Option<String>,
+) {
+    let run = daemon_run_state_mut(state, &dispatch.issue_identifier);
+    match outcome {
+        SchedulerDispatchOutcome::Succeeded => {
+            run.run_state = SchedulerRunState::Completed;
+            run.not_before_tick = 0;
+            run.last_error = None;
+        }
+        SchedulerDispatchOutcome::Failed => {
+            run.run_state = SchedulerRunState::Failed;
+            run.retry_count = run.retry_count.saturating_add(1);
+            run.not_before_tick = tick.saturating_add(retry_backoff_ticks(config, run.retry_count));
+            run.last_error = error;
+        }
+    }
+}
+
+pub fn retry_backoff_ticks(config: &WorkflowConfig, retry_count: usize) -> u64 {
+    if config.polling_interval_ms == 0 {
+        return 0;
+    }
+    let backoff_ms = retry_backoff_ms(config, retry_count);
+    backoff_ms.div_ceil(config.polling_interval_ms)
+}
+
+fn daemon_run_state_mut<'a>(
+    state: &'a mut DaemonProjectState,
+    issue_identifier: &str,
+) -> &'a mut DaemonRunState {
+    let index = state
+        .runs
+        .iter()
+        .position(|run| run.issue_identifier == issue_identifier);
+    let index = match index {
+        Some(index) => index,
+        None => {
+            state.runs.push(DaemonRunState {
+                issue_identifier: issue_identifier.to_string(),
+                run_state: SchedulerRunState::Pending,
+                retry_count: 0,
+                not_before_tick: 0,
+                last_error: None,
+            });
+            state.runs.len() - 1
+        }
+    };
+    &mut state.runs[index]
+}
+
 pub fn is_dispatch_eligible(item: &SchedulerItem, config: &WorkflowConfig, tick: u64) -> bool {
     if tick < item.not_before_tick {
         return false;
@@ -2072,18 +2256,21 @@ Body
                 run_state: SchedulerRunState::Running,
                 retry_count: 0,
                 not_before_tick: 0,
+                last_error: None,
             },
             DaemonRunState {
                 issue_identifier: "#3".to_string(),
                 run_state: SchedulerRunState::Failed,
                 retry_count: 1,
                 not_before_tick: 4,
+                last_error: Some("transient failure".to_string()),
             },
             DaemonRunState {
                 issue_identifier: "#4".to_string(),
                 run_state: SchedulerRunState::Blocked,
                 retry_count: 0,
                 not_before_tick: 0,
+                last_error: None,
             },
         ];
 
@@ -2105,6 +2292,84 @@ Body
                 .collect::<Vec<_>>(),
             vec![("#1", 0), ("#3", 1)]
         );
+    }
+
+    #[test]
+    fn dispatch_reconciliation_records_success_failure_and_retry_backoff() {
+        let workflow = parse_workflow(
+            r#"---
+polling:
+  interval_ms: 1000
+agent:
+  max_retry_backoff_ms: 5000
+max_retries: 2
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let mut state = DaemonProjectState {
+            project: "project-1".to_string(),
+            repository: Some("acme/app".to_string()),
+            issue_query: None,
+            execute_dispatches: true,
+            mock: true,
+            dry_run: false,
+            no_pr: false,
+            runs: Vec::new(),
+        };
+        let succeeded = SchedulerDispatch {
+            issue_identifier: "#1".to_string(),
+            issue_number: 1,
+            repo: "acme/app".to_string(),
+            retry_count: 0,
+        };
+        let failed = SchedulerDispatch {
+            issue_identifier: "#2".to_string(),
+            issue_number: 2,
+            repo: "acme/app".to_string(),
+            retry_count: 0,
+        };
+
+        record_dispatch_started(&mut state, &succeeded);
+        record_dispatch_result(
+            &mut state,
+            &succeeded,
+            SchedulerDispatchOutcome::Succeeded,
+            &config,
+            7,
+            None,
+        );
+        record_dispatch_started(&mut state, &failed);
+        record_dispatch_result(
+            &mut state,
+            &failed,
+            SchedulerDispatchOutcome::Failed,
+            &config,
+            7,
+            Some("codex exited 1".to_string()),
+        );
+
+        let succeeded_run = state
+            .runs
+            .iter()
+            .find(|run| run.issue_identifier == "#1")
+            .unwrap();
+        let failed_run = state
+            .runs
+            .iter()
+            .find(|run| run.issue_identifier == "#2")
+            .unwrap();
+
+        assert_eq!(succeeded_run.run_state, SchedulerRunState::Completed);
+        assert_eq!(succeeded_run.retry_count, 0);
+        assert_eq!(succeeded_run.not_before_tick, 0);
+        assert_eq!(succeeded_run.last_error, None);
+        assert_eq!(failed_run.run_state, SchedulerRunState::Failed);
+        assert_eq!(failed_run.retry_count, 1);
+        assert_eq!(failed_run.not_before_tick, 8);
+        assert_eq!(failed_run.last_error.as_deref(), Some("codex exited 1"));
     }
 
     #[test]
