@@ -55,7 +55,7 @@ enum AppSchema {
 		if let storeURL {
 			configuration = ModelConfiguration(schema: currentSchema, url: storeURL, cloudKitDatabase: .none)
 		} else {
-			configuration = ModelConfiguration(schema: currentSchema, isStoredInMemoryOnly: inMemory)
+			configuration = ModelConfiguration(schema: currentSchema, isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
 		}
 		return try ModelContainer(for: currentSchema, migrationPlan: MigrationPlan.self, configurations: [configuration])
 	}
