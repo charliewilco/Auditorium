@@ -3538,6 +3538,69 @@ struct AuditoriumTests {
 		}
 	}
 
+	@Test func runSecurityPolicyUsesParsedWorkflowForPullRequestConfirmation() {
+		let project = Project(
+			name: "PR Policy",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				open_pull_request: "yes"
+				---
+				Use reviewable pull requests.
+				"""
+		)
+
+		#expect(RunSecurityPolicy().wouldOpenPullRequest(project: project))
+	}
+
+	@Test func runSecurityPolicyDoesNotPromptForPullRequestsWhenWorkflowDisablesThem() {
+		let project = Project(
+			name: "No PR Policy",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				open_pull_request: false
+				---
+				Complete locally only.
+				"""
+		)
+
+		#expect(RunSecurityPolicy().wouldOpenPullRequest(project: project) == false)
+	}
+
+	@Test func runSecurityPolicyDefaultsToPullRequestConfirmationForInvalidWorkflow() {
+		let project = Project(
+			name: "Invalid PR Policy",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				open_pull_request: maybe
+				---
+				Invalid values should fail closed.
+				"""
+		)
+
+		#expect(RunSecurityPolicy().wouldOpenPullRequest(project: project))
+	}
+
 	@Test func runtimeDetectionReturnsExpectedChecks() async {
 		let checks = await RuntimeDetectionService().detect()
 		let ids = Set(checks.map(\.id))

@@ -319,7 +319,7 @@ Acceptance gate:
 
 - [x] Show runtime health.
 - [x] Show account/provider sections.
-- [~] Include security preference toggles.
+- [x] Include security preference toggles.
 - [x] Enforce network access toggle.
 - [x] Enforce filesystem write toggle.
 - [x] Enforce confirmation before starting runs.
@@ -330,7 +330,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] Settings reflect real enforced behavior, not only UI state.
+- [x] Settings reflect real enforced behavior, not only UI state.
 
 ## 18. `WORKFLOW.md`
 

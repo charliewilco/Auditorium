@@ -40,6 +40,6 @@ struct RunSecurityPolicy {
 	}
 
 	func wouldOpenPullRequest(project: Project) -> Bool {
-		project.workflowPolicyMarkdown.contains("open_pull_request: true")
+		(try? WorkflowPolicyParser().parse(project.workflowPolicyMarkdown).openPullRequest) ?? true
 	}
 }

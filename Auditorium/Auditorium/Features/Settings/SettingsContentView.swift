@@ -29,8 +29,6 @@ struct SettingsContentView: View {
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
 	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
-	@AppStorage("reportAutoSave") private var reportAutoSave = true
-	@AppStorage("logRetentionDays") private var logRetentionDays = 30
 	@AppStorage(ApplicationSettingsKeys.logsDirectoryPath) private var logsDirectoryPath = ""
 	@AppStorage(ApplicationSettingsKeys.reportsDirectoryPath) private var reportsDirectoryPath = ""
 
@@ -113,7 +111,6 @@ struct SettingsContentView: View {
 					WorkflowPolicyEditorView(project: project)
 				}
 				settingsSection("Reports") {
-					Toggle("Save reports to project history", isOn: $reportAutoSave)
 					pathField(
 						title: "Reports root",
 						path: $reportsDirectoryPath,
@@ -122,7 +119,6 @@ struct SettingsContentView: View {
 					)
 				}
 				settingsSection("Logs") {
-					Stepper("Retain logs for \(logRetentionDays) days", value: $logRetentionDays, in: 1...365)
 					pathField(
 						title: "Logs root",
 						path: $logsDirectoryPath,
