@@ -151,17 +151,27 @@ final class Orchestrator {
 					repository: project.repositoryName,
 					issueNumber: issueNumber,
 					workflowPath: workflowURL,
-					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id)
+					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id),
+					onEvent: { event in
+						context.insert(RuntimeEventRecord(
+							runID: run.id,
+							ticketRunID: ticketRun.id,
+							timestamp: event.timestamp,
+							level: EventLevel(rawValue: event.level) ?? .info,
+							category: EventCategory(rawValue: event.category) ?? .orchestration,
+							message: event.message,
+							metadataJSON: event.metadataJSON
+						))
+						try? context.save()
+					}
 				)
-				for event in result.events {
+				if result.events.isEmpty {
 					context.insert(RuntimeEventRecord(
 						runID: run.id,
 						ticketRunID: ticketRun.id,
-						timestamp: event.timestamp,
-						level: EventLevel(rawValue: event.level) ?? .info,
-						category: EventCategory(rawValue: event.category) ?? .orchestration,
-						message: event.message,
-						metadataJSON: event.metadataJSON
+						level: .warning,
+						category: .orchestration,
+						message: "symphony finished without emitting structured events."
 					))
 				}
 				if let summary = result.summary {

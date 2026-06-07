@@ -63,7 +63,14 @@ struct SymphonyCLIProcessRunner {
 		self.executablePath = executablePath
 	}
 
-	func run(repository: String, issueNumber: Int, workflowPath: URL, workspaceRoot: URL, mock: Bool = false) async throws -> SymphonyRunResult {
+	func run(
+		repository: String,
+		issueNumber: Int,
+		workflowPath: URL,
+		workspaceRoot: URL,
+		mock: Bool = false,
+		onEvent: (@MainActor (SymphonyCLIEvent) async -> Void)? = nil
+	) async throws -> SymphonyRunResult {
 		var arguments = [
 			"symphony",
 			"run",
@@ -80,8 +87,18 @@ struct SymphonyCLIProcessRunner {
 		if mock {
 			arguments.append("--mock")
 		}
-		let result = try await ProcessCommand.run(executable: executablePath, arguments: arguments)
+		let result = try await ProcessCommand.runStreaming(executable: executablePath, arguments: arguments, onStandardOutputLine: { line in
+			if let event = try? decodeEvent(line: line) {
+				await onEvent?(event)
+			}
+		})
 		return try decode(output: result.standardOutput)
+	}
+
+	func decodeEvent(line: String) throws -> SymphonyCLIEvent {
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		return try decoder.decode(SymphonyCLIEvent.self, from: Data(line.utf8))
 	}
 
 	func decode(output: String) throws -> SymphonyRunResult {

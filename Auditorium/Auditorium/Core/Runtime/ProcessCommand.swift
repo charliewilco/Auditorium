@@ -51,43 +51,113 @@ private final class ProcessCancellationBox: @unchecked Sendable {
 	}
 }
 
+private final class ProcessExitBox: @unchecked Sendable {
+	private let lock = NSLock()
+	nonisolated(unsafe) private var status: Int32?
+	nonisolated(unsafe) private var continuation: CheckedContinuation<Int32, Never>?
+
+	nonisolated func observe(_ process: Process) {
+		process.terminationHandler = { [weak self] process in
+			self?.finish(process.terminationStatus)
+		}
+	}
+
+	nonisolated func value() async -> Int32 {
+		await withCheckedContinuation { continuation in
+			lock.withLock {
+				if let status {
+					continuation.resume(returning: status)
+				} else {
+					self.continuation = continuation
+				}
+			}
+		}
+	}
+
+	nonisolated private func finish(_ status: Int32) {
+		let continuation: CheckedContinuation<Int32, Never>? = lock.withLock {
+			self.status = status
+			let continuation = self.continuation
+			self.continuation = nil
+			return continuation
+		}
+		continuation?.resume(returning: status)
+	}
+}
+
 enum ProcessCommand {
 	static func run(executable: String, arguments: [String], workingDirectory: URL? = nil) async throws -> ProcessResult {
+		try await runStreaming(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+	}
+
+	static func runStreaming(
+		executable: String,
+		arguments: [String],
+		workingDirectory: URL? = nil,
+		onStandardOutputLine: (@MainActor (String) async -> Void)? = nil,
+		onStandardErrorLine: (@MainActor (String) async -> Void)? = nil
+	) async throws -> ProcessResult {
 		let cancellationBox = ProcessCancellationBox()
+		let exitBox = ProcessExitBox()
 		return try await withTaskCancellationHandler {
-			try await Task.detached {
-				let process = Process()
-				let stdout = Pipe()
-				let stderr = Pipe()
-				process.executableURL = URL(fileURLWithPath: executable)
-				process.arguments = arguments
-				process.standardOutput = stdout
-				process.standardError = stderr
-				if let workingDirectory {
-					process.currentDirectoryURL = workingDirectory
-				}
-				do {
-					try process.run()
-					cancellationBox.setProcess(process)
-				} catch {
-					throw ProcessCommandError.launchFailed(error.localizedDescription)
-				}
-				process.waitUntilExit()
-				if cancellationBox.isCanceled {
-					throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
-				}
-				let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-				let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-				let output = String(data: outputData, encoding: .utf8) ?? ""
-				let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-				let result = ProcessResult(exitCode: process.terminationStatus, standardOutput: output, standardError: errorOutput)
-				guard result.exitCode == 0 else {
-					throw ProcessCommandError.failed(executable: executable, arguments: arguments, exitCode: result.exitCode, stderr: errorOutput)
-				}
-				return result
-			}.value
+			let process = Process()
+			let stdout = Pipe()
+			let stderr = Pipe()
+			process.executableURL = URL(fileURLWithPath: executable)
+			process.arguments = arguments
+			process.standardOutput = stdout
+			process.standardError = stderr
+			if let workingDirectory {
+				process.currentDirectoryURL = workingDirectory
+			}
+			exitBox.observe(process)
+			do {
+				try process.run()
+				cancellationBox.setProcess(process)
+			} catch {
+				throw ProcessCommandError.launchFailed(error.localizedDescription)
+			}
+
+			async let output = readLines(from: stdout.fileHandleForReading, onLine: onStandardOutputLine)
+			async let errorOutput = readLines(from: stderr.fileHandleForReading, onLine: onStandardErrorLine)
+			let exitCode = await exitBox.value()
+			let result = try await ProcessResult(exitCode: exitCode, standardOutput: output, standardError: errorOutput)
+
+			if cancellationBox.isCanceled {
+				throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
+			}
+			guard result.exitCode == 0 else {
+				throw ProcessCommandError.failed(executable: executable, arguments: arguments, exitCode: result.exitCode, stderr: result.standardError)
+			}
+			return result
 		} onCancel: {
 			cancellationBox.cancel()
+		}
+	}
+
+	private static func readLines(from fileHandle: FileHandle, onLine: (@MainActor (String) async -> Void)?) async throws -> String {
+		var output = Data()
+		var lineBuffer = Data()
+		for try await byte in fileHandle.bytes {
+			output.append(byte)
+			if byte == 10 {
+				try await emitLine(lineBuffer, onLine: onLine)
+				lineBuffer.removeAll(keepingCapacity: true)
+			} else {
+				lineBuffer.append(byte)
+			}
+		}
+		if lineBuffer.isEmpty == false {
+			try await emitLine(lineBuffer, onLine: onLine)
+		}
+		return String(data: output, encoding: .utf8) ?? ""
+	}
+
+	private static func emitLine(_ data: Data, onLine: (@MainActor (String) async -> Void)?) async throws {
+		guard let onLine else { return }
+		let line = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines)
+		if line.isEmpty == false {
+			await onLine(line)
 		}
 	}
 }

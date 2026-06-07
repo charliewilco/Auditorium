@@ -418,6 +418,124 @@ struct AuditoriumTests {
 		#expect(result.summary?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/1")
 	}
 
+	@Test func symphonyRunnerDecodesStreamingEventLine() throws {
+		let line = """
+		{"level":"success","category":"agent","message":"agent_finished","timestamp":"2026-06-06T12:00:01Z","metadata":{"ticket":"42"}}
+		"""
+
+		let event = try SymphonyCLIProcessRunner().decodeEvent(line: line)
+
+		#expect(event.level == "success")
+		#expect(event.category == "agent")
+		#expect(event.message == "agent_finished")
+		#expect(event.metadataJSON.contains("ticket"))
+	}
+
+	@Test func processCommandStreamsStandardOutputLines() async throws {
+		var lines: [String] = []
+
+		let result = try await ProcessCommand.runStreaming(
+			executable: "/bin/sh",
+			arguments: ["-lc", "printf 'one\\n'; sleep 0.1; printf 'two\\n'"],
+			onStandardOutputLine: { line in
+				lines.append(line)
+			}
+		)
+
+		#expect(result.standardOutput == "one\ntwo\n")
+		#expect(lines == ["one", "two"])
+	}
+
+	@Test func orchestratorPersistsSymphonyEventsWhileProcessRuns() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let fakeSymphony = root.appending(path: "fake-symphony")
+		let reportPath = root.appending(path: "report.md").path()
+		let workspacePath = root.appending(path: "workspace").path()
+		let script = """
+		#!/bin/sh
+		printf '%s\\n' '{"level":"info","category":"agent","message":"streamed_before_exit","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"7"}}'
+		sleep 1.0
+		mkdir -p '\(workspacePath)'
+		printf '# Fake Report\\n' > '\(reportPath)'
+		printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
+		"""
+		try script.write(to: fakeSymphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path())
+		let project = Project(
+			name: "Streaming",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "7",
+			title: "Stream events",
+			body: "Verify live event persistence.",
+			status: .ready,
+			labels: ["test"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/7",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root.appending(path: "app")),
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			symphonyRunner: SymphonyCLIProcessRunner(executablePath: fakeSymphony.path())
+		)
+
+		var taskCompleted = false
+		let task = Task { @MainActor in
+			defer { taskCompleted = true }
+			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		}
+		var earlyEvents: [RuntimeEventRecord] = []
+		for _ in 0..<20 {
+			earlyEvents = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+			if earlyEvents.contains(where: { $0.message == "streamed_before_exit" }) {
+				break
+			}
+			try await Task.sleep(nanoseconds: 50_000_000)
+		}
+
+		#expect(earlyEvents.contains { $0.message == "streamed_before_exit" })
+		#expect(taskCompleted == false)
+
+		try await task.value
+		let runs = try context.fetch(FetchDescriptor<RunRecord>())
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+
+		#expect(runs.count == 1)
+		#expect(runs.first?.totalTickets == 1)
+		#expect(runs.first?.status == .completed)
+		#expect(ticket.status == .needsReview)
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/7")
+		#expect(reports.contains { $0.filePath == reportPath })
+	}
+
 	@Test func processCommandCancelsRunningProcess() async {
 		let task = Task {
 			try await ProcessCommand.run(executable: "/bin/sh", arguments: ["-lc", "sleep 5"])

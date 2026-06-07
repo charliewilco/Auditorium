@@ -408,7 +408,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
+- [~] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
 
 ## 22. Testing
 
@@ -422,8 +422,8 @@ Acceptance gate:
 - [x] Swift tests for Apple Container preflight.
 - [x] Swift tests for Codex CLI preflight.
 - [x] Swift tests for GitHub adapter shape.
-- [ ] Swift tests for run creation count.
-- [ ] Swift tests for ticket status transitions.
+- [x] Swift tests for run creation count.
+- [x] Swift tests for ticket status transitions.
 - [ ] Swift tests for retry behavior.
 - [x] Swift tests for cancellation.
 - [ ] Swift tests for bounded concurrency.
@@ -468,7 +468,7 @@ Acceptance gate:
 - [x] Ticket branch is created.
 - [x] Changes are committed.
 - [x] Pull request is opened.
-- [ ] Live events appear in UI.
+- [x] Live events appear in UI.
 - [ ] Ticket inspector reflects current state.
 - [x] Markdown report is generated and saved.
 - [x] `symphony doctor` works.
