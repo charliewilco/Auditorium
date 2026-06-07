@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
@@ -10,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::time::{sleep, timeout};
 
 const CODEX_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
@@ -109,6 +111,18 @@ pub struct RunOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct RunQueueOptions {
+    pub repo: String,
+    pub issues: Vec<u64>,
+    pub workflow: PathBuf,
+    pub workspace_root: Option<PathBuf>,
+    pub json: bool,
+    pub mock: bool,
+    pub dry_run: bool,
+    pub no_pr: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct DaemonOptions {
     pub project: String,
     pub workflow: PathBuf,
@@ -140,6 +154,59 @@ pub struct WorkflowConfig {
     pub run_tests: bool,
     pub open_pull_request: bool,
     pub validation_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CoordinationMessageKind {
+    Finding,
+    ChangedFiles,
+    BlockedOn,
+    Risk,
+    Handoff,
+    Summary,
+}
+
+impl CoordinationMessageKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            CoordinationMessageKind::Finding => "finding",
+            CoordinationMessageKind::ChangedFiles => "changed_files",
+            CoordinationMessageKind::BlockedOn => "blocked_on",
+            CoordinationMessageKind::Risk => "risk",
+            CoordinationMessageKind::Handoff => "handoff",
+            CoordinationMessageKind::Summary => "summary",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoordinationMessage {
+    #[serde(rename = "type")]
+    pub record_type: String,
+    #[serde(rename = "coordinationMessageID")]
+    pub coordination_message_id: String,
+    #[serde(rename = "runID")]
+    pub run_id: String,
+    #[serde(rename = "ticketRunID")]
+    pub ticket_run_id: String,
+    pub issue: u64,
+    #[serde(rename = "sourceIssue")]
+    pub source_issue: u64,
+    #[serde(rename = "targetIssue")]
+    pub target_issue: Option<u64>,
+    pub kind: CoordinationMessageKind,
+    pub summary: String,
+    #[serde(rename = "changedFiles")]
+    pub changed_files: Vec<String>,
+    pub labels: Vec<String>,
+    pub keywords: Vec<String>,
+    #[serde(rename = "workspacePath")]
+    pub workspace_path: Option<PathBuf>,
+    #[serde(rename = "branchName")]
+    pub branch_name: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,6 +350,146 @@ struct Event {
     message: String,
     timestamp: DateTime<Utc>,
     metadata: serde_json::Value,
+    #[serde(rename = "runID", skip_serializing_if = "Option::is_none")]
+    run_id: Option<String>,
+    #[serde(rename = "ticketRunID", skip_serializing_if = "Option::is_none")]
+    ticket_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issue: Option<u64>,
+    #[serde(
+        rename = "coordinationMessageID",
+        skip_serializing_if = "Option::is_none"
+    )]
+    coordination_message_id: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct CoordinationBus {
+    inner: Arc<Mutex<CoordinationBusState>>,
+}
+
+#[derive(Debug)]
+struct CoordinationBusState {
+    run_id: String,
+    journal_path: PathBuf,
+    json_output: bool,
+    messages: Vec<CoordinationMessage>,
+}
+
+impl CoordinationBus {
+    async fn new(
+        run_id: String,
+        workspace_root: PathBuf,
+        json_output: bool,
+    ) -> Result<Self, SymphonyError> {
+        let journal_dir = workspace_root.join("coordination");
+        fs::create_dir_all(&journal_dir).await?;
+        let journal_path = journal_dir.join(format!("{run_id}.jsonl"));
+        Ok(Self {
+            inner: Arc::new(Mutex::new(CoordinationBusState {
+                run_id,
+                journal_path,
+                json_output,
+                messages: Vec::new(),
+            })),
+        })
+    }
+
+    async fn publish(
+        &self,
+        kind: CoordinationMessageKind,
+        issue: &NormalizedIssue,
+        target_issue: Option<u64>,
+        summary: String,
+        changed_files: Vec<String>,
+        workspace_path: Option<PathBuf>,
+        branch_name: Option<String>,
+    ) -> Result<CoordinationMessage, SymphonyError> {
+        let mut state = self.inner.lock().await;
+        let message = CoordinationMessage {
+            record_type: "coordination".to_string(),
+            coordination_message_id: format!(
+                "{}-coordination-{}",
+                state.run_id,
+                state.messages.len() + 1
+            ),
+            run_id: state.run_id.clone(),
+            ticket_run_id: format!("{}-issue-{}", state.run_id, issue.number),
+            issue: issue.number,
+            source_issue: issue.number,
+            target_issue,
+            kind,
+            summary,
+            changed_files,
+            labels: issue.labels.clone(),
+            keywords: issue_keywords(issue),
+            workspace_path,
+            branch_name,
+            created_at: Utc::now(),
+        };
+        if let Some(parent) = state.journal_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        let line = serde_json::to_string(&message)?;
+        let mut journal_line = line.clone();
+        journal_line.push('\n');
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&state.journal_path)
+            .await?;
+        file.write_all(journal_line.as_bytes()).await?;
+        state.messages.push(message.clone());
+        if state.json_output {
+            println!("{line}");
+        }
+        Ok(message)
+    }
+
+    async fn related_messages(
+        &self,
+        issue: &NormalizedIssue,
+        limit: usize,
+    ) -> Vec<CoordinationMessage> {
+        let state = self.inner.lock().await;
+        let mut scored = state
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| message.source_issue != issue.number)
+            .filter_map(|(index, message)| {
+                let score = coordination_relevance_score(message, issue);
+                (score > 0).then_some((score, index, message.clone()))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| right.1.cmp(&left.1))
+                .then_with(|| {
+                    left.2
+                        .coordination_message_id
+                        .cmp(&right.2.coordination_message_id)
+                })
+        });
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, message)| message)
+            .collect()
+    }
+}
+
+pub async fn replay_coordination_journal(
+    path: &Path,
+) -> Result<Vec<CoordinationMessage>, SymphonyError> {
+    let content = fs::read_to_string(path).await?;
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).map_err(SymphonyError::from))
+        .collect()
 }
 
 pub async fn init_workflow(path: &Path, check: bool) -> Result<(), SymphonyError> {
@@ -355,9 +562,153 @@ pub async fn doctor(options: DoctorOptions) -> Result<(), SymphonyError> {
     }
 }
 
+#[derive(Clone)]
+struct IssueRunContext {
+    queue_run_id: String,
+    ticket_run_id: String,
+    bus: CoordinationBus,
+}
+
 pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
+    let report = run_issue_internal(options.clone(), None).await?;
+    print_final_report(options.json, &report)?;
+    Ok(())
+}
+
+pub async fn run_queue(options: RunQueueOptions) -> Result<(), SymphonyError> {
+    if options.issues.is_empty() {
+        return Err(SymphonyError::InvalidConfig(
+            "run-queue requires at least one issue".to_string(),
+        ));
+    }
+
+    let definition = load_workflow(&options.workflow).await?;
+    let mut config = resolve_config(&definition, &options.workflow)?;
+    if let Some(root) = &options.workspace_root {
+        config.workspace_root = absolute_path(root, env::current_dir()?.as_path());
+    }
     let started_at = Utc::now();
-    let run_id = format!("{}-{}", started_at.format("%Y%m%d%H%M%S"), options.issue);
+    let queue_run_id = format!(
+        "{}-queue-{}",
+        started_at.format("%Y%m%d%H%M%S"),
+        options
+            .issues
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join("-")
+    );
+    let bus = CoordinationBus::new(
+        queue_run_id.clone(),
+        config.workspace_root.clone(),
+        options.json,
+    )
+    .await?;
+    emit(
+        options.json,
+        "info",
+        "orchestration",
+        "queue_started",
+        json!({
+            "runID": queue_run_id,
+            "issues": options.issues,
+            "maxConcurrentAgents": config.max_concurrent_agents
+        }),
+    )?;
+
+    let semaphore = Arc::new(Semaphore::new(config.max_concurrent_agents));
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    for issue in options.issues.iter().copied() {
+        let permit = semaphore.clone().acquire_owned().await.map_err(|_| {
+            SymphonyError::InvalidConfig("run-queue semaphore closed unexpectedly".to_string())
+        })?;
+        let sender = sender.clone();
+        let issue_options = RunOptions {
+            repo: options.repo.clone(),
+            issue,
+            workflow: options.workflow.clone(),
+            workspace_root: Some(config.workspace_root.clone()),
+            json: options.json,
+            mock: options.mock,
+            dry_run: options.dry_run,
+            no_pr: options.no_pr,
+        };
+        let context = IssueRunContext {
+            queue_run_id: queue_run_id.clone(),
+            ticket_run_id: format!("{queue_run_id}-issue-{issue}"),
+            bus: bus.clone(),
+        };
+        tokio::spawn(async move {
+            let result = run_issue_internal(issue_options, Some(context)).await;
+            drop(permit);
+            let _ = sender.send((issue, result));
+        });
+    }
+    drop(sender);
+
+    let mut failures = Vec::new();
+    while let Some((issue, result)) = receiver.recv().await {
+        match result {
+            Ok(report) => {
+                print_final_report(options.json, &report)?;
+            }
+            Err(error) => {
+                let message = error.to_string();
+                emit(
+                    options.json,
+                    "error",
+                    "orchestration",
+                    "queue_ticket_failed",
+                    json!({
+                        "runID": queue_run_id,
+                        "issue": issue,
+                        "code": error.code(),
+                        "error": message
+                    }),
+                )?;
+                failures.push((issue, message));
+            }
+        }
+    }
+
+    emit(
+        options.json,
+        if failures.is_empty() {
+            "success"
+        } else {
+            "warning"
+        },
+        "orchestration",
+        "queue_completed",
+        json!({
+            "runID": queue_run_id,
+            "issues": options.issues,
+            "failedIssues": failures
+        }),
+    )?;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(SymphonyError::InvalidConfig(format!(
+            "run-queue failed {} issue(s)",
+            failures.len()
+        )))
+    }
+}
+
+async fn run_issue_internal(
+    options: RunOptions,
+    queue_context: Option<IssueRunContext>,
+) -> Result<RunReport, SymphonyError> {
+    let started_at = Utc::now();
+    let run_id = queue_context
+        .as_ref()
+        .map(|context| context.queue_run_id.clone())
+        .unwrap_or_else(|| format!("{}-{}", started_at.format("%Y%m%d%H%M%S"), options.issue));
+    let ticket_run_id = queue_context
+        .as_ref()
+        .map(|context| context.ticket_run_id.clone())
+        .unwrap_or_else(|| run_id.clone());
     let definition = load_workflow(&options.workflow).await?;
     let mut config = resolve_config(&definition, &options.workflow)?;
     if let Some(root) = options.workspace_root {
@@ -390,11 +741,62 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
         "info",
         "orchestration",
         "run_started",
-        json!({ "runID": run_id, "issue": issue.identifier }),
+        json!({ "runID": run_id, "ticketRunID": ticket_run_id, "issue": issue.identifier }),
     )?;
+    let prompt = if let Some(context) = &queue_context {
+        let related = context.bus.related_messages(&issue, 5).await;
+        let prompt = enrich_prompt(
+            render_prompt(&definition.prompt_template, &issue, &config),
+            &related,
+        );
+        if !related.is_empty() {
+            emit(
+                options.json,
+                "info",
+                "coordination",
+                "prompt_enriched",
+                json!({
+                    "runID": run_id,
+                    "ticketRunID": ticket_run_id,
+                    "issue": issue.number,
+                    "relatedMessageCount": related.len()
+                }),
+            )?;
+        }
+        prompt
+    } else {
+        render_prompt(&definition.prompt_template, &issue, &config)
+    };
 
     if options.mock {
         fs::create_dir_all(&repo_path).await?;
+        fs::write(workspace.join("prompt.md"), &prompt).await?;
+        if let Some(context) = &queue_context {
+            context
+                .bus
+                .publish(
+                    CoordinationMessageKind::Finding,
+                    &issue,
+                    Some(issue.number),
+                    format!("{} is running in mock mode.", issue.identifier),
+                    Vec::new(),
+                    Some(workspace.clone()),
+                    Some(branch_name.clone()),
+                )
+                .await?;
+            context
+                .bus
+                .publish(
+                    CoordinationMessageKind::ChangedFiles,
+                    &issue,
+                    Some(issue.number),
+                    format!("{} mock run wrote prompt.md.", issue.identifier),
+                    vec!["prompt.md".to_string()],
+                    Some(workspace.clone()),
+                    Some(branch_name.clone()),
+                )
+                .await?;
+        }
         let report = write_report(
             &config,
             &run_id,
@@ -416,8 +818,7 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             "mock_report_written",
             json!({ "path": report.report_path }),
         )?;
-        print_final_report(options.json, &report)?;
-        return Ok(());
+        return Ok(report);
     }
 
     let default_branch = fetch_default_branch(&options.repo).await?;
@@ -448,7 +849,6 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
     )?;
 
     if !options.dry_run {
-        let prompt = render_prompt(&definition.prompt_template, &issue, &config);
         run_codex(&config, &repo_path, &prompt, options.json).await?;
     }
 
@@ -570,8 +970,39 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
         "report_written",
         json!({ "path": report.report_path }),
     )?;
-    print_final_report(options.json, &report)?;
-    Ok(())
+    if let Some(context) = &queue_context {
+        if !changed_files.is_empty() {
+            context
+                .bus
+                .publish(
+                    CoordinationMessageKind::ChangedFiles,
+                    &issue,
+                    Some(issue.number),
+                    format!(
+                        "{} changed {} file(s).",
+                        issue.identifier,
+                        changed_files.len()
+                    ),
+                    changed_files.clone(),
+                    Some(workspace.clone()),
+                    Some(branch_name.clone()),
+                )
+                .await?;
+        }
+        context
+            .bus
+            .publish(
+                CoordinationMessageKind::Summary,
+                &issue,
+                Some(issue.number),
+                format!("{} finished with status {status}.", issue.identifier),
+                changed_files.clone(),
+                Some(workspace.clone()),
+                Some(branch_name.clone()),
+            )
+            .await?;
+    }
+    Ok(report)
 }
 
 pub async fn daemon_once(
@@ -1632,6 +2063,110 @@ fn render_prompt(template: &str, issue: &NormalizedIssue, config: &WorkflowConfi
         )
 }
 
+fn enrich_prompt(prompt: String, related_messages: &[CoordinationMessage]) -> String {
+    if related_messages.is_empty() {
+        return prompt;
+    }
+    let mut enriched = prompt;
+    enriched.push_str("\n\n## Related work already observed\n");
+    for message in related_messages {
+        let changed_files = if message.changed_files.is_empty() {
+            "No changed files recorded.".to_string()
+        } else {
+            format!("Changed files: {}.", message.changed_files.join(", "))
+        };
+        enriched.push_str(&format!(
+            "- {} from #{}: {} {}\n",
+            message.kind.as_str(),
+            message.source_issue,
+            message.summary,
+            changed_files
+        ));
+    }
+    enriched
+}
+
+fn coordination_relevance_score(message: &CoordinationMessage, issue: &NormalizedIssue) -> usize {
+    let mut score = 0;
+    let text = format!(
+        "{} {}",
+        issue.title.to_lowercase(),
+        issue.description.clone().unwrap_or_default().to_lowercase()
+    );
+    if text.contains(&format!("#{}", message.source_issue)) {
+        score += 100;
+    }
+    if message
+        .labels
+        .iter()
+        .any(|label| issue.labels.iter().any(|issue_label| issue_label == label))
+    {
+        score += 30;
+    }
+    let issue_keywords = issue_keywords(issue);
+    let message_keywords = message.keywords.iter().collect::<BTreeSet<_>>();
+    score += issue_keywords
+        .iter()
+        .filter(|keyword| message_keywords.contains(keyword))
+        .count()
+        * 10;
+    for file in &message.changed_files {
+        let normalized = file.to_lowercase();
+        if !normalized.is_empty() && text.contains(&normalized) {
+            score += 40;
+        }
+        if let Some(file_name) = normalized.rsplit('/').next() {
+            if !file_name.is_empty() && text.contains(file_name) {
+                score += 20;
+            }
+        }
+    }
+    if let Some(branch_name) = &message.branch_name {
+        if text.contains(&branch_name.to_lowercase()) {
+            score += 20;
+        }
+    }
+    if let Some(workspace_path) = &message.workspace_path {
+        let workspace = workspace_path.to_string_lossy().to_lowercase();
+        if !workspace.is_empty() && text.contains(&workspace) {
+            score += 20;
+        }
+    }
+    score
+}
+
+fn issue_keywords(issue: &NormalizedIssue) -> Vec<String> {
+    let stop_words = BTreeSet::from([
+        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of",
+        "on", "or", "that", "the", "this", "to", "with",
+    ]);
+    let text = format!(
+        "{} {}",
+        issue.title.to_lowercase(),
+        issue.description.clone().unwrap_or_default().to_lowercase()
+    );
+    let mut keywords = BTreeSet::new();
+    let mut current = String::new();
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric()
+            || character == '_'
+            || character == '-'
+            || character == '/'
+        {
+            current.push(character);
+        } else if !current.is_empty() {
+            let token = std::mem::take(&mut current);
+            if token.len() > 2 && !stop_words.contains(token.as_str()) {
+                keywords.insert(token);
+            }
+        }
+    }
+    if !current.is_empty() && current.len() > 2 && !stop_words.contains(current.as_str()) {
+        keywords.insert(current);
+    }
+    keywords.into_iter().take(24).collect()
+}
+
 fn branch_name(prefix: &str, issue: &NormalizedIssue) -> String {
     let title_key = workspace_key(&issue.title).replace('_', "-");
     let short_title = title_key.chars().take(42).collect::<String>();
@@ -2139,6 +2674,10 @@ fn emit(
         message: message.to_string(),
         timestamp: Utc::now(),
         metadata,
+        run_id: None,
+        ticket_run_id: None,
+        issue: None,
+        coordination_message_id: None,
     };
     if json_output {
         println!("{}", serde_json::to_string(&event)?);
@@ -3402,6 +3941,112 @@ Prompt
 
         assert_eq!(error.code(), "invalid_config");
         assert!(error.to_string().contains("max_ticks"));
+    }
+
+    #[tokio::test]
+    async fn coordination_bus_records_and_replays_journal() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let bus = CoordinationBus::new(
+            "run-1".to_string(),
+            tempdir.path().join("workspaces"),
+            false,
+        )
+        .await
+        .unwrap();
+        let mut issue = normalized_issue(1, "open");
+        issue.labels = vec!["api".to_string()];
+        issue.title = "Touch GitHubAPIClient".to_string();
+
+        let message = bus
+            .publish(
+                CoordinationMessageKind::Finding,
+                &issue,
+                Some(2),
+                "Found shared retry code.".to_string(),
+                vec!["Auditorium/Core/Providers/GitHubAPIClient.swift".to_string()],
+                Some(tempdir.path().join("workspace-1")),
+                Some("auditorium/issue-1".to_string()),
+            )
+            .await
+            .unwrap();
+        let replayed = replay_coordination_journal(
+            &tempdir
+                .path()
+                .join("workspaces")
+                .join("coordination")
+                .join("run-1.jsonl"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(message.kind, CoordinationMessageKind::Finding);
+        assert_eq!(replayed, vec![message]);
+    }
+
+    #[test]
+    fn coordination_relevance_scores_issue_references_labels_keywords_and_files() {
+        let mut source = normalized_issue(1, "open");
+        source.labels = vec!["runtime".to_string()];
+        source.title = "Refactor container runtime launch".to_string();
+        let message = CoordinationMessage {
+            record_type: "coordination".to_string(),
+            coordination_message_id: "coord-1".to_string(),
+            run_id: "run-1".to_string(),
+            ticket_run_id: "run-1-issue-1".to_string(),
+            issue: 1,
+            source_issue: 1,
+            target_issue: Some(4),
+            kind: CoordinationMessageKind::ChangedFiles,
+            summary: "Runtime launch touches RuntimeExecutionRequest.".to_string(),
+            changed_files: vec!["Auditorium/Core/Runtime/RuntimeExecutionRequest.swift".to_string()],
+            labels: source.labels.clone(),
+            keywords: issue_keywords(&source),
+            workspace_path: Some(PathBuf::from("/tmp/runtime-workspace")),
+            branch_name: Some("auditorium/issue-1-runtime".to_string()),
+            created_at: Utc::now(),
+        };
+        let mut target = normalized_issue(4, "open");
+        target.labels = vec!["runtime".to_string()];
+        target.title = "Coordinate with #1 runtime launch".to_string();
+        target.description = Some(
+            "Also update RuntimeExecutionRequest.swift and the runtime-workspace handoff."
+                .to_string(),
+        );
+
+        let score = coordination_relevance_score(&message, &target);
+
+        assert!(score >= 160);
+    }
+
+    #[test]
+    fn prompt_enrichment_is_capped_and_stable() {
+        let base_issue = normalized_issue(1, "open");
+        let messages = (1..=6)
+            .map(|number| CoordinationMessage {
+                record_type: "coordination".to_string(),
+                coordination_message_id: format!("coord-{number}"),
+                run_id: "run-1".to_string(),
+                ticket_run_id: format!("run-1-issue-{number}"),
+                issue: number,
+                source_issue: number,
+                target_issue: Some(99),
+                kind: CoordinationMessageKind::Finding,
+                summary: format!("Finding {number} for {}", base_issue.title),
+                changed_files: vec![format!("file-{number}.swift")],
+                labels: vec!["mock".to_string()],
+                keywords: issue_keywords(&base_issue),
+                workspace_path: None,
+                branch_name: None,
+                created_at: Utc::now(),
+            })
+            .collect::<Vec<_>>();
+
+        let prompt = enrich_prompt("Prompt".to_string(), &messages[..3]);
+
+        assert!(prompt.contains("## Related work already observed"));
+        assert!(prompt.contains("Finding 1"));
+        assert!(prompt.contains("Finding 3"));
+        assert!(!prompt.contains("Finding 4"));
     }
 
     fn scheduler_item(

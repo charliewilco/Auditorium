@@ -201,6 +201,7 @@ fn help_lists_every_supported_command() {
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("doctor"))
         .stdout(predicate::str::contains("run"))
+        .stdout(predicate::str::contains("run-queue"))
         .stdout(predicate::str::contains("daemon"))
         .stdout(predicate::str::contains("report"));
 }
@@ -315,6 +316,81 @@ fn run_mock_json_writes_workspace_report_and_final_payload() {
     assert!(PathBuf::from(report["report_path"].as_str().unwrap()).exists());
     assert!(PathBuf::from(report["workspace_manifest_path"].as_str().unwrap()).exists());
     assert!(workspace_root.join("_77").is_dir());
+}
+
+#[test]
+fn run_queue_mock_json_emits_coordination_and_writes_journal() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+agent:
+  max_concurrent_agents: 1
+---
+Fix {{{{ issue.identifier }}}}.
+"#,
+            workspace_root.display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args([
+            "run-queue",
+            "--repo",
+            "acme/app",
+            "--issues",
+            "1,4",
+            "--workflow",
+        ])
+        .arg(&workflow)
+        .args(["--mock", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "queue_started"));
+    assert!(values.iter().any(|value| value["type"] == "coordination"
+        && value["kind"] == "finding"
+        && value["sourceIssue"] == 1));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "prompt_enriched"
+            && value["metadata"]["issue"] == 4
+            && value["metadata"]["relatedMessageCount"] == 2));
+    assert!(values.iter().any(|value| value["run_id"]
+        .as_str()
+        .is_some_and(|run_id| run_id.contains("queue-1-4"))
+        && value["issue"]["number"] == 1));
+    assert!(values.iter().any(|value| value["run_id"]
+        .as_str()
+        .is_some_and(|run_id| run_id.contains("queue-1-4"))
+        && value["issue"]["number"] == 4));
+
+    let journal_path = fs::read_dir(workspace_root.join("coordination"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let journal = fs::read_to_string(journal_path).unwrap();
+    assert!(journal.contains("\"type\":\"coordination\""));
+    assert!(journal.contains("\"sourceIssue\":1"));
+
+    let prompt = fs::read_to_string(workspace_root.join("_4").join("prompt.md")).unwrap();
+    assert!(prompt.contains("## Related work already observed"));
+    assert!(prompt.contains("finding from #1"));
+    assert!(prompt.contains("changed_files from #1"));
 }
 
 #[test]
