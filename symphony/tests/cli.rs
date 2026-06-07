@@ -482,3 +482,70 @@ fn daemon_execution_mode_runs_mock_dispatches_and_updates_project_state() {
         .join("reports")
         .is_dir());
 }
+
+#[test]
+fn daemon_reconciles_stale_running_state_before_scheduling() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let bin_dir = tempdir.path().join("bin");
+    write_fake_daemon_toolchain(&bin_dir);
+
+    symphony()
+        .args(["init", "--workflow"])
+        .arg(&workflow)
+        .assert()
+        .success();
+
+    let project_dir = tempdir
+        .path()
+        .join(".auditorium")
+        .join("symphony-workspaces")
+        .join("projects")
+        .join("project-123");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(
+        project_dir.join("project-state.json"),
+        r##"{
+  "project": "project-123",
+  "repository": "acme/app",
+  "issue_query": "label:ready",
+  "runs": [
+    {"issue_identifier":"#2","run_state":"running","retry_count":0,"not_before_tick":1}
+  ]
+}"##,
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args(["daemon", "--project", "project-123", "--workflow"])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "daemon_run_reconciled"
+            && value["metadata"]["issue"] == "#2"
+            && value["metadata"]["retryCount"] == 1));
+
+    let state: Value =
+        serde_json::from_str(&fs::read_to_string(project_dir.join("project-state.json")).unwrap())
+            .unwrap();
+    let issue_2 = state["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["issue_identifier"] == "#2")
+        .unwrap();
+
+    assert_eq!(issue_2["run_state"], "failed");
+    assert_eq!(issue_2["retry_count"], 1);
+    assert_eq!(issue_2["not_before_tick"], 2);
+    assert!(issue_2["last_error"].as_str().unwrap().contains("deadline"));
+}

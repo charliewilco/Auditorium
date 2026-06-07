@@ -210,6 +210,14 @@ pub struct SchedulerDispatch {
     pub retry_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulerReconciliation {
+    pub issue_identifier: String,
+    pub retry_count: usize,
+    pub not_before_tick: u64,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedulerDispatchOutcome {
     Succeeded,
@@ -685,11 +693,32 @@ async fn daemon_scheduler_plan(
     let Some(mut project_state) = load_daemon_project_state(config, &options.project).await? else {
         return Ok(None);
     };
-    let Some(repository) = project_state.repository.as_deref() else {
+    let reconciliations = reconcile_stale_running_runs(&mut project_state, config, tick);
+    if !reconciliations.is_empty() {
+        for reconciliation in &reconciliations {
+            emit(
+                options.json,
+                "warning",
+                "orchestration",
+                "daemon_run_reconciled",
+                json!({
+                    "project": &project_state.project,
+                    "issue": &reconciliation.issue_identifier,
+                    "retryCount": reconciliation.retry_count,
+                    "notBeforeTick": reconciliation.not_before_tick,
+                    "reason": &reconciliation.reason
+                }),
+            )?;
+        }
+        write_daemon_project_state(config, &options.project, &project_state).await?;
+    }
+
+    let Some(repository) = project_state.repository.clone() else {
         return Ok(None);
     };
+    let issue_query = project_state.issue_query.clone();
 
-    let issues = fetch_github_issues(repository, project_state.issue_query.as_deref()).await?;
+    let issues = fetch_github_issues(&repository, issue_query.as_deref()).await?;
     let plan = plan_scheduler_tick(
         &project_state.project,
         tick,
@@ -725,7 +754,7 @@ async fn execute_scheduler_dispatches(
                 "retryCount": dispatch.retry_count
             }),
         )?;
-        record_dispatch_started(project_state, dispatch);
+        record_dispatch_started(project_state, dispatch, config, plan.tick);
         write_daemon_project_state(config, &options.project, project_state).await?;
 
         let result = run_issue(RunOptions {
@@ -1589,9 +1618,15 @@ pub fn plan_scheduler_tick(
     }
 }
 
-pub fn record_dispatch_started(state: &mut DaemonProjectState, dispatch: &SchedulerDispatch) {
+pub fn record_dispatch_started(
+    state: &mut DaemonProjectState,
+    dispatch: &SchedulerDispatch,
+    config: &WorkflowConfig,
+    tick: u64,
+) {
     let run = daemon_run_state_mut(state, &dispatch.issue_identifier);
     run.run_state = SchedulerRunState::Running;
+    run.not_before_tick = tick.saturating_add(config.max_turns as u64);
     run.last_error = None;
 }
 
@@ -1625,6 +1660,34 @@ pub fn retry_backoff_ticks(config: &WorkflowConfig, retry_count: usize) -> u64 {
     }
     let backoff_ms = retry_backoff_ms(config, retry_count);
     backoff_ms.div_ceil(config.polling_interval_ms)
+}
+
+pub fn reconcile_stale_running_runs(
+    state: &mut DaemonProjectState,
+    config: &WorkflowConfig,
+    tick: u64,
+) -> Vec<SchedulerReconciliation> {
+    let mut reconciliations = Vec::new();
+    for run in &mut state.runs {
+        if run.run_state != SchedulerRunState::Running {
+            continue;
+        }
+        if run.not_before_tick == 0 || tick < run.not_before_tick {
+            continue;
+        }
+        let reason = format!("running run exceeded daemon deadline at tick {tick}");
+        run.run_state = SchedulerRunState::Failed;
+        run.retry_count = run.retry_count.saturating_add(1);
+        run.not_before_tick = tick.saturating_add(retry_backoff_ticks(config, run.retry_count));
+        run.last_error = Some(reason.clone());
+        reconciliations.push(SchedulerReconciliation {
+            issue_identifier: run.issue_identifier.clone(),
+            retry_count: run.retry_count,
+            not_before_tick: run.not_before_tick,
+            reason,
+        });
+    }
+    reconciliations
 }
 
 fn daemon_run_state_mut<'a>(
@@ -2332,7 +2395,7 @@ Body
             retry_count: 0,
         };
 
-        record_dispatch_started(&mut state, &succeeded);
+        record_dispatch_started(&mut state, &succeeded, &config, 7);
         record_dispatch_result(
             &mut state,
             &succeeded,
@@ -2341,7 +2404,7 @@ Body
             7,
             None,
         );
-        record_dispatch_started(&mut state, &failed);
+        record_dispatch_started(&mut state, &failed, &config, 7);
         record_dispatch_result(
             &mut state,
             &failed,
@@ -2370,6 +2433,77 @@ Body
         assert_eq!(failed_run.retry_count, 1);
         assert_eq!(failed_run.not_before_tick, 8);
         assert_eq!(failed_run.last_error.as_deref(), Some("codex exited 1"));
+    }
+
+    #[test]
+    fn stale_running_reconciliation_fails_expired_runs_only() {
+        let workflow = parse_workflow(
+            r#"---
+polling:
+  interval_ms: 1000
+agent:
+  max_retry_backoff_ms: 5000
+max_retries: 2
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let mut state = DaemonProjectState {
+            project: "project-1".to_string(),
+            repository: Some("acme/app".to_string()),
+            issue_query: None,
+            execute_dispatches: true,
+            mock: true,
+            dry_run: false,
+            no_pr: false,
+            runs: vec![
+                DaemonRunState {
+                    issue_identifier: "#1".to_string(),
+                    run_state: SchedulerRunState::Running,
+                    retry_count: 0,
+                    not_before_tick: 10,
+                    last_error: None,
+                },
+                DaemonRunState {
+                    issue_identifier: "#2".to_string(),
+                    run_state: SchedulerRunState::Running,
+                    retry_count: 1,
+                    not_before_tick: 12,
+                    last_error: None,
+                },
+                DaemonRunState {
+                    issue_identifier: "#3".to_string(),
+                    run_state: SchedulerRunState::Running,
+                    retry_count: 0,
+                    not_before_tick: 0,
+                    last_error: None,
+                },
+            ],
+        };
+
+        let first = reconcile_stale_running_runs(&mut state, &config, 11);
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].issue_identifier, "#1");
+        assert_eq!(first[0].retry_count, 1);
+        assert_eq!(first[0].not_before_tick, 12);
+        assert!(first[0].reason.contains("deadline"));
+        assert_eq!(state.runs[0].run_state, SchedulerRunState::Failed);
+        assert_eq!(state.runs[0].retry_count, 1);
+        assert_eq!(state.runs[0].not_before_tick, 12);
+        assert_eq!(state.runs[1].run_state, SchedulerRunState::Running);
+        assert_eq!(state.runs[2].run_state, SchedulerRunState::Running);
+
+        let second = reconcile_stale_running_runs(&mut state, &config, 12);
+
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].issue_identifier, "#2");
+        assert_eq!(second[0].retry_count, 2);
+        assert_eq!(second[0].not_before_tick, 14);
+        assert_eq!(state.runs[1].run_state, SchedulerRunState::Failed);
+        assert_eq!(state.runs[2].run_state, SchedulerRunState::Running);
     }
 
     #[test]

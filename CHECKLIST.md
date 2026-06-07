@@ -371,7 +371,7 @@ Acceptance gate:
 - [x] Add workflow loader.
 - [x] Add typed config layer.
 - [x] Add workspace manager.
-- [~] Add orchestrator with tested scheduler/retry policy, GitHub polling, and explicit execution dispatch; stale-running reconciliation remains.
+- [x] Add orchestrator with tested scheduler/retry policy, GitHub polling, explicit execution dispatch, and stale-running reconciliation.
 - [x] Add Codex process runner.
 - [x] Add report generator.
 - [x] Add NDJSON event output for app ingestion.
@@ -389,7 +389,7 @@ Acceptance gate:
 - [x] `symphony doctor`
 - [x] `symphony doctor --json`
 - [x] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
-- [~] `symphony daemon --project PROJECT_ID` reads project-state handoff, polls GitHub issues, persists scheduler plans, and can execute dispatches when enabled; stale-running reconciliation remains.
+- [x] `symphony daemon --project PROJECT_ID`
 - [x] `symphony report --run RUN_ID`
 
 Acceptance gate:
@@ -432,6 +432,7 @@ Acceptance gate:
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.
 - [x] Rust tests for daemon GitHub polling handoff and scheduler plan persistence.
 - [x] Rust tests for daemon dispatch execution and project-state reconciliation.
+- [x] Rust tests for daemon stale-running reconciliation.
 - [ ] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
 
