@@ -105,7 +105,7 @@ Acceptance gate:
 - [x] Fetch issue details.
 - [x] Normalize issue number, node ID, title, body, labels, assignees, URL, timestamps, and state.
 - [x] Add issue comments.
-- [ ] Optionally add/update labels when workflow policy allows.
+- [x] Optionally add/update labels when workflow policy allows.
 - [x] Avoid closing issues automatically in v0.
 - [x] Add pagination handling.
 - [x] Add rate-limit/error handling.

@@ -7,6 +7,8 @@ struct ParsedWorkflowPolicy: Sendable, Equatable {
 	let branchPrefix: String
 	let runTests: Bool
 	let openPullRequest: Bool
+	let handoffStatus: String?
+	let updateIssueLabels: Bool
 	let prompt: String
 }
 
@@ -31,6 +33,8 @@ struct WorkflowPolicyParser {
 		let branchPrefix = values["branch_prefix"]?.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? "auditorium"
 		let runTests = boolValue(values["run_tests"], defaultValue: true)
 		let openPullRequest = boolValue(values["open_pull_request"], defaultValue: true)
+		let handoffStatus = optionalString(values["handoff_status"])
+		let updateIssueLabels = boolValue(values["update_issue_labels"], defaultValue: false)
 		return ParsedWorkflowPolicy(
 			concurrency: concurrency,
 			maxRetries: maxRetries,
@@ -38,6 +42,8 @@ struct WorkflowPolicyParser {
 			branchPrefix: branchPrefix,
 			runTests: runTests,
 			openPullRequest: openPullRequest,
+			handoffStatus: handoffStatus,
+			updateIssueLabels: updateIssueLabels,
 			prompt: parts.body.trimmingCharacters(in: .whitespacesAndNewlines)
 		)
 	}
@@ -96,5 +102,10 @@ struct WorkflowPolicyParser {
 			return defaultValue
 		}
 		return ["true", "yes", "1"].contains(rawValue.lowercased())
+	}
+
+	private func optionalString(_ rawValue: String?) -> String? {
+		let value = rawValue?.trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespacesAndNewlines)) ?? ""
+		return value.isEmpty ? nil : value
 	}
 }

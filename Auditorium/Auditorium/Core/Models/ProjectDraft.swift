@@ -57,6 +57,7 @@ final class ProjectDraft {
 		concurrency: \(concurrency)
 		max_retries: \(maxRetries)
 		handoff_status: "Needs Review"
+		update_issue_labels: false
 		branch_prefix: "\(branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "auditorium" : branchPrefix.trimmingCharacters(in: .whitespacesAndNewlines))"
 		run_tests: \(runTests)
 		open_pull_request: \(openPullRequest)

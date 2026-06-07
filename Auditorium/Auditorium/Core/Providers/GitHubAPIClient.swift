@@ -63,6 +63,15 @@ struct GitHubAPIClient: Sendable {
 		_ = try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/comments", method: "POST", body: payload) as GitHubCommentPayload
 	}
 
+	func addLabels(repositoryFullName: String, issueNumber: String, labels: [String]) async throws {
+		let cleanedLabels = labels.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.isEmpty == false }
+		guard cleanedLabels.isEmpty == false else {
+			return
+		}
+		let payload = GitHubLabelsRequest(labels: cleanedLabels)
+		_ = try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/labels", method: "POST", body: payload) as [GitHubLabelPayload]
+	}
+
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
 		let payload = [
 			"title": request.title,
@@ -274,6 +283,10 @@ struct GitHubPullRequestMarker: Decodable {}
 
 struct GitHubCommentPayload: Decodable {
 	let id: Int64
+}
+
+struct GitHubLabelsRequest: Encodable {
+	let labels: [String]
 }
 
 struct GitHubPullRequestPayload: Decodable {

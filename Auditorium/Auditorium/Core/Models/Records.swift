@@ -528,6 +528,7 @@ struct WorkflowPolicy {
 	concurrency: 3
 	max_retries: 2
 	handoff_status: "Needs Review"
+	update_issue_labels: false
 	branch_prefix: "auditorium"
 	run_tests: true
 	open_pull_request: true

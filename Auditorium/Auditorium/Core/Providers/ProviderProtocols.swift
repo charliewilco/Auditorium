@@ -28,6 +28,24 @@ protocol IssueTrackerProvider {
 	func listTickets(projectID: String) async throws -> [TicketDescriptor]
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws
 	func addComment(ticketID: String, body: String) async throws
+	func addLabels(ticketID: String, labels: [String]) async throws
+}
+
+extension IssueTrackerProvider {
+	func addLabels(ticketID: String, labels: [String]) async throws {
+		if labels.isEmpty == false {
+			throw ProviderError.notImplemented("\(kind.title) label updates")
+		}
+	}
+
+	func applyWorkflowHandoffLabel(ticketID: String, policy: ParsedWorkflowPolicy) async throws {
+		guard policy.updateIssueLabels,
+			  let handoffStatus = policy.handoffStatus?.trimmingCharacters(in: .whitespacesAndNewlines),
+			  handoffStatus.isEmpty == false else {
+			return
+		}
+		try await addLabels(ticketID: ticketID, labels: [handoffStatus])
+	}
 }
 
 typealias RepositoryProvider = SourceCodeProvider

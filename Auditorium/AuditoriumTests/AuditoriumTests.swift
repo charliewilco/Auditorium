@@ -415,6 +415,41 @@ struct AuditoriumTests {
 		#expect(message.contains("2026"))
 	}
 
+	@Test func githubIssueProviderAppliesWorkflowHandoffLabelOnlyWhenEnabled() async throws {
+		let disabledPolicy = try WorkflowPolicyParser().parse("""
+		---
+		handoff_status: "Needs Review"
+		update_issue_labels: false
+		---
+		Prompt
+		""")
+		let disabledTransport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: "[]")])
+		let disabledProvider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: GitHubAPIClient(token: "test", transport: disabledTransport))
+
+		try await disabledProvider.applyWorkflowHandoffLabel(ticketID: "42", policy: disabledPolicy)
+
+		#expect(await disabledTransport.requestedURLs().isEmpty)
+
+		let enabledPolicy = try WorkflowPolicyParser().parse("""
+		---
+		handoff_status: "Needs Review"
+		update_issue_labels: true
+		---
+		Prompt
+		""")
+		let enabledTransport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: #"[{ "name": "Needs Review" }]"#)])
+		let enabledProvider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: GitHubAPIClient(token: "test", transport: enabledTransport))
+
+		try await enabledProvider.applyWorkflowHandoffLabel(ticketID: "42", policy: enabledPolicy)
+		let requestURLs = await enabledTransport.requestedURLs()
+		let requestMethods = await enabledTransport.requestedMethods()
+		let requestBodies = await enabledTransport.requestedBodyStrings()
+
+		#expect(requestURLs.first?.path == "/repos/charliewilco/Auditorium/issues/42/labels")
+		#expect(requestMethods.first == "POST")
+		#expect(requestBodies.first?.contains("Needs Review") == true)
+	}
+
 	@Test func projectIssueImportCreatesAndUpdatesTicketsWithoutDuplicates() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -671,6 +706,8 @@ struct AuditoriumTests {
 		#expect(policy.branchPrefix == "auditorium")
 		#expect(policy.runTests)
 		#expect(policy.openPullRequest)
+		#expect(policy.handoffStatus == "Needs Review")
+		#expect(policy.updateIssueLabels == false)
 		#expect(policy.prompt.contains("autonomous coding agent"))
 	}
 
@@ -1272,6 +1309,8 @@ private struct MockGitHubResponse: Sendable {
 private actor RecordingGitHubTransport: GitHubAPITransport {
 	private var responses: [MockGitHubResponse]
 	private var urls: [URL] = []
+	private var methods: [String] = []
+	private var bodyStrings: [String] = []
 
 	init(responses: [MockGitHubResponse]) {
 		self.responses = responses
@@ -1281,6 +1320,8 @@ private actor RecordingGitHubTransport: GitHubAPITransport {
 		if let url = request.url {
 			urls.append(url)
 		}
+		methods.append(request.httpMethod ?? "GET")
+		bodyStrings.append(request.httpBody.map { String(decoding: $0, as: UTF8.self) } ?? "")
 		let response = responses.isEmpty ? MockGitHubResponse(payload: "[]", statusCode: 500) : responses.removeFirst()
 		let httpResponse = HTTPURLResponse(
 			url: request.url ?? URL(string: "https://api.github.com")!,
@@ -1293,6 +1334,14 @@ private actor RecordingGitHubTransport: GitHubAPITransport {
 
 	func requestedURLs() -> [URL] {
 		urls
+	}
+
+	func requestedMethods() -> [String] {
+		methods
+	}
+
+	func requestedBodyStrings() -> [String] {
+		bodyStrings
 	}
 }
 

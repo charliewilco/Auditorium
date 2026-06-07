@@ -118,13 +118,23 @@ final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 	}
 
 	func addComment(ticketID: String, body: String) async throws {
+		let issue = try resolvedIssue(ticketID: ticketID)
+		try await requireClient().addComment(repositoryFullName: issue.repository, issueNumber: issue.number, body: body)
+	}
+
+	func addLabels(ticketID: String, labels: [String]) async throws {
+		let issue = try resolvedIssue(ticketID: ticketID)
+		try await requireClient().addLabels(repositoryFullName: issue.repository, issueNumber: issue.number, labels: labels)
+	}
+
+	private func resolvedIssue(ticketID: String) throws -> (repository: String, number: String) {
 		let parts = ticketID.split(separator: "#")
 		let repository = parts.count == 2 ? String(parts[0]) : repositoryFullName
 		let issueNumber = parts.count == 2 ? String(parts[1]) : ticketID
 		guard let repository else {
-			throw ProviderError.unavailable("A GitHub repository is required to comment on issue \(ticketID).")
+			throw ProviderError.unavailable("A GitHub repository is required for issue \(ticketID).")
 		}
-		try await requireClient().addComment(repositoryFullName: repository, issueNumber: issueNumber, body: body)
+		return (repository, issueNumber)
 	}
 
 	private func resolvedRepository(projectID: String) throws -> String {
