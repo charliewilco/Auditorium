@@ -143,7 +143,7 @@ final class Orchestrator {
 
 	private func executeWithLocalWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext) async throws {
 		let plan = OrchestrationRunPlan.make(queueItems: queueItems, requestedConcurrency: concurrency, workflowPolicyMarkdown: project.workflowPolicyMarkdown)
-		let sourceProvider = try resolveLocalWorkspaceSourceProvider(project: project, context: context)
+		let sourceProvider = try await resolveLocalWorkspaceSourceProvider(project: project, context: context)
 		let repository = repositoryDescriptor(for: project)
 		let policy = try WorkflowPolicyParser().parse(plan.workflowPolicyMarkdown)
 		try workspaceService.ensureProjectLayout(projectID: project.id)
@@ -366,14 +366,14 @@ final class Orchestrator {
 		return issueNumber
 	}
 
-	private func resolveLocalWorkspaceSourceProvider(project: Project, context: ModelContext) throws -> any SourceCodeProvider {
+	private func resolveLocalWorkspaceSourceProvider(project: Project, context: ModelContext) async throws -> any SourceCodeProvider {
 		if let localWorkspaceSourceProvider {
 			return localWorkspaceSourceProvider
 		}
 		guard let providerRegistry else {
 			throw ProviderError.unavailable("A source-code provider is required for Local Workspace runs.")
 		}
-		return try providerRegistry.sourceCodeProvider(for: project, context: context)
+		return try await providerRegistry.sourceCodeProvider(for: project, context: context)
 	}
 
 	private func repositoryDescriptor(for project: Project) -> RepositoryDescriptor {

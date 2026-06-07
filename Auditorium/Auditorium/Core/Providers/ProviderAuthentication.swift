@@ -32,9 +32,9 @@ struct OAuthAuthorizationDescriptor: Sendable {
 }
 
 enum GitHubOAuth {
-	static let callbackScheme = "auditorium"
+	nonisolated static let callbackScheme = "auditorium"
 
-	static let descriptor = OAuthAuthorizationDescriptor(
+	nonisolated static let descriptor = OAuthAuthorizationDescriptor(
 		authorizationEndpoint: URL(string: "https://github.com/login/oauth/authorize")!,
 		tokenEndpoint: URL(string: "https://github.com/login/oauth/access_token")!,
 		deviceCodeEndpoint: URL(string: "https://github.com/login/device/code")!,

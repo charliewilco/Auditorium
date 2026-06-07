@@ -502,6 +502,13 @@ final class ProviderAccountRecord {
 	var providerKindRaw: String
 	var displayName: String
 	var keychainAccount: String
+	var oauthClientID: String
+	var grantedScopesRaw: String
+	var tokenType: String
+	var accessTokenExpiresAt: Date?
+	var refreshTokenKeychainAccount: String?
+	var refreshTokenExpiresAt: Date?
+	var lastValidatedAt: Date?
 	var createdAt: Date
 	var updatedAt: Date
 
@@ -510,6 +517,13 @@ final class ProviderAccountRecord {
 		providerKindRaw: String,
 		displayName: String,
 		keychainAccount: String,
+		oauthClientID: String = "",
+		grantedScopesRaw: String = "",
+		tokenType: String = "",
+		accessTokenExpiresAt: Date? = nil,
+		refreshTokenKeychainAccount: String? = nil,
+		refreshTokenExpiresAt: Date? = nil,
+		lastValidatedAt: Date? = nil,
 		createdAt: Date = .now,
 		updatedAt: Date = .now
 	) {
@@ -517,8 +531,33 @@ final class ProviderAccountRecord {
 		self.providerKindRaw = providerKindRaw
 		self.displayName = displayName
 		self.keychainAccount = keychainAccount
+		self.oauthClientID = oauthClientID
+		self.grantedScopesRaw = grantedScopesRaw
+		self.tokenType = tokenType
+		self.accessTokenExpiresAt = accessTokenExpiresAt
+		self.refreshTokenKeychainAccount = refreshTokenKeychainAccount
+		self.refreshTokenExpiresAt = refreshTokenExpiresAt
+		self.lastValidatedAt = lastValidatedAt
 		self.createdAt = createdAt
 		self.updatedAt = updatedAt
+	}
+
+	var grantedScopes: Set<String> {
+		Set(
+			grantedScopesRaw
+				.split { character in
+					character == "," || character == " " || character == "\n"
+				}
+				.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+				.filter { $0.isEmpty == false }
+		)
+	}
+
+	func accessTokenRequiresRefresh(at date: Date, skew: TimeInterval = 60) -> Bool {
+		guard let accessTokenExpiresAt else {
+			return false
+		}
+		return accessTokenExpiresAt <= date.addingTimeInterval(skew)
 	}
 }
 

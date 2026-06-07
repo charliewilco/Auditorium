@@ -67,7 +67,7 @@ Acceptance gate:
 - [x] Persist only account metadata in SwiftData.
 - [~] Allow pasted access token as temporary bootstrap.
 - [x] Implement GitHub OAuth device flow or native callback flow.
-- [ ] Store and refresh OAuth token metadata safely.
+- [x] Store and refresh OAuth token metadata safely.
 - [x] Validate granted scopes.
 - [x] Detect missing or insufficient GitHub credentials before import/run.
 - [x] Add Settings UI for connected GitHub account.

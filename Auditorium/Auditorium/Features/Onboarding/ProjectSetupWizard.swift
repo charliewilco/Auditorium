@@ -96,7 +96,14 @@ struct ProjectSetupWizard: View {
 			oauthForm(
 				title: "\(draft.repositoryProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
-				text: Binding(get: { draft.repositoryCredential }, set: { draft.repositoryCredential = $0 }),
+				text: Binding(
+					get: { draft.repositoryCredential },
+					set: {
+						draft.repositoryCredential = $0
+						draft.selectedRepositoryAccountID = nil
+						draft.clearGitHubOAuthTokenMetadata()
+					}
+				),
 				selectedAccountID: draft.selectedRepositoryAccountID,
 				connect: { Task { await connectGitHub() } },
 				selectAccount: { selectSavedGitHubAccount($0, useForRepository: true) }
@@ -156,7 +163,14 @@ struct ProjectSetupWizard: View {
 			oauthForm(
 				title: "\(draft.issueProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
-				text: Binding(get: { draft.issueCredential }, set: { draft.issueCredential = $0 }),
+				text: Binding(
+					get: { draft.issueCredential },
+					set: {
+						draft.issueCredential = $0
+						draft.selectedIssueAccountID = nil
+						draft.clearGitHubOAuthTokenMetadata()
+					}
+				),
 				selectedAccountID: draft.selectedIssueAccountID,
 				connect: { Task { await connectGitHub() } },
 				selectAccount: { selectSavedGitHubAccount($0, useForRepository: false) }
@@ -393,10 +407,7 @@ struct ProjectSetupWizard: View {
 			oauthMessage = "Enter code \(deviceCode.userCode) in GitHub, then return here."
 			NSWorkspace.shared.open(verificationURL)
 			let token = try await service.pollToken(clientID: clientID, deviceCode: deviceCode)
-			draft.repositoryCredential = token.accessToken
-			draft.issueCredential = token.accessToken
-			draft.selectedRepositoryAccountID = nil
-			draft.selectedIssueAccountID = nil
+			draft.applyGitHubOAuthTokenResponse(token, clientID: clientID)
 			oauthMessage = "GitHub connected with scopes: \(token.scope)"
 		}
 		catch {
@@ -416,6 +427,7 @@ struct ProjectSetupWizard: View {
 			if useForRepository {
 				draft.repositoryCredential = token
 				draft.selectedRepositoryAccountID = selection.id
+				draft.clearGitHubOAuthTokenMetadata()
 				if draft.trimmedIssueCredential.isEmpty {
 					draft.issueCredential = token
 					draft.selectedIssueAccountID = selection.id
@@ -424,6 +436,7 @@ struct ProjectSetupWizard: View {
 			else {
 				draft.issueCredential = token
 				draft.selectedIssueAccountID = selection.id
+				draft.clearGitHubOAuthTokenMetadata()
 				if draft.trimmedRepositoryCredential.isEmpty {
 					draft.repositoryCredential = token
 					draft.selectedRepositoryAccountID = selection.id

@@ -8,7 +8,7 @@ struct AppServices {
 	let projectCreation = ProjectCreationService()
 	let symphony = SymphonyCLIProcessRunner()
 
-	var providerRegistry: ProviderRegistry {
+	@MainActor var providerRegistry: ProviderRegistry {
 		ProviderRegistry(keychainService: keychain)
 	}
 }

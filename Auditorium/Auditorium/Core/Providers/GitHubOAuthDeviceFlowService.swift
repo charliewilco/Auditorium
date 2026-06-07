@@ -56,11 +56,42 @@ struct GitHubOAuthTokenResponse: Decodable, Sendable, Equatable {
 	}
 }
 
+struct GitHubOAuthTokenMetadata: Sendable, Equatable {
+	let accessToken: String
+	let oauthClientID: String
+	let grantedScopesRaw: String
+	let tokenType: String
+	let accessTokenExpiresAt: Date?
+	let refreshToken: String?
+	let refreshTokenExpiresAt: Date?
+
+	init(response: GitHubOAuthTokenResponse, oauthClientID: String, issuedAt: Date = .now) {
+		accessToken = response.accessToken
+		self.oauthClientID = oauthClientID
+		grantedScopesRaw = GitHubOAuthTokenMetadata.normalizedScopesRaw(response.scope)
+		tokenType = response.tokenType
+		accessTokenExpiresAt = response.expiresIn.map { issuedAt.addingTimeInterval(TimeInterval($0)) }
+		refreshToken = response.refreshToken
+		refreshTokenExpiresAt = response.refreshTokenExpiresIn.map { issuedAt.addingTimeInterval(TimeInterval($0)) }
+	}
+
+	static func normalizedScopesRaw(_ rawValue: String) -> String {
+		rawValue
+			.split { character in
+				character == "," || character == " " || character == "\n"
+			}
+			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+			.filter { $0.isEmpty == false }
+			.sorted()
+			.joined(separator: ",")
+	}
+}
+
 struct GitHubOAuthDeviceFlowService: Sendable {
 	let descriptor: OAuthAuthorizationDescriptor
 	let transport: any GitHubAPITransport
 
-	init(descriptor: OAuthAuthorizationDescriptor = GitHubOAuth.descriptor, transport: any GitHubAPITransport = URLSession.shared) {
+	nonisolated init(descriptor: OAuthAuthorizationDescriptor = GitHubOAuth.descriptor, transport: any GitHubAPITransport = URLSession.shared) {
 		self.descriptor = descriptor
 		self.transport = transport
 	}
@@ -71,7 +102,7 @@ struct GitHubOAuthDeviceFlowService: Sendable {
 		}
 		let body = formBody([
 			"client_id": clientID,
-			"scope": descriptor.scopes.joined(separator: " ")
+			"scope": descriptor.scopes.joined(separator: " "),
 		])
 		var request = URLRequest(url: deviceCodeEndpoint)
 		request.httpMethod = "POST"
@@ -89,9 +120,11 @@ struct GitHubOAuthDeviceFlowService: Sendable {
 		while Date() < deadline {
 			do {
 				return try await requestToken(clientID: clientID, deviceCode: deviceCode.deviceCode)
-			} catch GitHubOAuthDeviceFlowError.unsupportedResponse(let error) where error == "authorization_pending" {
+			}
+			catch GitHubOAuthDeviceFlowError.unsupportedResponse(let error) where error == "authorization_pending" {
 				try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
-			} catch GitHubOAuthDeviceFlowError.unsupportedResponse(let error) where error == "slow_down" {
+			}
+			catch GitHubOAuthDeviceFlowError.unsupportedResponse(let error) where error == "slow_down" {
 				interval += 5
 				try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
 			}
@@ -103,7 +136,7 @@ struct GitHubOAuthDeviceFlowService: Sendable {
 		let body = formBody([
 			"client_id": clientID,
 			"device_code": deviceCode,
-			"grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+			"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
 		])
 		var request = URLRequest(url: descriptor.tokenEndpoint)
 		request.httpMethod = "POST"
@@ -118,6 +151,33 @@ struct GitHubOAuthDeviceFlowService: Sendable {
 		let error = try JSONDecoder().decode(GitHubOAuthErrorResponse.self, from: data)
 		switch error.error {
 		case "expired_token":
+			throw GitHubOAuthDeviceFlowError.expired
+		case "access_denied":
+			throw GitHubOAuthDeviceFlowError.accessDenied
+		default:
+			throw GitHubOAuthDeviceFlowError.unsupportedResponse(error.error)
+		}
+	}
+
+	func refreshToken(clientID: String, refreshToken: String) async throws -> GitHubOAuthTokenResponse {
+		let body = formBody([
+			"client_id": clientID,
+			"grant_type": "refresh_token",
+			"refresh_token": refreshToken,
+		])
+		var request = URLRequest(url: descriptor.tokenEndpoint)
+		request.httpMethod = "POST"
+		request.httpBody = Data(body.utf8)
+		request.setValue("application/json", forHTTPHeaderField: "Accept")
+		request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+		let (data, response) = try await transport.send(request)
+		try validate(response: response)
+		if let token = try? JSONDecoder().decode(GitHubOAuthTokenResponse.self, from: data) {
+			return token
+		}
+		let error = try JSONDecoder().decode(GitHubOAuthErrorResponse.self, from: data)
+		switch error.error {
+		case "expired_token", "bad_refresh_token":
 			throw GitHubOAuthDeviceFlowError.expired
 		case "access_denied":
 			throw GitHubOAuthDeviceFlowError.accessDenied

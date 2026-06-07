@@ -63,7 +63,17 @@ struct GitHubAuthenticationState: Equatable {
 		keychainAccount = account.keychainAccount
 		if (try? secretReader(account.keychainAccount))?.isEmpty == false {
 			status = .connected
-			detail = "Connected. Secret material is stored in Keychain."
+			var details = ["Connected. Secret material is stored in Keychain."]
+			if account.grantedScopes.isEmpty == false {
+				details.append("Scopes: \(account.grantedScopes.sorted().joined(separator: ", ")).")
+			}
+			if let accessTokenExpiresAt = account.accessTokenExpiresAt {
+				details.append("Access token expires \(accessTokenExpiresAt.formatted(date: .abbreviated, time: .shortened)).")
+			}
+			if account.refreshTokenKeychainAccount != nil {
+				details.append("Refresh token is stored separately in Keychain.")
+			}
+			detail = details.joined(separator: " ")
 		}
 		else {
 			status = .missingSecret

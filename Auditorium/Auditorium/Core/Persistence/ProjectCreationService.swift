@@ -58,6 +58,7 @@ struct ProjectCreationService {
 					displayName: "GitHub OAuth for \(draft.trimmedRepositoryName)",
 					projectID: project.id,
 					credentialRole: "github-oauth",
+					metadata: draft.githubOAuthTokenMetadata,
 					context: context,
 					keychainService: keychainService
 				)
@@ -74,6 +75,7 @@ struct ProjectCreationService {
 					displayName: "\(draft.repositoryProviderKind.title) for \(draft.trimmedRepositoryName)",
 					projectID: project.id,
 					credentialRole: "repository",
+					metadata: nil,
 					context: context,
 					keychainService: keychainService
 				)
@@ -85,6 +87,7 @@ struct ProjectCreationService {
 					displayName: "\(draft.issueProviderKind.title) for \(draft.issueSourceName)",
 					projectID: project.id,
 					credentialRole: "issues",
+					metadata: nil,
 					context: context,
 					keychainService: keychainService
 				)
@@ -142,6 +145,7 @@ struct ProjectCreationService {
 		displayName: String,
 		projectID: UUID,
 		credentialRole: String,
+		metadata: GitHubOAuthTokenMetadata?,
 		context: ModelContext,
 		keychainService: KeychainService?
 	) throws -> UUID? {
@@ -152,15 +156,39 @@ struct ProjectCreationService {
 
 		let accountID = UUID()
 		let keychainAccount = "\(projectID.uuidString)-\(credentialRole)-\(providerKind)"
-		try keychainService.storeSecret(trimmed, account: keychainAccount)
-		context.insert(
-			ProviderAccountRecord(
-				id: accountID,
-				providerKindRaw: providerKind,
-				displayName: displayName,
-				keychainAccount: keychainAccount
+		let matchingMetadata = metadata?.accessToken == trimmed ? metadata : nil
+		let refreshToken = matchingMetadata?.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+		let refreshTokenKeychainAccount = refreshToken?.isEmpty == false ? "\(keychainAccount)-refresh" : nil
+		var storedKeychainAccounts: [String] = []
+		do {
+			try keychainService.storeSecret(trimmed, account: keychainAccount)
+			storedKeychainAccounts.append(keychainAccount)
+			if let refreshToken, let refreshTokenKeychainAccount {
+				try keychainService.storeSecret(refreshToken, account: refreshTokenKeychainAccount)
+				storedKeychainAccounts.append(refreshTokenKeychainAccount)
+			}
+			context.insert(
+				ProviderAccountRecord(
+					id: accountID,
+					providerKindRaw: providerKind,
+					displayName: displayName,
+					keychainAccount: keychainAccount,
+					oauthClientID: matchingMetadata?.oauthClientID ?? "",
+					grantedScopesRaw: matchingMetadata?.grantedScopesRaw ?? "",
+					tokenType: matchingMetadata?.tokenType ?? "",
+					accessTokenExpiresAt: matchingMetadata?.accessTokenExpiresAt,
+					refreshTokenKeychainAccount: refreshTokenKeychainAccount,
+					refreshTokenExpiresAt: matchingMetadata?.refreshTokenExpiresAt,
+					lastValidatedAt: matchingMetadata == nil ? nil : .now
+				)
 			)
-		)
+		}
+		catch {
+			for account in storedKeychainAccounts {
+				try? keychainService.deleteSecret(account: account)
+			}
+			throw error
+		}
 		return accountID
 	}
 

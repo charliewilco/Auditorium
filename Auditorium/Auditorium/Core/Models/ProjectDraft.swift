@@ -98,6 +98,7 @@ final class ProjectDraft {
 	var defaultBranch = "next"
 	var repositoryCredential = ""
 	var selectedRepositoryAccountID: UUID?
+	var githubOAuthTokenMetadata: GitHubOAuthTokenMetadata?
 	var issueProviderKind: IssueProviderKind = .githubIssues
 	var issueSourceName = "charlie/burton-ios"
 	var issueSourceIdentifier = "charlie/burton-ios"
@@ -171,6 +172,18 @@ final class ProjectDraft {
 	var canCreate: Bool {
 		!trimmedName.isEmpty && !trimmedRepositoryName.isEmpty && !trimmedRepositoryURL.isEmpty && !trimmedDefaultBranch.isEmpty
 			&& !trimmedIssueSourceName.isEmpty
+	}
+
+	func applyGitHubOAuthTokenResponse(_ token: GitHubOAuthTokenResponse, clientID: String, issuedAt: Date = .now) {
+		repositoryCredential = token.accessToken
+		issueCredential = token.accessToken
+		selectedRepositoryAccountID = nil
+		selectedIssueAccountID = nil
+		githubOAuthTokenMetadata = GitHubOAuthTokenMetadata(response: token, oauthClientID: clientID, issuedAt: issuedAt)
+	}
+
+	func clearGitHubOAuthTokenMetadata() {
+		githubOAuthTokenMetadata = nil
 	}
 
 	var resolvedWorkflowPolicyMarkdown: String {

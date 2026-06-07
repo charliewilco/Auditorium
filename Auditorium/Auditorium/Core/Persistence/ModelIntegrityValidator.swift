@@ -240,7 +240,11 @@ private extension ModelIntegrityValidator {
 			requireNonEmpty(record.keychainAccount, model: "ProviderAccountRecord", id: id, field: "keychainAccount", issues: &issues)
 			scanSecrets([
 				("displayName", record.displayName),
-				("keychainAccount", record.keychainAccount)
+				("keychainAccount", record.keychainAccount),
+				("oauthClientID", record.oauthClientID),
+				("grantedScopesRaw", record.grantedScopesRaw),
+				("tokenType", record.tokenType),
+				("refreshTokenKeychainAccount", record.refreshTokenKeychainAccount ?? "")
 			], model: "ProviderAccountRecord", id: id, issues: &issues)
 		}
 	}

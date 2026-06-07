@@ -244,6 +244,156 @@ struct AuditoriumCoreTests {
 		#expect(issueTracker.providerAccountID == account.id)
 	}
 
+	@Test func oauthTokenMetadataNormalizesScopesAndExpiry() {
+		let issuedAt = Date(timeIntervalSince1970: 1_000)
+		let response = GitHubOAuthTokenResponse(
+			accessToken: "gho_access",
+			scope: "read:user, repo",
+			tokenType: "bearer",
+			expiresIn: 3_600,
+			refreshToken: "ghr_refresh",
+			refreshTokenExpiresIn: 7_200
+		)
+		let metadata = GitHubOAuthTokenMetadata(response: response, oauthClientID: "client-123", issuedAt: issuedAt)
+
+		#expect(metadata.accessToken == "gho_access")
+		#expect(metadata.oauthClientID == "client-123")
+		#expect(metadata.grantedScopesRaw == "read:user,repo")
+		#expect(metadata.tokenType == "bearer")
+		#expect(metadata.accessTokenExpiresAt == Date(timeIntervalSince1970: 4_600))
+		#expect(metadata.refreshToken == "ghr_refresh")
+		#expect(metadata.refreshTokenExpiresAt == Date(timeIntervalSince1970: 8_200))
+	}
+
+	@Test func projectCreationStoresOAuthMetadataAndRefreshSecret() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let issuedAt = Date(timeIntervalSince1970: 1_000)
+		let draft = ProjectDraft()
+		draft.name = "OAuth Metadata"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.importDemoTickets = false
+		draft.applyGitHubOAuthTokenResponse(
+			GitHubOAuthTokenResponse(
+				accessToken: "gho_access",
+				scope: "repo,read:user",
+				tokenType: "bearer",
+				expiresIn: 3_600,
+				refreshToken: "ghr_refresh",
+				refreshTokenExpiresIn: 7_200
+			),
+			clientID: "client-123",
+			issuedAt: issuedAt
+		)
+
+		_ = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root),
+			keychainService: keychain
+		)
+
+		let account = try #require(context.fetch(FetchDescriptor<ProviderAccountRecord>()).first)
+		let refreshTokenAccount = try #require(account.refreshTokenKeychainAccount)
+		#expect(account.oauthClientID == "client-123")
+		#expect(account.grantedScopes == ["repo", "read:user"])
+		#expect(account.tokenType == "bearer")
+		#expect(account.accessTokenExpiresAt == Date(timeIntervalSince1970: 4_600))
+		#expect(account.refreshTokenExpiresAt == Date(timeIntervalSince1970: 8_200))
+		#expect(try keychain.readSecret(account: account.keychainAccount) == "gho_access")
+		#expect(try keychain.readSecret(account: refreshTokenAccount) == "ghr_refresh")
+
+		try ProviderRegistry(keychainService: keychain).clearGitHubCredentials(context: context)
+
+		#expect(try keychain.readSecret(account: account.keychainAccount) == nil)
+		#expect(try keychain.readSecret(account: refreshTokenAccount) == nil)
+	}
+
+	@Test func providerRegistryRefreshesExpiredGitHubToken() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let now = Date(timeIntervalSince1970: 10_000)
+		let project = Project(
+			name: "Refresh",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let accessAccount = "access-\(UUID().uuidString)"
+		let refreshAccount = "refresh-\(UUID().uuidString)"
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Refresh",
+			keychainAccount: accessAccount,
+			oauthClientID: "client-123",
+			grantedScopesRaw: "repo",
+			tokenType: "bearer",
+			accessTokenExpiresAt: now.addingTimeInterval(-1),
+			refreshTokenKeychainAccount: refreshAccount,
+			refreshTokenExpiresAt: now.addingTimeInterval(3_600)
+		)
+		try keychain.storeSecret("old-access", account: accessAccount)
+		try keychain.storeSecret("old-refresh", account: refreshAccount)
+		defer {
+			try? keychain.deleteSecret(account: accessAccount)
+			try? keychain.deleteSecret(account: refreshAccount)
+		}
+		context.insert(project)
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: "https://github.com/charliewilco/Auditorium.git",
+				webURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				providerAccountID: account.id,
+				projectID: project.id
+			)
+		)
+		context.insert(account)
+		try context.save()
+		let payload = """
+			{
+				"access_token": "new-access",
+				"scope": "repo,read:user",
+				"token_type": "bearer",
+				"expires_in": 900,
+				"refresh_token": "new-refresh",
+				"refresh_token_expires_in": 1800
+			}
+			"""
+		let registry = ProviderRegistry(
+			keychainService: keychain,
+			githubOAuthService: GitHubOAuthDeviceFlowService(transport: MockGitHubTransport(payload: payload)),
+			refreshSkew: 60,
+			now: { now }
+		)
+
+		let token = try await registry.requireGitHubToken(for: project, context: context, operation: "testing refresh")
+
+		#expect(token == "new-access")
+		#expect(try keychain.readSecret(account: accessAccount) == "new-access")
+		#expect(try keychain.readSecret(account: refreshAccount) == "new-refresh")
+		#expect(account.grantedScopes == ["repo", "read:user"])
+		#expect(account.accessTokenExpiresAt == now.addingTimeInterval(900))
+		#expect(account.refreshTokenExpiresAt == now.addingTimeInterval(1_800))
+		#expect(account.lastValidatedAt == now)
+	}
+
 	@Test func modelIntegrityValidatorRejectsPersistedSecretMaterial() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -354,5 +504,22 @@ struct AuditoriumCoreTests {
 			estimatedComplexity: 1,
 			blockedBy: []
 		)
+	}
+}
+
+private struct MockGitHubTransport: GitHubAPITransport {
+	let payload: String
+	let statusCode: Int
+	let headers: [String: String]
+
+	init(payload: String, statusCode: Int = 200, headers: [String: String] = [:]) {
+		self.payload = payload
+		self.statusCode = statusCode
+		self.headers = headers
+	}
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: headers)!
+		return (Data(payload.utf8), response)
 	}
 }

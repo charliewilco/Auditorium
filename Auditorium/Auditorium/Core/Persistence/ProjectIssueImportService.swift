@@ -28,7 +28,8 @@ struct ProjectIssueImportService {
 				ticket.updatedAt = descriptor.updatedAt
 				ticket.estimatedComplexity = descriptor.estimatedComplexity
 				ticket.blockedBy = descriptor.blockedBy
-			} else {
+			}
+			else {
 				let ticket = TicketRecord(
 					provider: descriptor.provider,
 					externalID: descriptor.externalID,
@@ -61,7 +62,7 @@ struct ProjectIssueImportService {
 		guard let project = projects.first(where: { $0.id == projectID }) else {
 			throw ProjectCreationError.projectNotFound(projectID)
 		}
-		let provider = try providerRegistry.issueTrackerProvider(for: project, context: context)
+		let provider = try await providerRegistry.issueTrackerProvider(for: project, context: context)
 		return try await importTickets(for: project, context: context, provider: provider)
 	}
 }

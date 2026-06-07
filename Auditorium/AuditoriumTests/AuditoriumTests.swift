@@ -472,8 +472,8 @@ struct AuditoriumTests {
 		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 2)
-		#expect(AppSchema.MigrationPlan.stages.count == 1)
+		#expect(AppSchema.MigrationPlan.schemas.count == 3)
+		#expect(AppSchema.MigrationPlan.stages.count == 2)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
