@@ -3,11 +3,14 @@ import SwiftData
 
 enum ProjectCreationError: LocalizedError {
 	case invalidDraft
+	case projectNotFound(UUID)
 
 	var errorDescription: String? {
 		switch self {
 		case .invalidDraft:
 			"Project name, repository, default branch, and issue source are required."
+		case .projectNotFound(let id):
+			"Project \(id.uuidString) could not be found."
 		}
 	}
 }

@@ -7,7 +7,11 @@ enum KeychainError: Error {
 }
 
 struct KeychainService {
-	private let service = "co.charliewil.Auditorium"
+	private let service: String
+
+	init(service: String = "co.charliewil.Auditorium") {
+		self.service = service
+	}
 
 	func storeSecret(_ secret: String, account: String) throws {
 		let data = Data(secret.utf8)

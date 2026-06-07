@@ -9,6 +9,10 @@ struct ProjectSetupWizard: View {
 	let onCreate: (UUID) -> Void
 	@State private var step = 0
 	@State private var draft = ProjectDraft()
+	@State private var availableRepositories: [RepositoryDescriptor] = []
+	@State private var repositoryLoadMessage = ""
+	@State private var isLoadingRepositories = false
+	@State private var isCreating = false
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -36,13 +40,13 @@ struct ProjectSetupWizard: View {
 					.disabled(step == 0)
 				Button(step == steps.count - 1 ? "Create Project" : "Next") {
 					if step == steps.count - 1 {
-						createProject()
+						Task { await createProject() }
 					} else {
 						step += 1
 					}
 				}
 				.buttonStyle(.borderedProminent)
-				.disabled(step == steps.count - 1 && !draft.canCreate)
+				.disabled((step == steps.count - 1 && !draft.canCreate) || isCreating)
 			}
 			.padding()
 		}
@@ -65,12 +69,45 @@ struct ProjectSetupWizard: View {
 			VStack(alignment: .leading, spacing: 14) {
 				Text("Select Repository")
 					.font(.headline)
+				HStack {
+					Button("Load Repositories") {
+						Task { await loadRepositories() }
+					}
+					.disabled(draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoadingRepositories)
+					if isLoadingRepositories {
+						ProgressView()
+							.controlSize(.small)
+					}
+					if !repositoryLoadMessage.isEmpty {
+						Text(repositoryLoadMessage)
+							.foregroundStyle(.secondary)
+					}
+				}
+				if !availableRepositories.isEmpty {
+					List(availableRepositories) { repository in
+						Button {
+							selectRepository(repository)
+						} label: {
+							HStack {
+								VStack(alignment: .leading, spacing: 2) {
+									Text(repository.fullName)
+										.font(.subheadline.weight(.medium))
+									Text(repository.webURL.absoluteString)
+										.foregroundStyle(.secondary)
+								}
+								Spacer()
+								Text(repository.defaultBranch)
+									.foregroundStyle(.secondary)
+							}
+						}
+						.buttonStyle(.plain)
+					}
+					.frame(minHeight: 180)
+				}
 				TextField("Project Name", text: Binding(get: { draft.name }, set: { draft.name = $0 }))
 				TextField("Repository", text: Binding(get: { draft.repositoryName }, set: { draft.repositoryName = $0 }))
 				TextField("Clone/Web URL", text: Binding(get: { draft.repositoryURL }, set: { draft.repositoryURL = $0 }))
 				TextField("Default Branch", text: Binding(get: { draft.defaultBranch }, set: { draft.defaultBranch = $0 }))
-				Text("Mock provider data is shown now; real listing will plug into the same provider protocol.")
-					.foregroundStyle(.secondary)
 			}
 		case 3:
 			providerGrid([IssueProviderKind.githubIssues], selected: draft.issueProviderKind) { kind in
@@ -90,9 +127,8 @@ struct ProjectSetupWizard: View {
 				TextField("Source Identifier", text: Binding(get: { draft.issueSourceIdentifier }, set: { draft.issueSourceIdentifier = $0 }))
 				TextField("Filter", text: Binding(get: { draft.issueFilterName }, set: { draft.issueFilterName = $0 }))
 				TextField("Issue Tracker URL", text: Binding(get: { draft.issueTrackerURL }, set: { draft.issueTrackerURL = $0 }))
+				Toggle("Import open GitHub issues", isOn: Binding(get: { draft.importGitHubIssues }, set: { draft.importGitHubIssues = $0 }))
 				Toggle("Import demo tickets", isOn: Binding(get: { draft.importDemoTickets }, set: { draft.importDemoTickets = $0 }))
-				Text("Ten realistic demo tickets will be imported for the first build.")
-					.foregroundStyle(.secondary)
 			}
 		case 6:
 			providerGrid(RuntimeProviderKind.allCases, selected: draft.runtimeProviderKind) { kind in
@@ -125,6 +161,7 @@ struct ProjectSetupWizard: View {
 				LabeledContent("Runtime", value: draft.runtimeProviderKind.title)
 				LabeledContent("Agent", value: draft.agentProviderKind.title)
 				LabeledContent("Concurrency", value: "\(draft.concurrency)")
+				LabeledContent("Import Issues", value: draft.importGitHubIssues ? "GitHub open issues" : "No GitHub import")
 				LabeledContent("Initial Runs", value: "None")
 			}
 		}
@@ -189,7 +226,42 @@ struct ProjectSetupWizard: View {
 		return ("Provider", "Provider", "square")
 	}
 
-	private func createProject() {
+	private func loadRepositories() async {
+		let token = draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !token.isEmpty else {
+			return
+		}
+		isLoadingRepositories = true
+		repositoryLoadMessage = ""
+		defer { isLoadingRepositories = false }
+
+		do {
+			let provider = GitHubRepositoryProvider(token: token)
+			availableRepositories = try await provider.listRepositories()
+			repositoryLoadMessage = "\(availableRepositories.count) repositories"
+		} catch {
+			repositoryLoadMessage = error.localizedDescription
+		}
+	}
+
+	private func selectRepository(_ repository: RepositoryDescriptor) {
+		draft.name = repository.name
+		draft.repositoryName = repository.fullName
+		draft.repositoryURL = repository.webURL.absoluteString
+		draft.defaultBranch = repository.defaultBranch
+		draft.issueSourceName = repository.fullName
+		draft.issueSourceIdentifier = repository.fullName
+		draft.issueTrackerURL = repository.webURL.appending(path: "issues").absoluteString
+		if draft.issueCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+			draft.issueCredential = draft.repositoryCredential
+		}
+		draft.importDemoTickets = false
+		draft.importGitHubIssues = true
+	}
+
+	private func createProject() async {
+		isCreating = true
+		defer { isCreating = false }
 		do {
 			let projectID = try services.projectCreation.createProject(
 				from: draft,
@@ -197,6 +269,9 @@ struct ProjectSetupWizard: View {
 				workspaceService: services.workspace,
 				keychainService: services.keychain
 			)
+			if draft.importGitHubIssues {
+				_ = try await ProjectIssueImportService().importTickets(projectID: projectID, context: modelContext, providerRegistry: services.providerRegistry)
+			}
 			onCreate(projectID)
 			dismiss()
 		} catch {

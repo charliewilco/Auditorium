@@ -194,6 +194,103 @@ struct AuditoriumTests {
 		#expect(tickets.first?.assignee == "charliewilco")
 	}
 
+	@Test func projectIssueImportCreatesAndUpdatesTicketsWithoutDuplicates() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let project = Project(
+			name: "Auditorium",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		context.insert(project)
+		try context.save()
+		let createdAt = Date(timeIntervalSince1970: 1_780_000_000)
+		let provider = StaticIssueTrackerProvider(tickets: [
+			TicketDescriptor(
+				provider: .githubIssues,
+				externalID: "42",
+				title: "Import issues",
+				body: "Original body",
+				status: .ready,
+				labels: ["agent"],
+				assignee: "charliewilco",
+				priority: .medium,
+				webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/42"),
+				createdAt: createdAt,
+				updatedAt: createdAt,
+				estimatedComplexity: 3,
+				blockedBy: []
+			)
+		])
+
+		let imported = try await ProjectIssueImportService().importTickets(for: project, context: context, provider: provider)
+
+		#expect(imported == 1)
+		#expect(try context.fetch(FetchDescriptor<TicketRecord>()).count == 1)
+
+		let updateProvider = StaticIssueTrackerProvider(tickets: [
+			TicketDescriptor(
+				provider: .githubIssues,
+				externalID: "42",
+				title: "Import issues from GitHub",
+				body: "Updated body",
+				status: .ready,
+				labels: ["agent", "github"],
+				assignee: nil,
+				priority: .high,
+				webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/42"),
+				createdAt: createdAt,
+				updatedAt: createdAt.addingTimeInterval(60),
+				estimatedComplexity: 5,
+				blockedBy: []
+			)
+		])
+
+		let updated = try await ProjectIssueImportService().importTickets(for: project, context: context, provider: updateProvider)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+
+		#expect(updated == 1)
+		#expect(tickets.count == 1)
+		#expect(tickets.first?.title == "Import issues from GitHub")
+		#expect(tickets.first?.labels == ["agent", "github"])
+		#expect(tickets.first?.priority == .high)
+	}
+
+	@Test func githubCredentialLifecycleStoresSecretAndClearsMetadata() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let draft = ProjectDraft()
+		draft.name = "Credential Test"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.repositoryCredential = "test-token"
+		draft.issueCredential = "test-token"
+		draft.importDemoTickets = false
+
+		_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root), keychainService: keychain)
+		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+		let keychainAccount = try #require(accounts.first?.keychainAccount)
+
+		#expect(accounts.count == 1)
+		#expect(try keychain.readSecret(account: keychainAccount) == "test-token")
+
+		try ProviderRegistry(keychainService: keychain).clearGitHubCredentials(context: context)
+
+		#expect(try context.fetch(FetchDescriptor<ProviderAccountRecord>()).isEmpty)
+		#expect(try keychain.readSecret(account: keychainAccount) == nil)
+	}
+
 	@Test func projectDraftDefaultsToGitHubForSourceAndIssues() {
 		let draft = ProjectDraft()
 
@@ -433,4 +530,16 @@ private struct MockGitHubTransport: GitHubAPITransport {
 		)!
 		return (Data(payload.utf8), response)
 	}
+}
+
+private struct StaticIssueTrackerProvider: IssueTrackerProvider {
+	let kind = IssueProviderKind.githubIssues
+	let tickets: [TicketDescriptor]
+
+	func listTickets(projectID: String) async throws -> [TicketDescriptor] {
+		tickets
+	}
+
+	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {}
+	func addComment(ticketID: String, body: String) async throws {}
 }

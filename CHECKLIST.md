@@ -72,13 +72,13 @@ Acceptance gate:
 - [~] Detect missing or insufficient GitHub credentials before import/run.
 - [~] Add Settings UI for connected GitHub account.
 - [x] Add clear credentials action.
-- [ ] Add tests for Keychain-backed account lifecycle.
+- [x] Add tests for Keychain-backed account lifecycle.
 
 Acceptance gate:
 
 - [ ] A user can connect GitHub without manually pasting a token.
-- [ ] Repository and issue APIs can share one GitHub account.
-- [ ] Clearing the account removes Keychain secrets and SwiftData metadata.
+- [x] Repository and issue APIs can share one GitHub account.
+- [x] Clearing the account removes Keychain secrets and SwiftData metadata.
 
 ## 4. GitHub Source-Code Provider
 
@@ -113,8 +113,8 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] The app can import real GitHub Issues into `TicketRecord`.
-- [ ] Ticket browser data matches GitHub issue details.
+- [x] The app can import real GitHub Issues into `TicketRecord`.
+- [x] Ticket browser data matches GitHub issue details.
 
 ## 6. Project Creation Flow
 
@@ -125,14 +125,14 @@ Acceptance gate:
 - [x] Persist project, repository, issue tracker, workflow policy, and optional demo tickets.
 - [~] Show OAuth-shaped credential step.
 - [ ] Select GitHub account.
-- [ ] Select repository from real GitHub data.
+- [x] Select repository from real GitHub data.
 - [ ] Select issue filter/query from real GitHub Issues data.
 - [ ] Validate required fields before advancing each step.
 - [ ] Add clearer error handling for failed creation.
 
 Acceptance gate:
 
-- [ ] A user can create a real GitHub-backed project without mock data.
+- [~] A user can create a real GitHub-backed project without mock data.
 
 ## 7. Demo Mode
 
@@ -334,7 +334,7 @@ Acceptance gate:
 - [ ] Enforce confirmation before starting runs.
 - [ ] Enforce confirmation before opening PRs.
 - [ ] Show Keychain storage explanation.
-- [ ] Clear GitHub credentials.
+- [x] Clear GitHub credentials.
 - [ ] Configure runtime isolation level.
 - [ ] Configure logs/reports paths.
 
@@ -456,8 +456,8 @@ Acceptance gate:
 ## 24. v0 Final Acceptance
 
 - [ ] User authenticates GitHub.
-- [ ] User selects GitHub repository.
-- [ ] User imports GitHub Issues.
+- [x] User selects GitHub repository.
+- [x] User imports GitHub Issues.
 - [ ] User queues issues.
 - [ ] User reorders queue.
 - [ ] User starts run.

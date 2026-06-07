@@ -25,6 +25,7 @@ final class ProjectDraft {
 	var openPullRequest = true
 	var workflowPolicyMarkdown = WorkflowPolicy.defaultMarkdown
 	var importDemoTickets = true
+	var importGitHubIssues = false
 
 	var trimmedName: String {
 		name.trimmingCharacters(in: .whitespacesAndNewlines)
