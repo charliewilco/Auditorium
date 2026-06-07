@@ -1064,10 +1064,13 @@ struct AuditoriumTests {
 		let fakeSymphony = root.appending(path: "fake-symphony")
 		let reportPath = root.appending(path: "report.md").path()
 		let workspacePath = root.appending(path: "workspace").path()
+		let releasePath = root.appending(path: "release-symphony").path()
 		let script = """
 		#!/bin/sh
 		printf '%s\\n' '{"level":"info","category":"agent","message":"streamed_before_exit","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"7"}}'
-		sleep 1.0
+		while [ ! -f '\(releasePath)' ]; do
+			sleep 0.05
+		done
 		mkdir -p '\(workspacePath)'
 		printf '# Fake Report\\n' > '\(reportPath)'
 		printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
@@ -1120,13 +1123,14 @@ struct AuditoriumTests {
 			try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
 		}
 		var earlyEvents: [RuntimeEventRecord] = []
-		for _ in 0..<20 {
+		for _ in 0..<100 {
 			earlyEvents = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
 			if earlyEvents.contains(where: { $0.message == "streamed_before_exit" }) {
 				break
 			}
 			try await Task.sleep(nanoseconds: 50_000_000)
 		}
+		_ = FileManager.default.createFile(atPath: releasePath, contents: Data())
 
 		#expect(earlyEvents.contains { $0.message == "streamed_before_exit" })
 		#expect(taskCompleted == false)
