@@ -273,8 +273,8 @@ Acceptance gate:
 - [x] Preview reports in app.
 - [~] Copy/export/reveal actions exist in prototype form.
 - [ ] Verify copy/export/reveal manually.
-- [ ] Include accurate changed files.
-- [ ] Include validation/test output.
+- [x] Include accurate changed files.
+- [x] Include validation/test output.
 - [ ] Include failure details and suggested actions.
 - [ ] Include PR/check status.
 - [ ] Add report golden tests.
@@ -356,7 +356,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Workflow policy controls concurrency, retries, branch prefix, tests, PR creation, and agent prompt.
+- [~] Workflow policy controls concurrency, retries, branch prefix, tests, PR creation, and agent prompt.
 
 ## 19. Rust `symphony` CLI
 

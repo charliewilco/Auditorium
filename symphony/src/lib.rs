@@ -21,6 +21,8 @@ polling:
   interval_ms: 30000
 workspace:
   root: ".auditorium/symphony-workspaces"
+validation:
+  command: ""
 agent:
   max_concurrent_agents: 3
   max_turns: 1
@@ -121,6 +123,7 @@ pub struct WorkflowConfig {
     pub max_retries: usize,
     pub run_tests: bool,
     pub open_pull_request: bool,
+    pub validation_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +152,8 @@ pub struct RunReport {
     pub status: String,
     pub pull_request_url: Option<String>,
     pub report_path: PathBuf,
+    pub changed_files: Vec<String>,
+    pub validation_output: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: DateTime<Utc>,
 }
@@ -270,6 +275,8 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             &branch_name,
             "mock_completed",
             None,
+            &[],
+            None,
             started_at,
         )
         .await?;
@@ -303,6 +310,8 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
     }
 
     let changed = command_stdout("git", &["status", "--porcelain"], Some(&repo_path)).await?;
+    let changed_files = parse_changed_files(&changed);
+    let mut validation_output = None;
     let mut pr_url = None;
     let status = if changed.trim().is_empty() {
         emit(
@@ -319,10 +328,23 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             "info",
             "git",
             "dry_run_left_changes_uncommitted",
-            json!({}),
+            json!({ "changedFiles": changed_files }),
         )?;
         "dry_run"
     } else {
+        if config.run_tests {
+            if let Some(command) = &config.validation_command {
+                let validation = run_validation(command, &repo_path).await?;
+                validation_output = Some(validation);
+                emit(
+                    options.json,
+                    "success",
+                    "validation",
+                    "validation_passed",
+                    json!({ "command": command }),
+                )?;
+            }
+        }
         git(&repo_path, &["add", "-A"]).await?;
         let message = format!("{}: {}", issue.identifier, issue.title);
         git(&repo_path, &["commit", "-m", message.as_str()]).await?;
@@ -379,6 +401,8 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
         &branch_name,
         status,
         pr_url,
+        &changed_files,
+        validation_output,
         started_at,
     )
     .await?;
@@ -489,6 +513,8 @@ pub fn resolve_config(
     let polling = mapping_value(&definition.config, "polling").and_then(|value| value.as_mapping());
     let workspace =
         mapping_value(&definition.config, "workspace").and_then(|value| value.as_mapping());
+    let validation =
+        mapping_value(&definition.config, "validation").and_then(|value| value.as_mapping());
     let agent = mapping_value(&definition.config, "agent").and_then(|value| value.as_mapping());
     let codex = mapping_value(&definition.config, "codex").and_then(|value| value.as_mapping());
 
@@ -517,6 +543,8 @@ pub fn resolve_config(
         max_retries: int_from_root(&definition.config, "max_retries").unwrap_or(2) as usize,
         run_tests: bool_from_root(&definition.config, "run_tests").unwrap_or(true),
         open_pull_request: bool_from_root(&definition.config, "open_pull_request").unwrap_or(true),
+        validation_command: string_from_map(validation, "command")
+            .filter(|command| !command.trim().is_empty()),
     };
     if config.max_concurrent_agents == 0 {
         return Err(SymphonyError::InvalidConfig(
@@ -532,6 +560,9 @@ pub fn resolve_config(
         return Err(SymphonyError::InvalidConfig(
             "codex.command must not be empty".to_string(),
         ));
+    }
+    if config.run_tests && config.validation_command.as_deref().is_none() {
+        tracing::warn!("run_tests is true but validation.command is empty");
     }
     Ok(config)
 }
@@ -866,6 +897,49 @@ fn branch_name(prefix: &str, issue: &NormalizedIssue) -> String {
     )
 }
 
+fn parse_changed_files(status_porcelain: &str) -> Vec<String> {
+    status_porcelain
+        .lines()
+        .filter_map(|line| {
+            let path = line.get(3..)?.trim();
+            if path.is_empty() {
+                None
+            } else if let Some((_, renamed_to)) = path.split_once(" -> ") {
+                Some(renamed_to.to_string())
+            } else {
+                Some(path.to_string())
+            }
+        })
+        .collect()
+}
+
+async fn run_validation(command: &str, repo_path: &Path) -> Result<String, SymphonyError> {
+    let output = Command::new("/bin/sh")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(repo_path)
+        .output()
+        .await?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let combined = match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout,
+        (true, false) => stderr,
+        (false, false) => format!("{stdout}\n{stderr}"),
+    };
+    if output.status.success() {
+        Ok(combined)
+    } else {
+        Err(SymphonyError::CommandFailed {
+            program: "/bin/sh".to_string(),
+            args: vec!["-lc".to_string(), command.to_string()],
+            status: output.status.code().unwrap_or(1),
+            stderr: combined,
+        })
+    }
+}
+
 async fn write_report(
     config: &WorkflowConfig,
     run_id: &str,
@@ -874,6 +948,8 @@ async fn write_report(
     branch_name: &str,
     status: &str,
     pull_request_url: Option<String>,
+    changed_files: &[String],
+    validation_output: Option<String>,
     started_at: DateTime<Utc>,
 ) -> Result<RunReport, SymphonyError> {
     let ended_at = Utc::now();
@@ -881,17 +957,33 @@ async fn write_report(
         .workspace_root
         .join("reports")
         .join(format!("{run_id}.md"));
+    let changed_files_markdown = if changed_files.is_empty() {
+        "No changed files detected.".to_string()
+    } else {
+        changed_files
+            .iter()
+            .map(|file| format!("- `{file}`"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let validation_markdown = validation_output
+        .as_deref()
+        .filter(|output| !output.trim().is_empty())
+        .map(|output| format!("```text\n{}\n```", output.trim()))
+        .unwrap_or_else(|| "No validation command was run.".to_string());
     let markdown = format!(
-		"# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Validation\n- Rust runner completed its orchestration path.\n- Codex and git output were streamed as structured events when enabled.\n",
-		issue.repo,
-		issue.identifier,
-		issue.title,
-		workspace.display(),
-		pull_request_url.clone().unwrap_or_else(|| "None".to_string()),
-		started_at.to_rfc3339(),
-		ended_at.to_rfc3339(),
-		issue.description.clone().unwrap_or_default()
-	);
+        "# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Changed Files\n{}\n\n## Validation\n{}\n",
+        issue.repo,
+        issue.identifier,
+        issue.title,
+        workspace.display(),
+        pull_request_url.clone().unwrap_or_else(|| "None".to_string()),
+        started_at.to_rfc3339(),
+        ended_at.to_rfc3339(),
+        issue.description.clone().unwrap_or_default(),
+        changed_files_markdown,
+        validation_markdown
+    );
     fs::write(&report_path, markdown).await?;
     Ok(RunReport {
         run_id: run_id.to_string(),
@@ -902,6 +994,8 @@ async fn write_report(
         status: status.to_string(),
         pull_request_url,
         report_path,
+        changed_files: changed_files.to_vec(),
+        validation_output,
         started_at,
         ended_at,
     })
@@ -1035,5 +1129,31 @@ Hello {{ issue.title }}
     fn branch_names_are_deterministic() {
         let issue = mock_issue("charlie/auditorium", 42);
         assert!(branch_name("auditorium", &issue).starts_with("auditorium/issue-42-"));
+    }
+
+    #[test]
+    fn parses_validation_command() {
+        let workflow = parse_workflow(
+            r#"---
+validation:
+  command: "cargo test --all-targets"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(
+            config.validation_command.as_deref(),
+            Some("cargo test --all-targets")
+        );
+    }
+
+    #[test]
+    fn parses_changed_files_from_porcelain_status() {
+        let files = parse_changed_files(" M README.md\n?? src/main.rs\nR  old.rs -> new.rs\n");
+
+        assert_eq!(files, vec!["README.md", "src/main.rs", "new.rs"]);
     }
 }

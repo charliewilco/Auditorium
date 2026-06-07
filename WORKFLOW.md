@@ -7,6 +7,8 @@ polling:
   interval_ms: 30000
 workspace:
   root: ".auditorium/symphony-workspaces"
+validation:
+  command: "cargo test --all-targets"
 agent:
   max_concurrent_agents: 3
   max_turns: 1
