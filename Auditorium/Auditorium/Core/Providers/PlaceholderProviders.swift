@@ -88,10 +88,12 @@ final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 	let kind = IssueProviderKind.githubIssues
 	let authentication = ProviderAuthenticationDescriptor(method: .oauth, displayName: "GitHub OAuth", oauth: GitHubOAuth.descriptor)
 	private let repositoryFullName: String?
+	private let issueFilter: GitHubIssueFilter
 	private let client: GitHubAPIClient?
 
-	init(repositoryFullName: String? = nil, token: String? = nil, client: GitHubAPIClient? = nil) {
+	init(repositoryFullName: String? = nil, issueFilter: GitHubIssueFilter = GitHubIssueFilter(), token: String? = nil, client: GitHubAPIClient? = nil) {
 		self.repositoryFullName = repositoryFullName
+		self.issueFilter = issueFilter
 		if let client {
 			self.client = client
 		} else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
@@ -102,7 +104,11 @@ final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 	}
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor] {
-		try await requireClient().listIssues(repositoryFullName: resolvedRepository(projectID: projectID))
+		try await requireClient().listIssues(repositoryFullName: resolvedRepository(projectID: projectID), filter: issueFilter)
+	}
+
+	func fetchTicket(projectID: String, ticketID: String) async throws -> TicketDescriptor {
+		try await requireClient().issue(repositoryFullName: resolvedRepository(projectID: projectID), issueNumber: ticketID)
 	}
 
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {

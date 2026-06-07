@@ -26,13 +26,36 @@ struct GitHubAPIClient: Sendable {
 	}
 
 	func listRepositories() async throws -> [RepositoryDescriptor] {
-		let repositories: [GitHubRepositoryPayload] = try await get(path: "/user/repos?per_page=100&sort=pushed")
+		let repositories: [GitHubRepositoryPayload] = try await get(path: "/user/repos", queryItems: [
+			URLQueryItem(name: "per_page", value: "100"),
+			URLQueryItem(name: "sort", value: "pushed")
+		])
 		return repositories.map(\.descriptor)
 	}
 
-	func listIssues(repositoryFullName: String) async throws -> [TicketDescriptor] {
-		let issues: [GitHubIssuePayload] = try await get(path: "/repos/\(repositoryFullName)/issues?state=open&per_page=100")
+	func listIssues(repositoryFullName: String, filter: GitHubIssueFilter = GitHubIssueFilter()) async throws -> [TicketDescriptor] {
+		var page = 1
+		var issues: [GitHubIssuePayload] = []
+		var hasNextPage = true
+		while hasNextPage {
+			let pageItems = filter.queryItems + [
+				URLQueryItem(name: "per_page", value: "100"),
+				URLQueryItem(name: "page", value: String(page))
+			]
+			let response: ([GitHubIssuePayload], HTTPURLResponse) = try await getWithResponse(path: "/repos/\(repositoryFullName)/issues", queryItems: pageItems)
+			issues.append(contentsOf: response.0)
+			hasNextPage = response.1.hasGitHubNextPage
+			page += 1
+		}
 		return issues.filter { $0.pullRequest == nil }.map { $0.descriptor(repositoryFullName: repositoryFullName) }
+	}
+
+	func issue(repositoryFullName: String, issueNumber: String) async throws -> TicketDescriptor {
+		let issue: GitHubIssuePayload = try await get(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)")
+		guard issue.pullRequest == nil else {
+			throw ProviderError.unavailable("GitHub issue \(issueNumber) is a pull request, not an issue.")
+		}
+		return issue.descriptor(repositoryFullName: repositoryFullName)
 	}
 
 	func addComment(repositoryFullName: String, issueNumber: String, body: String) async throws {
@@ -70,23 +93,43 @@ struct GitHubAPIClient: Sendable {
 		return granted
 	}
 
-	private func get<Value: Decodable>(path: String) async throws -> Value {
-		try await send(path: path, method: "GET", body: Optional<String>.none)
+	private func get<Value: Decodable>(path: String, queryItems: [URLQueryItem] = []) async throws -> Value {
+		try await send(path: path, queryItems: queryItems, method: "GET", body: Optional<String>.none)
+	}
+
+	private func getWithResponse<Value: Decodable>(path: String, queryItems: [URLQueryItem]) async throws -> (Value, HTTPURLResponse) {
+		try await sendWithResponse(path: path, queryItems: queryItems, method: "GET", body: Optional<String>.none)
 	}
 
 	private func send<Body: Encodable, Value: Decodable>(path: String, method: String, body: Body?) async throws -> Value {
-		var request = try makeRequest(path: path, method: method)
+		try await send(path: path, queryItems: [], method: method, body: body)
+	}
+
+	private func send<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?) async throws -> Value {
+		let response: (Value, HTTPURLResponse) = try await sendWithResponse(path: path, queryItems: queryItems, method: method, body: body)
+		return response.0
+	}
+
+	private func sendWithResponse<Body: Encodable, Value: Decodable>(path: String, queryItems: [URLQueryItem], method: String, body: Body?) async throws -> (Value, HTTPURLResponse) {
+		var request = try makeRequest(path: path, queryItems: queryItems, method: method)
 		if let body {
 			request.httpBody = try JSONEncoder().encode(body)
 			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 		}
 		let (data, response) = try await transport.send(request)
 		try validate(response: response)
-		return try JSONDecoder.github.decode(Value.self, from: data)
+		return (try JSONDecoder.github.decode(Value.self, from: data), response)
 	}
 
-	private func makeRequest(path: String, method: String) throws -> URLRequest {
-		guard let url = URL(string: path, relativeTo: baseURL) else {
+	private func makeRequest(path: String, queryItems: [URLQueryItem] = [], method: String) throws -> URLRequest {
+		guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+			throw ProviderError.unavailable("Invalid GitHub API path: \(path)")
+		}
+		let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+		let requestPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+		components.path = "/" + [basePath, requestPath].filter { $0.isEmpty == false }.joined(separator: "/")
+		components.queryItems = queryItems.isEmpty ? nil : queryItems
+		guard let url = components.url else {
 			throw ProviderError.unavailable("Invalid GitHub API path: \(path)")
 		}
 		var request = URLRequest(url: url)
@@ -99,11 +142,33 @@ struct GitHubAPIClient: Sendable {
 
 	private func validate(response: HTTPURLResponse) throws {
 		guard (200..<300).contains(response.statusCode) else {
+			if response.isGitHubRateLimited {
+				throw ProviderError.unavailable("GitHub API rate limit is exhausted\(response.githubRateLimitResetDescription).")
+			}
 			if response.statusCode == 401 || response.statusCode == 403 {
 				throw ProviderError.unavailable("GitHub credentials are missing, expired, or unauthorized.")
 			}
 			throw ProviderError.unavailable("GitHub API request failed with HTTP \(response.statusCode).")
 		}
+	}
+}
+
+private extension HTTPURLResponse {
+	var hasGitHubNextPage: Bool {
+		value(forHTTPHeaderField: "Link")?.contains("rel=\"next\"") == true
+	}
+
+	var isGitHubRateLimited: Bool {
+		(statusCode == 403 || statusCode == 429) && value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0"
+	}
+
+	var githubRateLimitResetDescription: String {
+		guard let reset = value(forHTTPHeaderField: "X-RateLimit-Reset"),
+			  let interval = TimeInterval(reset) else {
+			return "."
+		}
+		let date = Date(timeIntervalSince1970: interval)
+		return " until \(ISO8601DateFormatter().string(from: date))."
 	}
 }
 

@@ -245,13 +245,18 @@ struct AuditoriumTests {
 			}
 		]
 		"""
-		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
+		let transport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: payload)])
+		let client = GitHubAPIClient(token: "test", transport: transport)
 		let provider = GitHubRepositoryProvider(client: client)
 
 		let repositories = try await provider.listRepositories()
+		let requestURLs = await transport.requestedURLs()
+		let firstQuery = URLComponents(url: try #require(requestURLs.first), resolvingAgainstBaseURL: false)?.queryItems ?? []
 
 		#expect(repositories.map(\.fullName) == ["charliewilco/Auditorium"])
 		#expect(repositories.first?.defaultBranch == "main")
+		#expect(firstQuery.first(named: "per_page")?.value == "100")
+		#expect(firstQuery.first(named: "sort")?.value == "pushed")
 	}
 
 	@Test func githubIssueProviderNormalizesIssuesAndSkipsPullRequests() async throws {
@@ -294,6 +299,120 @@ struct AuditoriumTests {
 		#expect(tickets.first?.externalID == "42")
 		#expect(tickets.first?.labels == ["agent"])
 		#expect(tickets.first?.assignee == "charliewilco")
+	}
+
+	@Test func githubIssueProviderAppliesFilterAndPaginatesIssues() async throws {
+		let pageOne = """
+		[
+			{
+				"id": 123,
+				"number": 42,
+				"title": "Implement runner",
+				"body": "Ship the flow",
+				"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+				"state": "open",
+				"labels": [{ "name": "ready for agent" }],
+				"assignees": [{ "login": "octo" }],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z"
+			}
+		]
+		"""
+		let pageTwo = """
+		[
+			{
+				"id": 124,
+				"number": 43,
+				"title": "Second issue",
+				"body": "Continue the flow",
+				"html_url": "https://github.com/charliewilco/Auditorium/issues/43",
+				"state": "closed",
+				"labels": [{ "name": "ready for agent" }],
+				"assignees": [],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z"
+			},
+			{
+				"id": 125,
+				"number": 44,
+				"title": "Pull request",
+				"body": "",
+				"html_url": "https://github.com/charliewilco/Auditorium/pull/44",
+				"state": "open",
+				"labels": [],
+				"assignees": [],
+				"created_at": "2026-06-06T12:00:00Z",
+				"updated_at": "2026-06-06T13:00:00Z",
+				"pull_request": {}
+			}
+		]
+		"""
+		let transport = RecordingGitHubTransport(responses: [
+			MockGitHubResponse(payload: pageOne, headers: ["Link": "<https://api.github.com/repos/charliewilco/Auditorium/issues?page=2>; rel=\"next\""]),
+			MockGitHubResponse(payload: pageTwo)
+		])
+		let client = GitHubAPIClient(token: "test", transport: transport)
+		let provider = GitHubIssueTrackerProvider(
+			repositoryFullName: "charliewilco/Auditorium",
+			issueFilter: GitHubIssueFilter(rawValue: "state:all label:\"ready for agent\" assignee:octo sort:updated direction:asc"),
+			client: client
+		)
+
+		let tickets = try await provider.listTickets(projectID: "ignored")
+		let requestURLs = await transport.requestedURLs()
+		let firstQuery = URLComponents(url: try #require(requestURLs.first), resolvingAgainstBaseURL: false)?.queryItems ?? []
+
+		#expect(tickets.map(\.externalID) == ["42", "43"])
+		#expect(requestURLs.count == 2)
+		#expect(firstQuery.first(named: "state")?.value == "all")
+		#expect(firstQuery.first(named: "labels")?.value == "ready for agent")
+		#expect(firstQuery.first(named: "assignee")?.value == "octo")
+		#expect(firstQuery.first(named: "sort")?.value == "updated")
+		#expect(firstQuery.first(named: "direction")?.value == "asc")
+		#expect(firstQuery.first(named: "page")?.value == "1")
+	}
+
+	@Test func githubIssueProviderFetchesIssueDetails() async throws {
+		let payload = """
+		{
+			"id": 123,
+			"number": 42,
+			"title": "Implement runner",
+			"body": "Ship the flow",
+			"html_url": "https://github.com/charliewilco/Auditorium/issues/42",
+			"state": "open",
+			"labels": [{ "name": "agent" }],
+			"assignees": [{ "login": "charliewilco" }],
+			"created_at": "2026-06-06T12:00:00Z",
+			"updated_at": "2026-06-06T13:00:00Z"
+		}
+		"""
+		let client = GitHubAPIClient(token: "test", transport: MockGitHubTransport(payload: payload))
+		let provider = GitHubIssueTrackerProvider(repositoryFullName: "charliewilco/Auditorium", client: client)
+
+		let ticket = try await provider.fetchTicket(projectID: "ignored", ticketID: "42")
+
+		#expect(ticket.externalID == "42")
+		#expect(ticket.title == "Implement runner")
+		#expect(ticket.webURL?.absoluteString == "https://github.com/charliewilco/Auditorium/issues/42")
+	}
+
+	@Test func githubAPIClientReportsRateLimitErrors() async {
+		let reset = String(Int(Date(timeIntervalSince1970: 1_780_000_000).timeIntervalSince1970))
+		let client = GitHubAPIClient(
+			token: "test",
+			transport: MockGitHubTransport(payload: "{}", statusCode: 403, headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": reset])
+		)
+		var message = ""
+
+		do {
+			_ = try await client.listIssues(repositoryFullName: "charliewilco/Auditorium")
+		} catch {
+			message = error.localizedDescription
+		}
+
+		#expect(message.contains("rate limit"))
+		#expect(message.contains("2026"))
 	}
 
 	@Test func projectIssueImportCreatesAndUpdatesTicketsWithoutDuplicates() async throws {
@@ -1135,6 +1254,51 @@ private struct MockGitHubTransport: GitHubAPITransport {
 			headerFields: headers
 		)!
 		return (Data(payload.utf8), response)
+	}
+}
+
+private struct MockGitHubResponse: Sendable {
+	let payload: String
+	let statusCode: Int
+	let headers: [String: String]
+
+	init(payload: String, statusCode: Int = 200, headers: [String: String] = [:]) {
+		self.payload = payload
+		self.statusCode = statusCode
+		self.headers = headers
+	}
+}
+
+private actor RecordingGitHubTransport: GitHubAPITransport {
+	private var responses: [MockGitHubResponse]
+	private var urls: [URL] = []
+
+	init(responses: [MockGitHubResponse]) {
+		self.responses = responses
+	}
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		if let url = request.url {
+			urls.append(url)
+		}
+		let response = responses.isEmpty ? MockGitHubResponse(payload: "[]", statusCode: 500) : responses.removeFirst()
+		let httpResponse = HTTPURLResponse(
+			url: request.url ?? URL(string: "https://api.github.com")!,
+			statusCode: response.statusCode,
+			httpVersion: nil,
+			headerFields: response.headers
+		)!
+		return (Data(response.payload.utf8), httpResponse)
+	}
+
+	func requestedURLs() -> [URL] {
+		urls
+	}
+}
+
+private extension [URLQueryItem] {
+	func first(named name: String) -> URLQueryItem? {
+		first { $0.name == name }
 	}
 }
 

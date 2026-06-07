@@ -101,14 +101,14 @@ Acceptance gate:
 ## 5. GitHub Issues Provider
 
 - [x] List issues for selected repository.
-- [ ] Support issue filter/query for v0.
-- [ ] Fetch issue details.
+- [x] Support issue filter/query for v0.
+- [x] Fetch issue details.
 - [x] Normalize issue number, node ID, title, body, labels, assignees, URL, timestamps, and state.
 - [x] Add issue comments.
 - [ ] Optionally add/update labels when workflow policy allows.
 - [x] Avoid closing issues automatically in v0.
-- [ ] Add pagination handling.
-- [ ] Add rate-limit/error handling.
+- [x] Add pagination handling.
+- [x] Add rate-limit/error handling.
 - [x] Add tests with mocked GitHub API responses.
 
 Acceptance gate:

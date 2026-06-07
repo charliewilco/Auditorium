@@ -37,7 +37,9 @@ struct ProviderRegistry {
 	func issueTrackerProvider(for project: Project, context: ModelContext) throws -> any IssueTrackerProvider {
 		switch project.issueProviderKind {
 		case .githubIssues:
-			return GitHubIssueTrackerProvider(repositoryFullName: project.repositoryName, token: try githubToken(for: project, context: context))
+			let issueTracker = try context.fetch(FetchDescriptor<IssueTrackerRecord>())
+				.first { $0.projectID == project.id && $0.provider == .githubIssues }
+			return GitHubIssueTrackerProvider(repositoryFullName: project.repositoryName, issueFilter: GitHubIssueFilter(rawValue: issueTracker?.filterName), token: try githubToken(for: project, context: context))
 		case .linear:
 			return LinearIssueTrackerProvider()
 		case .asana:
