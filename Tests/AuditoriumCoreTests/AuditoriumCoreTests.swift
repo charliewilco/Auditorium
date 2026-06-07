@@ -325,6 +325,58 @@ struct AuditoriumCoreTests {
 		#expect(markdown.contains("[orchestration] Dry run validated 0 enabled queue items."))
 	}
 
+	@Test func reportGeneratorIncludesCrossTicketFindings() {
+		let project = Project(
+			name: "Coordination Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let run = RunRecord(projectID: project.id, status: .completed, totalTickets: 1, completedTickets: 1, summary: "Done.")
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "1",
+			title: "Coordinate runtime",
+			body: "",
+			status: .completed,
+			labels: ["runtime"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/1",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		let message = CoordinationMessageRecord(
+			runID: run.id,
+			externalMessageID: "coord-1",
+			sourceIssueNumber: 1,
+			targetIssueNumber: 4,
+			kind: "finding",
+			summary: "Runtime request shape overlaps.",
+			changedFiles: ["RuntimeExecutionRequest.swift"]
+		)
+
+		let markdown = ReportGenerator().generate(
+			project: project,
+			run: run,
+			ticketRuns: [],
+			tickets: [ticket],
+			pullRequests: [],
+			events: [],
+			coordinationMessages: [message]
+		)
+
+		#expect(markdown.contains("## Cross-ticket Findings"))
+		#expect(markdown.contains("[finding] 1: Coordinate runtime -> #4"))
+		#expect(markdown.contains("RuntimeExecutionRequest.swift"))
+	}
+
 	@Test func reportActionsCopyExportAndRevealUseDurableReportData() throws {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }

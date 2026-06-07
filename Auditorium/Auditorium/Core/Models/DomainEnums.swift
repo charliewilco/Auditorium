@@ -265,6 +265,7 @@ enum EventCategory: String, CaseIterable, Codable, Identifiable, Sendable {
 	case tests
 	case pullRequest
 	case report
+	case coordination
 
 	var id: String { rawValue }
 }

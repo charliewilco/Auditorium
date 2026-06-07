@@ -644,9 +644,10 @@ struct AuditoriumTests {
 		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
 		let environmentSecrets = try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>())
+		let coordinationMessages = try context.fetch(FetchDescriptor<CoordinationMessageRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 6)
-		#expect(AppSchema.MigrationPlan.stages.count == 5)
+		#expect(AppSchema.MigrationPlan.schemas.count == 7)
+		#expect(AppSchema.MigrationPlan.stages.count == 6)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
@@ -662,6 +663,7 @@ struct AuditoriumTests {
 		#expect(reports.first?.runID == ids.runID)
 		#expect(accounts.first?.displayName == "GitHub")
 		#expect(environmentSecrets.isEmpty)
+		#expect(coordinationMessages.isEmpty)
 		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
 	}
 
@@ -723,14 +725,22 @@ struct AuditoriumTests {
 			displayName: "GitHub",
 			keychainAccount: "gho_1234567890abcdefghijklmnopqrst"
 		)
+		let coordinationMessage = CoordinationMessageRecord(
+			runID: UUID(),
+			externalMessageID: "coord-1",
+			sourceIssueNumber: 1,
+			kind: "finding",
+			summary: "Leaked github_pat_1234567890abcdefghijklmnopqrst into handoff."
+		)
 		context.insert(ticket)
 		context.insert(account)
+		context.insert(coordinationMessage)
 		try context.save()
 
 		let issues = try ModelIntegrityValidator.validate(context: context)
 		let secretFields = Set(issues.filter { $0.reason.contains("secret") }.map { "\($0.model).\($0.field)" })
 
-		#expect(secretFields == Set(["TicketRecord.body", "ProviderAccountRecord.keychainAccount"]))
+		#expect(secretFields == Set(["TicketRecord.body", "ProviderAccountRecord.keychainAccount", "CoordinationMessageRecord.summary"]))
 	}
 
 	@Test func projectCreationRejectsPersistedSecretMaterial() throws {
@@ -2298,13 +2308,14 @@ struct AuditoriumTests {
 	@Test func symphonyRunnerDecodesEventsAndSummary() throws {
 		let output = """
 			{"level":"info","category":"orchestration","message":"run_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#42"}}
-			{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"/tmp/work","branch_name":"auditorium/issue-42","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/1","report_path":"/tmp/report.md"}
+			{"run_id":"run-1","repo":"charliewilco/Auditorium","issue":{"number":42},"workspace_path":"/tmp/work","branch_name":"auditorium/issue-42","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/1","report_path":"/tmp/report.md"}
 			"""
 
 		let result = try SymphonyCLIProcessRunner().decode(output: output)
 
 		#expect(result.events.count == 1)
 		#expect(result.events.first?.message == "run_started")
+		#expect(result.summary?.issueNumber == 42)
 		#expect(result.summary?.branchName == "auditorium/issue-42")
 		#expect(result.summary?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/1")
 	}
@@ -2320,6 +2331,24 @@ struct AuditoriumTests {
 		#expect(event.category == "agent")
 		#expect(event.message == "agent_finished")
 		#expect(event.metadataJSON.contains("ticket"))
+	}
+
+	@Test func symphonyRunnerDecodesQueueEventsCoordinationAndSummaries() throws {
+		let output = """
+			{"level":"info","category":"orchestration","message":"queue_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#1"}}
+			{"type":"coordination","coordinationMessageID":"coord-1","runID":"queue-1","ticketRunID":"queue-1-issue-1","issue":1,"sourceIssue":1,"targetIssue":4,"kind":"finding","summary":"Shared runtime code touched.","changedFiles":["Runtime.swift"],"labels":["runtime"],"keywords":["runtime"],"workspacePath":"/tmp/work","branchName":"auditorium/issue-1","createdAt":"2026-06-06T12:00:01Z"}
+			{"run_id":"queue-1","repo":"charliewilco/Auditorium","issue":{"number":1},"workspace_path":"/tmp/work-1","branch_name":"auditorium/issue-1","status":"completed","pull_request_url":null,"report_path":"/tmp/report-1.md"}
+			{"run_id":"queue-1","repo":"charliewilco/Auditorium","issue":{"number":4},"workspace_path":"/tmp/work-4","branch_name":"auditorium/issue-4","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/4","report_path":"/tmp/report-4.md"}
+			"""
+
+		let result = try SymphonyCLIProcessRunner().decodeQueue(output: output)
+
+		#expect(result.events.map(\.message) == ["queue_started"])
+		#expect(result.coordinationMessages.count == 1)
+		#expect(result.coordinationMessages.first?.sourceIssue == 1)
+		#expect(result.coordinationMessages.first?.targetIssue == 4)
+		#expect(result.summaries.map(\.issueNumber) == [1, 4])
+		#expect(result.summaries.last?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/4")
 	}
 
 	@Test func symphonyRunnerDecodesDoctorStatus() {
@@ -2626,7 +2655,7 @@ struct AuditoriumTests {
 			done
 			mkdir -p '\(workspacePath)'
 			printf '# Fake Report\\n' > '\(reportPath)'
-			printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
+			printf '%s\\n' '{"run_id":"run-1","repo":"charliewilco/Auditorium","issue":{"number":7},"workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-7","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/7","report_path":"\(reportPath)"}'
 			"""
 		try script.write(to: fakeSymphony, atomically: true, encoding: .utf8)
 		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path())
@@ -2724,7 +2753,8 @@ struct AuditoriumTests {
 			mkdir -p '\(workspacePath)'
 			printf '# App Symphony Report\\n' > '\(reportPath)'
 			printf '%s\\n' '{"level":"info","category":"agent","message":"app_symphony_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"ticket":"8"}}'
-			printf '%s\\n' '{"run_id":"run-8","repo":"charliewilco/Auditorium","workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-8","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/8","report_path":"\(reportPath)"}'
+			printf '%s\\n' '{"type":"coordination","coordinationMessageID":"coord-8","runID":"run-8","ticketRunID":"run-8-issue-8","issue":8,"sourceIssue":8,"targetIssue":8,"kind":"finding","summary":"Shared app orchestration path observed.","changedFiles":["Orchestrator.swift"],"labels":["app"],"keywords":["orchestration"],"workspacePath":"\(workspacePath)","branchName":"auditorium/issue-8","createdAt":"2026-06-06T12:00:01Z"}'
+			printf '%s\\n' '{"run_id":"run-8","repo":"charliewilco/Auditorium","issue":{"number":8},"workspace_path":"\(workspacePath)","branch_name":"auditorium/issue-8","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/8","report_path":"\(reportPath)"}'
 			"""
 		try script.write(to: fakeSymphony, atomically: true, encoding: .utf8)
 		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path())
@@ -2806,6 +2836,7 @@ struct AuditoriumTests {
 		let finalRun = try #require(run)
 		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let coordinationMessages = try context.fetch(FetchDescriptor<CoordinationMessageRecord>())
 		let arguments = try String(contentsOfFile: argumentsPath, encoding: .utf8)
 
 		#expect(finalRun.status == .completed)
@@ -2814,7 +2845,12 @@ struct AuditoriumTests {
 		#expect(ticketRun.status == .needsReview)
 		#expect(ticketRun.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/8")
 		#expect(events.contains { $0.message == "app_symphony_started" })
-		#expect(arguments.contains("symphony\nrun\n"))
+		#expect(coordinationMessages.count == 1)
+		#expect(coordinationMessages.first?.summary == "Shared app orchestration path observed.")
+		#expect(finalRun.reportMarkdown.contains("## Cross-ticket Findings"))
+		#expect(finalRun.reportMarkdown.contains("Orchestrator.swift"))
+		#expect(arguments.contains("symphony\nrun-queue\n"))
+		#expect(arguments.contains("--issues\n8\n"))
 	}
 
 	@Test func localWorkspaceCodexOrchestratorCommitsPushesAndStoresPullRequest() async throws {

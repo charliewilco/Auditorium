@@ -7,7 +7,8 @@ struct ReportGenerator {
 		ticketRuns: [TicketRunRecord],
 		tickets: [TicketRecord],
 		pullRequests: [PullRequestRecord],
-		events: [RuntimeEventRecord]
+		events: [RuntimeEventRecord],
+		coordinationMessages: [CoordinationMessageRecord] = []
 	) -> String {
 		let ended = run.endedAt ?? .now
 		let duration = ended.timeIntervalSince(run.startedAt)
@@ -51,6 +52,7 @@ struct ReportGenerator {
 			markdown += "\n| None | None | None | None | None | 0% |"
 		}
 
+		markdown += coordinationSection(messages: coordinationMessages, tickets: tickets)
 		markdown += "\n\n## Completed Tickets"
 		for ticketRun in ticketRuns where ticketRun.status == .completed || ticketRun.status == .needsReview {
 			let ticket = tickets.first { $0.id == ticketRun.ticketID }
@@ -229,6 +231,21 @@ struct ReportGenerator {
 		return "\n\n## Suggested Actions\n" + actions.joined(separator: "\n")
 	}
 
+	private func coordinationSection(messages: [CoordinationMessageRecord], tickets: [TicketRecord]) -> String {
+		guard messages.isEmpty == false else {
+			return "\n\n## Cross-ticket Findings\nNo cross-ticket findings were recorded."
+		}
+		var markdown = "\n\n## Cross-ticket Findings"
+		for message in messages.sorted(by: { $0.createdAt < $1.createdAt }) {
+			let sourceTicket = tickets.first { githubIssueNumber(from: $0.externalID) == message.sourceIssueNumber }
+			let source = sourceTicket.map { "\($0.externalID): \($0.title)" } ?? "#\(message.sourceIssueNumber)"
+			let target = message.targetIssueNumber.map { "#\($0)" } ?? "run"
+			let changedFiles = message.changedFiles.isEmpty ? "No changed files recorded." : message.changedFiles.joined(separator: ", ")
+			markdown += "\n- [\(message.kindRaw)] \(source) -> \(target): \(message.summary) Changed files: \(changedFiles)"
+		}
+		return markdown
+	}
+
 	private func formatDuration(_ seconds: TimeInterval) -> String {
 		let whole = max(0, Int(seconds))
 		let minutes = whole / 60
@@ -252,5 +269,16 @@ struct ReportGenerator {
 			return "No ticket events recorded"
 		}
 		return "[\(event.category.rawValue)] \(event.message)"
+	}
+
+	private func githubIssueNumber(from externalID: String) -> Int? {
+		let trimmed = externalID.trimmingCharacters(in: .whitespacesAndNewlines)
+		if let number = Int(trimmed) {
+			return number
+		}
+		if trimmed.hasPrefix("#"), let number = Int(trimmed.dropFirst()) {
+			return number
+		}
+		return nil
 	}
 }

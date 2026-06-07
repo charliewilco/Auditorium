@@ -483,6 +483,79 @@ final class RuntimeEventRecord {
 }
 
 @Model
+final class CoordinationMessageRecord {
+	var id: UUID
+	var runID: UUID
+	var ticketRunID: UUID?
+	var externalMessageID: String
+	var sourceIssueNumber: Int
+	var targetIssueNumber: Int?
+	var kindRaw: String
+	var summary: String
+	var changedFilesJSON: String
+	var labelsJSON: String
+	var keywordsJSON: String
+	var workspacePath: String
+	var branchName: String
+	var createdAt: Date
+
+	init(
+		id: UUID = UUID(),
+		runID: UUID,
+		ticketRunID: UUID? = nil,
+		externalMessageID: String,
+		sourceIssueNumber: Int,
+		targetIssueNumber: Int? = nil,
+		kind: String,
+		summary: String,
+		changedFiles: [String] = [],
+		labels: [String] = [],
+		keywords: [String] = [],
+		workspacePath: String = "",
+		branchName: String = "",
+		createdAt: Date = .now
+	) {
+		self.id = id
+		self.runID = runID
+		self.ticketRunID = ticketRunID
+		self.externalMessageID = externalMessageID
+		self.sourceIssueNumber = sourceIssueNumber
+		self.targetIssueNumber = targetIssueNumber
+		self.kindRaw = kind
+		self.summary = summary
+		self.changedFilesJSON = Self.encodeList(changedFiles)
+		self.labelsJSON = Self.encodeList(labels)
+		self.keywordsJSON = Self.encodeList(keywords)
+		self.workspacePath = workspacePath
+		self.branchName = branchName
+		self.createdAt = createdAt
+	}
+
+	var changedFiles: [String] {
+		get { Self.decodeList(changedFilesJSON) }
+		set { changedFilesJSON = Self.encodeList(newValue) }
+	}
+
+	var labels: [String] {
+		get { Self.decodeList(labelsJSON) }
+		set { labelsJSON = Self.encodeList(newValue) }
+	}
+
+	var keywords: [String] {
+		get { Self.decodeList(keywordsJSON) }
+		set { keywordsJSON = Self.encodeList(newValue) }
+	}
+
+	private static func encodeList(_ values: [String]) -> String {
+		(try? String(data: JSONEncoder().encode(values), encoding: .utf8)) ?? "[]"
+	}
+
+	private static func decodeList(_ json: String) -> [String] {
+		(try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+	}
+}
+
+@Model
 final class ReportRecord {
 	var id: UUID
 	var projectID: UUID

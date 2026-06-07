@@ -177,132 +177,159 @@ final class Orchestrator {
 		let run = lifecycle.run
 		let ticketRuns = lifecycle.ticketRuns
 
+		var ticketsByIssueNumber: [Int: TicketRecord] = [:]
+		var ticketRunsByIssueNumber: [Int: TicketRunRecord] = [:]
 		for ticketRun in ticketRuns {
-			if Task.isCancelled {
-				try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
-				return
-			}
 			guard let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 				continue
 			}
+			let issueNumber = try githubIssueNumber(from: ticket.externalID)
+			ticketsByIssueNumber[issueNumber] = ticket
+			ticketRunsByIssueNumber[issueNumber] = ticketRun
 			ticket.status = .running
 			ticketRun.status = .running
 			ticketRun.startedAt = .now
-			try ModelIntegrityValidator.save(context: context)
+		}
+		try ModelIntegrityValidator.save(context: context)
 
-			do {
-				let issueNumber = try githubIssueNumber(from: ticket.externalID)
-				let environment = try await symphonyEnvironment(project: project, context: context)
-				let result = try await symphonyRunner.run(
-					repository: project.repositoryName,
-					issueNumber: issueNumber,
-					workflowPath: workflowURL,
-					workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id),
-					environment: environment,
-					onEvent: { event in
-						context.insert(
-							RuntimeEventRecord(
-								runID: run.id,
-								ticketRunID: ticketRun.id,
-								timestamp: event.timestamp,
-								level: EventLevel(rawValue: event.level) ?? .info,
-								category: EventCategory(rawValue: event.category) ?? .orchestration,
-								message: event.message,
-								metadataJSON: event.metadataJSON
-							)
-						)
-						try? ModelIntegrityValidator.save(context: context)
-					}
-				)
-				if result.events.isEmpty {
+		do {
+			let environment = try await symphonyEnvironment(project: project, context: context)
+			let result = try await symphonyRunner.runQueue(
+				repository: project.repositoryName,
+				issueNumbers: Array(ticketRunsByIssueNumber.keys).sorted(),
+				workflowPath: workflowURL,
+				workspaceRoot: workspaceService.workspacesDirectory(projectID: project.id),
+				environment: environment,
+				onEvent: { event in
+					let issueNumber = Self.issueNumber(from: event)
 					context.insert(
 						RuntimeEventRecord(
 							runID: run.id,
-							ticketRunID: ticketRun.id,
-							level: .warning,
-							category: .orchestration,
-							message: "symphony finished without emitting structured events."
+							ticketRunID: issueNumber.flatMap { ticketRunsByIssueNumber[$0]?.id },
+							timestamp: event.timestamp,
+							level: EventLevel(rawValue: event.level) ?? .info,
+							category: EventCategory(rawValue: event.category) ?? .orchestration,
+							message: event.message,
+							metadataJSON: event.metadataJSON
 						)
 					)
-				}
-				if let summary = result.summary {
-					ticketRun.workspacePath = summary.workspacePath
-					ticketRun.branchName = summary.branchName
-					ticketRun.pullRequestURL = summary.pullRequestURL
-					ticketRun.summary = "symphony finished with status \(summary.status)."
-					ticketRun.logPath = summary.reportPath
-					if let pullRequestURL = summary.pullRequestURL {
-						ticket.status = .needsReview
-						ticketRun.status = .needsReview
-						context.insert(
-							PullRequestRecord(
-								provider: project.repositoryProviderKind,
-								ticketRunID: ticketRun.id,
-								title: "\(ticket.externalID): \(ticket.title)",
-								url: pullRequestURL,
-								branchName: summary.branchName,
-								targetBranch: project.defaultBranch,
-								status: .open,
-								checksStatus: .pending
-							)
+					try? ModelIntegrityValidator.save(context: context)
+				},
+				onCoordinationMessage: { message in
+					context.insert(
+						CoordinationMessageRecord(
+							runID: run.id,
+							ticketRunID: ticketRunsByIssueNumber[message.sourceIssue]?.id,
+							externalMessageID: message.coordinationMessageID,
+							sourceIssueNumber: message.sourceIssue,
+							targetIssueNumber: message.targetIssue,
+							kind: message.kind,
+							summary: message.summary,
+							changedFiles: message.changedFiles,
+							labels: message.labels,
+							keywords: message.keywords,
+							workspacePath: message.workspacePath ?? "",
+							branchName: message.branchName ?? "",
+							createdAt: message.createdAt
 						)
-					}
-					else {
-						ticket.status = .completed
-						ticketRun.status = .completed
-					}
-					if let markdown = try? String(contentsOf: URL(fileURLWithPath: summary.reportPath), encoding: .utf8) {
-						context.insert(
-							ReportRecord(
-								projectID: project.id,
-								runID: run.id,
-								title: "Run \(run.id.uuidString.prefix(8))",
-								markdown: markdown,
-								filePath: summary.reportPath
-							)
-						)
-					}
+					)
+					try? ModelIntegrityValidator.save(context: context)
 				}
-				else {
-					ticket.status = .failed
-					ticketRun.status = .failed
-					ticketRun.failureReason = "symphony did not emit a run summary."
-				}
-			}
-			catch ProcessCommandError.canceled {
-				ticket.status = .canceled
-				ticketRun.status = .canceled
-				ticketRun.failureReason = "Canceled by user."
-				ticket.updatedAt = .now
-				ticketRun.endedAt = .now
+			)
+			if result.events.isEmpty {
 				context.insert(
 					RuntimeEventRecord(
 						runID: run.id,
-						ticketRunID: ticketRun.id,
 						level: .warning,
 						category: .orchestration,
-						message: "symphony run canceled."
+						message: "symphony finished without emitting structured events."
 					)
 				)
-				try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
-				return
 			}
-			catch {
-				ticket.status = .failed
+			for summary in result.summaries {
+				guard let issueNumber = summary.issueNumber,
+					let ticketRun = ticketRunsByIssueNumber[issueNumber],
+					let ticket = ticketsByIssueNumber[issueNumber]
+				else {
+					continue
+				}
+				ticketRun.workspacePath = summary.workspacePath
+				ticketRun.branchName = summary.branchName
+				ticketRun.pullRequestURL = summary.pullRequestURL
+				ticketRun.summary = "symphony finished with status \(summary.status)."
+				ticketRun.logPath = summary.reportPath
+				ticketRun.endedAt = .now
+				if let pullRequestURL = summary.pullRequestURL {
+					ticket.status = .needsReview
+					ticketRun.status = .needsReview
+					context.insert(
+						PullRequestRecord(
+							provider: project.repositoryProviderKind,
+							ticketRunID: ticketRun.id,
+							title: "\(ticket.externalID): \(ticket.title)",
+							url: pullRequestURL,
+							branchName: summary.branchName,
+							targetBranch: project.defaultBranch,
+							status: .open,
+							checksStatus: .pending
+						)
+					)
+				}
+				else {
+					ticket.status = .completed
+					ticketRun.status = .completed
+				}
+				if let markdown = try? String(contentsOf: URL(fileURLWithPath: summary.reportPath), encoding: .utf8) {
+					context.insert(
+						ReportRecord(
+							projectID: project.id,
+							runID: run.id,
+							title: "Run \(run.id.uuidString.prefix(8))",
+							markdown: markdown,
+							filePath: summary.reportPath
+						)
+					)
+				}
+			}
+			let summarizedIssueNumbers = Set(result.summaries.compactMap(\.issueNumber))
+			for issueNumber in ticketRunsByIssueNumber.keys where summarizedIssueNumbers.contains(issueNumber) == false {
+				ticketRunsByIssueNumber[issueNumber]?.status = .failed
+				ticketRunsByIssueNumber[issueNumber]?.failureReason = "symphony did not emit a run summary."
+				ticketRunsByIssueNumber[issueNumber]?.endedAt = .now
+				ticketsByIssueNumber[issueNumber]?.status = .failed
+			}
+			for ticket in ticketsByIssueNumber.values {
+				ticket.updatedAt = .now
+			}
+			try ModelIntegrityValidator.save(context: context)
+		}
+		catch ProcessCommandError.canceled {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					level: .warning,
+					category: .orchestration,
+					message: "symphony queue run canceled."
+				)
+			)
+			try cancelRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+			return
+		}
+		catch {
+			for ticketRun in ticketRuns where ticketRun.status == .running || ticketRun.status == .pending {
 				ticketRun.status = .failed
 				ticketRun.failureReason = error.localizedDescription
-				context.insert(
-					RuntimeEventRecord(
-						runID: run.id,
-						ticketRunID: ticketRun.id,
-						level: .error,
-						category: .orchestration,
-						message: error.localizedDescription
-					)
-				)
+				ticketRun.endedAt = .now
+				tickets.first { $0.id == ticketRun.ticketID }?.status = .failed
 			}
-			ticket.updatedAt = .now
-			ticketRun.endedAt = .now
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					level: .error,
+					category: .orchestration,
+					message: error.localizedDescription
+				)
+			)
 			try ModelIntegrityValidator.save(context: context)
 		}
 
@@ -441,6 +468,7 @@ final class Orchestrator {
 
 		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
+		let coordinationMessages = try context.fetch(FetchDescriptor<CoordinationMessageRecord>()).filter { $0.runID == run.id }
 		let prs = try context.fetch(FetchDescriptor<PullRequestRecord>())
 		let markdown = reportGenerator.generate(
 			project: project,
@@ -448,7 +476,8 @@ final class Orchestrator {
 			ticketRuns: ticketRuns,
 			tickets: finalTickets,
 			pullRequests: prs,
-			events: events
+			events: events,
+			coordinationMessages: coordinationMessages
 		)
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
@@ -504,6 +533,26 @@ final class Orchestrator {
 			throw ProviderError.unavailable("GitHub issue external ID must contain an issue number.")
 		}
 		return issueNumber
+	}
+
+	private static func issueNumber(from event: SymphonyCLIEvent) -> Int? {
+		if let issue = event.issue {
+			return issue
+		}
+		guard let data = event.metadataJSON.data(using: .utf8),
+			let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+			let value = metadata["issue"]
+		else {
+			return nil
+		}
+		if let number = value as? Int {
+			return number
+		}
+		if let string = value as? String {
+			let digits = string.filter(\.isNumber)
+			return Int(digits)
+		}
+		return nil
 	}
 
 	private func resolveLocalWorkspaceSourceProvider(project: Project, context: ModelContext) async throws -> any SourceCodeProvider {

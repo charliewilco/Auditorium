@@ -6,6 +6,10 @@ struct SymphonyCLIEvent: Decodable, Sendable, Equatable {
 	let message: String
 	let timestamp: Date
 	let metadataJSON: String
+	let runID: String?
+	let ticketRunID: String?
+	let issue: Int?
+	let coordinationMessageID: String?
 
 	enum CodingKeys: String, CodingKey {
 		case level
@@ -13,6 +17,10 @@ struct SymphonyCLIEvent: Decodable, Sendable, Equatable {
 		case message
 		case timestamp
 		case metadata
+		case runID
+		case ticketRunID
+		case issue
+		case coordinationMessageID
 	}
 
 	init(from decoder: Decoder) throws {
@@ -30,12 +38,17 @@ struct SymphonyCLIEvent: Decodable, Sendable, Equatable {
 		else {
 			metadataJSON = "{}"
 		}
+		runID = try container.decodeIfPresent(String.self, forKey: .runID)
+		ticketRunID = try container.decodeIfPresent(String.self, forKey: .ticketRunID)
+		issue = try container.decodeIfPresent(Int.self, forKey: .issue)
+		coordinationMessageID = try container.decodeIfPresent(String.self, forKey: .coordinationMessageID)
 	}
 }
 
 struct SymphonyRunSummary: Decodable, Sendable, Equatable {
 	let runID: String
 	let repo: String
+	let issueNumber: Int?
 	let workspacePath: String
 	let branchName: String
 	let status: String
@@ -45,17 +58,76 @@ struct SymphonyRunSummary: Decodable, Sendable, Equatable {
 	enum CodingKeys: String, CodingKey {
 		case runID = "run_id"
 		case repo
+		case issue
 		case workspacePath = "workspace_path"
 		case branchName = "branch_name"
 		case status
 		case pullRequestURL = "pull_request_url"
 		case reportPath = "report_path"
 	}
+
+	private struct IssuePayload: Decodable {
+		let number: Int
+	}
+
+	init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		runID = try container.decode(String.self, forKey: .runID)
+		repo = try container.decode(String.self, forKey: .repo)
+		issueNumber = try container.decodeIfPresent(IssuePayload.self, forKey: .issue)?.number
+		workspacePath = try container.decode(String.self, forKey: .workspacePath)
+		branchName = try container.decode(String.self, forKey: .branchName)
+		status = try container.decode(String.self, forKey: .status)
+		pullRequestURL = try container.decodeIfPresent(String.self, forKey: .pullRequestURL)
+		reportPath = try container.decode(String.self, forKey: .reportPath)
+	}
 }
 
 struct SymphonyRunResult: Sendable {
 	let events: [SymphonyCLIEvent]
 	let summary: SymphonyRunSummary?
+}
+
+struct SymphonyCoordinationMessage: Decodable, Sendable, Equatable {
+	let recordType: String
+	let coordinationMessageID: String
+	let runID: String
+	let ticketRunID: String
+	let issue: Int
+	let sourceIssue: Int
+	let targetIssue: Int?
+	let kind: String
+	let summary: String
+	let changedFiles: [String]
+	let labels: [String]
+	let keywords: [String]
+	let workspacePath: String?
+	let branchName: String?
+	let createdAt: Date
+
+	enum CodingKeys: String, CodingKey {
+		case recordType = "type"
+		case coordinationMessageID
+		case runID
+		case ticketRunID
+		case issue
+		case sourceIssue
+		case targetIssue
+		case kind
+		case summary
+		case changedFiles
+		case labels
+		case keywords
+		case workspacePath
+		case branchName
+		case createdAt
+	}
+}
+
+struct SymphonyQueueRunResult: Sendable {
+	let events: [SymphonyCLIEvent]
+	let summaries: [SymphonyRunSummary]
+	let coordinationMessages: [SymphonyCoordinationMessage]
 }
 
 struct SymphonyDoctorCheck: Sendable, Equatable, Identifiable {
@@ -147,6 +219,48 @@ struct SymphonyCLIProcessRunner {
 		return try decode(output: result.standardOutput)
 	}
 
+	func runQueue(
+		repository: String,
+		issueNumbers: [Int],
+		workflowPath: URL,
+		workspaceRoot: URL,
+		mock: Bool = false,
+		environment: [String: String] = [:],
+		onEvent: (@MainActor (SymphonyCLIEvent) async -> Void)? = nil,
+		onCoordinationMessage: (@MainActor (SymphonyCoordinationMessage) async -> Void)? = nil
+	) async throws -> SymphonyQueueRunResult {
+		var arguments = [
+			"symphony",
+			"run-queue",
+			"--repo",
+			repository,
+			"--issues",
+			issueNumbers.map(String.init).joined(separator: ","),
+			"--workflow",
+			workflowPath.path(),
+			"--workspace-root",
+			workspaceRoot.path(),
+			"--json",
+		]
+		if mock {
+			arguments.append("--mock")
+		}
+		let result = try await ProcessCommand.runStreaming(
+			executable: executablePath,
+			arguments: arguments,
+			environment: environment.isEmpty ? nil : environment,
+			onStandardOutputLine: { line in
+				if let event = try? decodeEvent(line: line) {
+					await onEvent?(event)
+				}
+				else if let message = try? decodeCoordinationMessage(line: line) {
+					await onCoordinationMessage?(message)
+				}
+			}
+		)
+		return try decodeQueue(output: result.standardOutput)
+	}
+
 	func doctor(workflowPath: URL? = nil) async -> SymphonyDoctorStatus {
 		var arguments = [
 			"symphony",
@@ -181,6 +295,12 @@ struct SymphonyCLIProcessRunner {
 		return try decoder.decode(SymphonyCLIEvent.self, from: Data(line.utf8))
 	}
 
+	func decodeCoordinationMessage(line: String) throws -> SymphonyCoordinationMessage {
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		return try decoder.decode(SymphonyCoordinationMessage.self, from: Data(line.utf8))
+	}
+
 	func decode(output: String) throws -> SymphonyRunResult {
 		let decoder = JSONDecoder()
 		decoder.dateDecodingStrategy = .iso8601
@@ -196,6 +316,27 @@ struct SymphonyCLIProcessRunner {
 			}
 		}
 		return SymphonyRunResult(events: events, summary: summary)
+	}
+
+	func decodeQueue(output: String) throws -> SymphonyQueueRunResult {
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		var events: [SymphonyCLIEvent] = []
+		var summaries: [SymphonyRunSummary] = []
+		var coordinationMessages: [SymphonyCoordinationMessage] = []
+		for line in output.components(separatedBy: .newlines) where line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+			let data = Data(line.utf8)
+			if let event = try? decoder.decode(SymphonyCLIEvent.self, from: data) {
+				events.append(event)
+			}
+			else if let message = try? decoder.decode(SymphonyCoordinationMessage.self, from: data) {
+				coordinationMessages.append(message)
+			}
+			else if let runSummary = try? decoder.decode(SymphonyRunSummary.self, from: data) {
+				summaries.append(runSummary)
+			}
+		}
+		return SymphonyQueueRunResult(events: events, summaries: summaries, coordinationMessages: coordinationMessages)
 	}
 
 	func decodeDoctor(output: String, exitCode: Int32, stderr: String) -> SymphonyDoctorStatus {

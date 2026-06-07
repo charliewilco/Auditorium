@@ -40,6 +40,7 @@ enum ModelIntegrityValidator {
 		try validateTicketRuns(context: context, issues: &issues)
 		try validatePullRequests(context: context, issues: &issues)
 		try validateRuntimeEvents(context: context, issues: &issues)
+		try validateCoordinationMessages(context: context, issues: &issues)
 		try validateReports(context: context, issues: &issues)
 		try validateProviderAccounts(context: context, issues: &issues)
 		try validateProjectEnvironmentSecrets(context: context, issues: &issues)
@@ -395,6 +396,51 @@ extension ModelIntegrityValidator {
 		}
 	}
 
+	fileprivate static func validateCoordinationMessages(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
+		for record in try context.fetch(FetchDescriptor<CoordinationMessageRecord>()) {
+			let id = record.id.uuidString
+			requireNonEmpty(
+				record.externalMessageID,
+				model: "CoordinationMessageRecord",
+				id: id,
+				field: "externalMessageID",
+				issues: &issues
+			)
+			requireNonEmpty(record.kindRaw, model: "CoordinationMessageRecord", id: id, field: "kindRaw", issues: &issues)
+			requireNonEmpty(record.summary, model: "CoordinationMessageRecord", id: id, field: "summary", issues: &issues)
+			validateJSONStringArray(
+				record.changedFilesJSON,
+				model: "CoordinationMessageRecord",
+				id: id,
+				field: "changedFilesJSON",
+				issues: &issues
+			)
+			validateJSONStringArray(record.labelsJSON, model: "CoordinationMessageRecord", id: id, field: "labelsJSON", issues: &issues)
+			validateJSONStringArray(
+				record.keywordsJSON,
+				model: "CoordinationMessageRecord",
+				id: id,
+				field: "keywordsJSON",
+				issues: &issues
+			)
+			scanSecrets(
+				[
+					("externalMessageID", record.externalMessageID),
+					("kindRaw", record.kindRaw),
+					("summary", record.summary),
+					("changedFilesJSON", record.changedFilesJSON),
+					("labelsJSON", record.labelsJSON),
+					("keywordsJSON", record.keywordsJSON),
+					("workspacePath", record.workspacePath),
+					("branchName", record.branchName),
+				],
+				model: "CoordinationMessageRecord",
+				id: id,
+				issues: &issues
+			)
+		}
+	}
+
 	fileprivate static func validateReports(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
 		for record in try context.fetch(FetchDescriptor<ReportRecord>()) {
 			let id = record.id.uuidString
@@ -508,6 +554,21 @@ extension ModelIntegrityValidator {
 	fileprivate static func requireNonNegative(_ value: Int, model: String, id: String, field: String, issues: inout [ModelIntegrityIssue]) {
 		if value < 0 {
 			issues.append(ModelIntegrityIssue(model: model, id: id, field: field, reason: "value must not be negative"))
+		}
+	}
+
+	fileprivate static func validateJSONStringArray(
+		_ value: String,
+		model: String,
+		id: String,
+		field: String,
+		issues: inout [ModelIntegrityIssue]
+	) {
+		guard let data = value.data(using: .utf8),
+			(try? JSONDecoder().decode([String].self, from: data)) != nil
+		else {
+			issues.append(ModelIntegrityIssue(model: model, id: id, field: field, reason: "value must be a JSON string array"))
+			return
 		}
 	}
 

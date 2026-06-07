@@ -62,9 +62,19 @@ enum AppSchema {
 		}
 	}
 
+	enum V7: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 6, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypes
+		}
+	}
+
 	enum MigrationPlan: SchemaMigrationPlan {
 		static var schemas: [any VersionedSchema.Type] {
-			[V1.self, V2.self, V3.self, V4.self, V5.self, V6.self]
+			[V1.self, V2.self, V3.self, V4.self, V5.self, V6.self, V7.self]
 		}
 
 		static var stages: [MigrationStage] {
@@ -74,6 +84,7 @@ enum AppSchema {
 				.lightweight(fromVersion: V3.self, toVersion: V4.self),
 				.lightweight(fromVersion: V4.self, toVersion: V5.self),
 				.lightweight(fromVersion: V5.self, toVersion: V6.self),
+				.lightweight(fromVersion: V6.self, toVersion: V7.self),
 			]
 		}
 	}
@@ -88,13 +99,14 @@ enum AppSchema {
 		TicketRunRecord.self,
 		PullRequestRecord.self,
 		RuntimeEventRecord.self,
+		CoordinationMessageRecord.self,
 		ReportRecord.self,
 		ProviderAccountRecord.self,
 		ProjectEnvironmentSecretRecord.self,
 	]
 
 	static var currentSchema: Schema {
-		Schema(versionedSchema: V6.self)
+		Schema(versionedSchema: V7.self)
 	}
 
 	static func makeModelContainer(inMemory: Bool = false, storeURL: URL? = nil) throws -> ModelContainer {

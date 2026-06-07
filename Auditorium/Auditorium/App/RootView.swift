@@ -14,6 +14,7 @@ struct RootView: View {
 	@Query(sort: \RunRecord.startedAt, order: .reverse) private var runs: [RunRecord]
 	@Query(sort: \TicketRunRecord.startedAt, order: .reverse) private var ticketRuns: [TicketRunRecord]
 	@Query(sort: \RuntimeEventRecord.timestamp, order: .reverse) private var events: [RuntimeEventRecord]
+	@Query(sort: \CoordinationMessageRecord.createdAt, order: .reverse) private var coordinationMessages: [CoordinationMessageRecord]
 	@Query(sort: \PullRequestRecord.createdAt, order: .reverse) private var pullRequests: [PullRequestRecord]
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
@@ -178,7 +179,14 @@ struct RootView: View {
 				moveItems: moveQueueItems
 			)
 		case .runs:
-			RunsView(runs: projectRuns, ticketRuns: ticketRuns, tickets: projectTickets, events: events, pullRequests: pullRequests)
+			RunsView(
+				runs: projectRuns,
+				ticketRuns: ticketRuns,
+				tickets: projectTickets,
+				events: events,
+				coordinationMessages: coordinationMessages,
+				pullRequests: pullRequests
+			)
 		case .reports:
 			ReportsView(
 				project: selectedProject,

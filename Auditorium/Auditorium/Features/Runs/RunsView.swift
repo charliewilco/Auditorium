@@ -6,6 +6,7 @@ struct RunsView: View {
 	let ticketRuns: [TicketRunRecord]
 	let tickets: [TicketRecord]
 	let events: [RuntimeEventRecord]
+	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
 
 	var body: some View {
@@ -31,6 +32,7 @@ struct RunsView: View {
 					ticketRuns: ticketRuns.filter { $0.runID == run.id },
 					tickets: tickets,
 					events: events.filter { $0.runID == run.id },
+					coordinationMessages: coordinationMessages.filter { $0.runID == run.id },
 					pullRequests: pullRequests
 				)
 			}
@@ -65,6 +67,7 @@ struct RunDetailView: View {
 	let ticketRuns: [TicketRunRecord]
 	let tickets: [TicketRecord]
 	let events: [RuntimeEventRecord]
+	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
 
 	var progress: Double {
@@ -103,6 +106,7 @@ struct RunDetailView: View {
 						tint: .indigo
 					)
 				}
+				crossTicketFindings
 				pullRequestsSection
 				ticketExecutionList
 				timeline
@@ -110,6 +114,24 @@ struct RunDetailView: View {
 			}
 			.padding()
 		}
+	}
+
+	private var crossTicketFindings: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			Text("Cross-ticket Findings")
+				.font(.headline)
+			if coordinationMessages.isEmpty {
+				Text("No coordination notes have been recorded for this run.")
+					.foregroundStyle(.secondary)
+			}
+			else {
+				ForEach(coordinationMessages.sorted { $0.createdAt < $1.createdAt }) { message in
+					CoordinationMessageRow(message: message, ticket: ticketForIssue(message.sourceIssueNumber))
+				}
+			}
+		}
+		.padding()
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
 
 	private var pullRequestsSection: some View {
@@ -161,25 +183,41 @@ struct RunDetailView: View {
 				.font(.headline)
 			ForEach(ticketRuns) { ticketRun in
 				let ticket = tickets.first { $0.id == ticketRun.ticketID }
-				HStack {
-					VStack(alignment: .leading, spacing: 4) {
-						Text(ticket?.title ?? "Unknown Ticket")
-							.font(.callout.weight(.medium))
-						Text(
-							"\(ticketRun.branchName.isEmpty ? "No branch yet" : ticketRun.branchName) • \(ticketRun.runtimeID.isEmpty ? "No runtime yet" : ticketRun.runtimeID)"
-						)
-						.font(.caption)
-						.foregroundStyle(.secondary)
+				let related = relatedMessages(for: ticketRun, ticket: ticket)
+				VStack(alignment: .leading, spacing: 8) {
+					HStack {
+						VStack(alignment: .leading, spacing: 4) {
+							Text(ticket?.title ?? "Unknown Ticket")
+								.font(.callout.weight(.medium))
+							Text(
+								"\(ticketRun.branchName.isEmpty ? "No branch yet" : ticketRun.branchName) • \(ticketRun.runtimeID.isEmpty ? "No runtime yet" : ticketRun.runtimeID)"
+							)
+							.font(.caption)
+							.foregroundStyle(.secondary)
+						}
+						Spacer()
+						if let url = ticketRun.pullRequestURL, let link = URL(string: url) {
+							Link("PR", destination: link)
+						}
+						Text("Retry \(ticketRun.retryCount)")
+							.foregroundStyle(.secondary)
+						Text("\(Int(ticketRun.confidence * 100))%")
+							.frame(width: 44, alignment: .trailing)
+						StatusBadge(title: ticketRun.status.title, tint: ticketRun.status.tint)
 					}
-					Spacer()
-					if let url = ticketRun.pullRequestURL, let link = URL(string: url) {
-						Link("PR", destination: link)
+					if related.isEmpty == false {
+						VStack(alignment: .leading, spacing: 6) {
+							Text("Related Notes")
+								.font(.caption.weight(.semibold))
+								.foregroundStyle(.secondary)
+							ForEach(related) { message in
+								CoordinationMessageRow(
+									message: message,
+									ticket: ticketForIssue(message.sourceIssueNumber)
+								)
+							}
+						}
 					}
-					Text("Retry \(ticketRun.retryCount)")
-						.foregroundStyle(.secondary)
-					Text("\(Int(ticketRun.confidence * 100))%")
-						.frame(width: 44, alignment: .trailing)
-					StatusBadge(title: ticketRun.status.title, tint: ticketRun.status.tint)
 				}
 				.padding(10)
 				.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
@@ -213,5 +251,81 @@ struct RunDetailView: View {
 		}
 		.padding()
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+	}
+
+	private func relatedMessages(for ticketRun: TicketRunRecord, ticket: TicketRecord?) -> [CoordinationMessageRecord] {
+		let issueNumber = ticket.flatMap { githubIssueNumber(from: $0.externalID) }
+		return
+			coordinationMessages
+			.filter { message in
+				message.ticketRunID == ticketRun.id || (issueNumber != nil && message.targetIssueNumber == issueNumber)
+			}
+			.sorted { $0.createdAt < $1.createdAt }
+	}
+
+	private func ticketForIssue(_ issueNumber: Int) -> TicketRecord? {
+		tickets.first { githubIssueNumber(from: $0.externalID) == issueNumber }
+	}
+
+	private func githubIssueNumber(from externalID: String) -> Int? {
+		let trimmed = externalID.trimmingCharacters(in: .whitespacesAndNewlines)
+		if let number = Int(trimmed) {
+			return number
+		}
+		if trimmed.hasPrefix("#"), let number = Int(trimmed.dropFirst()) {
+			return number
+		}
+		return nil
+	}
+}
+
+private struct CoordinationMessageRow: View {
+	let message: CoordinationMessageRecord
+	let ticket: TicketRecord?
+
+	var body: some View {
+		HStack(alignment: .top, spacing: 10) {
+			Image(systemName: symbol)
+				.foregroundStyle(.teal)
+				.frame(width: 18)
+			VStack(alignment: .leading, spacing: 3) {
+				Text("\(message.kindRaw.replacingOccurrences(of: "_", with: " ").capitalized) from \(sourceTitle)")
+					.font(.caption.weight(.semibold))
+				Text(message.summary)
+					.font(.caption)
+				if message.changedFiles.isEmpty == false {
+					Text(message.changedFiles.joined(separator: ", "))
+						.font(.caption2)
+						.foregroundStyle(.secondary)
+						.lineLimit(2)
+				}
+			}
+			Spacer()
+			if let targetIssueNumber = message.targetIssueNumber {
+				Text("-> #\(targetIssueNumber)")
+					.font(.caption2.weight(.medium))
+					.foregroundStyle(.secondary)
+			}
+		}
+	}
+
+	private var sourceTitle: String {
+		if let ticket {
+			"\(ticket.externalID): \(ticket.title)"
+		}
+		else {
+			"#\(message.sourceIssueNumber)"
+		}
+	}
+
+	private var symbol: String {
+		switch message.kindRaw {
+		case "changed_files": "doc.on.doc"
+		case "blocked_on": "hand.raised"
+		case "risk": "exclamationmark.triangle"
+		case "handoff": "arrow.triangle.branch"
+		case "summary": "text.badge.checkmark"
+		default: "lightbulb"
+		}
 	}
 }
