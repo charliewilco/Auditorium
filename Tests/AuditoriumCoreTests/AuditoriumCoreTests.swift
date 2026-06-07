@@ -1,24 +1,27 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import AuditoriumCore
 
 @MainActor
 struct AuditoriumCoreTests {
 	@Test func workflowPolicyParserReadsCorePolicyValues() throws {
-		let policy = try WorkflowPolicyParser().parse("""
-		---
-		concurrency: 4
-		max_retries: 3
-		max_retry_backoff_ms: 8000
-		branch_prefix: "codex"
-		run_tests: false
-		open_pull_request: true
-		handoff_status: "Needs Review"
-		update_issue_labels: true
-		---
-		Implement the issue.
-		""")
+		let policy = try WorkflowPolicyParser().parse(
+			"""
+			---
+			concurrency: 4
+			max_retries: 3
+			max_retry_backoff_ms: 8000
+			branch_prefix: "codex"
+			run_tests: false
+			open_pull_request: true
+			handoff_status: "Needs Review"
+			update_issue_labels: true
+			---
+			Implement the issue.
+			"""
+		)
 
 		#expect(policy.concurrency == 4)
 		#expect(policy.maxRetries == 3)
@@ -33,11 +36,29 @@ struct AuditoriumCoreTests {
 
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
-		let first = QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 2, priority: .high, isEnabled: true, concurrencyGroup: "ui")
+		let first = QueueItemRecord(
+			ticketID: UUID(),
+			projectID: projectID,
+			position: 2,
+			priority: .high,
+			isEnabled: true,
+			concurrencyGroup: "ui"
+		)
 		let disabled = QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 1, priority: .low, isEnabled: false)
-		let second = QueueItemRecord(ticketID: UUID(), projectID: projectID, position: 0, priority: .urgent, isEnabled: true, concurrencyGroup: "auth")
+		let second = QueueItemRecord(
+			ticketID: UUID(),
+			projectID: projectID,
+			position: 0,
+			priority: .urgent,
+			isEnabled: true,
+			concurrencyGroup: "auth"
+		)
 
-		let plan = OrchestrationRunPlan.make(queueItems: [first, disabled, second], requestedConcurrency: 2, workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown)
+		let plan = OrchestrationRunPlan.make(
+			queueItems: [first, disabled, second],
+			requestedConcurrency: 2,
+			workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown
+		)
 
 		#expect(plan.concurrency == 2)
 		#expect(plan.queueSnapshot.map(\.ticketID) == [second.ticketID, first.ticketID])
@@ -58,11 +79,21 @@ struct AuditoriumCoreTests {
 		let unsafePath = root.deletingLastPathComponent().appending(path: "outside-auditorium").path()
 		let ticketRuns = [
 			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: failedWorkspace.path(), status: .failed),
-			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: reviewWorkspace.path(), status: .needsReview, pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/102"),
-			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: unsafePath, status: .canceled)
+			TicketRunRecord(
+				runID: UUID(),
+				ticketID: UUID(),
+				workspacePath: reviewWorkspace.path(),
+				status: .needsReview,
+				pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/102"
+			),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: unsafePath, status: .canceled),
 		]
 
-		let result = try service.cleanupTicketWorkspaces(projectID: projectID, ticketRuns: ticketRuns, policy: .removeCanceledAndTerminalWithoutReview)
+		let result = try service.cleanupTicketWorkspaces(
+			projectID: projectID,
+			ticketRuns: ticketRuns,
+			policy: .removeCanceledAndTerminalWithoutReview
+		)
 
 		#expect(result.removed == 1)
 		#expect(result.preserved == 2)
@@ -96,16 +127,18 @@ struct AuditoriumCoreTests {
 	@Test func modelIntegrityValidatorRejectsPersistedSecretMaterial() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
-		context.insert(Project(
-			name: "Secret Project",
-			repositoryProviderKind: .github,
-			repositoryName: "charliewilco/Auditorium",
-			repositoryURL: "https://github.com/charliewilco/Auditorium?token=ghp_abcdefghijklmnopqrstuvwxyz",
-			defaultBranch: "main",
-			issueProviderKind: .githubIssues,
-			runtimeProviderKind: .mockRuntime,
-			agentProviderKind: .mockAgent
-		))
+		context.insert(
+			Project(
+				name: "Secret Project",
+				repositoryProviderKind: .github,
+				repositoryName: "charliewilco/Auditorium",
+				repositoryURL: "https://github.com/charliewilco/Auditorium?token=ghp_abcdefghijklmnopqrstuvwxyz",
+				defaultBranch: "main",
+				issueProviderKind: .githubIssues,
+				runtimeProviderKind: .mockRuntime,
+				agentProviderKind: .mockAgent
+			)
+		)
 
 		let issues = try ModelIntegrityValidator.validate(context: context)
 

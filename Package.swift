@@ -18,7 +18,7 @@ let package = Package(
 		.testTarget(
 			name: "AuditoriumCoreTests",
 			dependencies: ["AuditoriumCore"]
-		)
+		),
 	],
 	swiftLanguageModes: [.v5]
 )
