@@ -266,4 +266,44 @@ fn daemon_json_emits_one_scheduling_tick() {
     assert_eq!(values.len(), 1);
     assert_eq!(values[0]["message"], "daemon_tick_completed");
     assert_eq!(values[0]["metadata"]["project"], "project-123");
+    assert_eq!(values[0]["metadata"]["tick"], 1);
+    assert_eq!(values[0]["metadata"]["workflowRevision"], 1);
+}
+
+#[test]
+fn daemon_watch_mode_can_run_bounded_ticks() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+
+    symphony()
+        .args(["init", "--workflow"])
+        .arg(&workflow)
+        .assert()
+        .success();
+
+    let output = symphony()
+        .args(["daemon", "--project", "project-123", "--workflow"])
+        .arg(&workflow)
+        .args([
+            "--json",
+            "--watch",
+            "--max-ticks",
+            "2",
+            "--poll-interval-ms",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0]["message"], "daemon_tick_completed");
+    assert_eq!(values[1]["message"], "daemon_tick_completed");
+    assert_eq!(values[0]["metadata"]["tick"], 1);
+    assert_eq!(values[1]["metadata"]["tick"], 2);
+    assert_eq!(values[0]["metadata"]["workflowReloaded"], true);
+    assert_eq!(values[1]["metadata"]["workflowReloaded"], false);
 }

@@ -3,6 +3,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::time::sleep;
 
 const DEFAULT_WORKFLOW: &str = r#"---
 tracker:
@@ -102,6 +104,16 @@ pub struct RunOptions {
     pub mock: bool,
     pub dry_run: bool,
     pub no_pr: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DaemonOptions {
+    pub project: String,
+    pub workflow: PathBuf,
+    pub json: bool,
+    pub watch: bool,
+    pub max_ticks: Option<usize>,
+    pub poll_interval_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,20 +461,109 @@ pub async fn daemon_once(
     workflow: PathBuf,
     json_output: bool,
 ) -> Result<(), SymphonyError> {
-    let definition = load_workflow(&workflow).await?;
-    let config = resolve_config(&definition, &workflow)?;
+    daemon(DaemonOptions {
+        project,
+        workflow,
+        json: json_output,
+        watch: false,
+        max_ticks: Some(1),
+        poll_interval_ms: None,
+    })
+    .await
+}
+
+pub async fn daemon(options: DaemonOptions) -> Result<(), SymphonyError> {
+    if options.max_ticks == Some(0) {
+        return Err(SymphonyError::InvalidConfig(
+            "daemon.max_ticks must be positive when provided".to_string(),
+        ));
+    }
+
+    let mut loader = DaemonWorkflowLoader::default();
+    let max_ticks = if options.watch {
+        options.max_ticks
+    } else {
+        Some(1)
+    };
+    let mut tick = 0usize;
+
+    loop {
+        tick += 1;
+        let loaded = loader.load(&options.workflow).await?;
+        emit_daemon_tick(&options, tick, &loaded)?;
+
+        if max_ticks.is_some_and(|limit| tick >= limit) || !options.watch {
+            return Ok(());
+        }
+
+        let interval = options
+            .poll_interval_ms
+            .unwrap_or(loaded.config.polling_interval_ms);
+        sleep(Duration::from_millis(interval)).await;
+    }
+}
+
+#[derive(Debug)]
+struct LoadedDaemonWorkflow {
+    config: WorkflowConfig,
+    revision: u64,
+    reloaded: bool,
+}
+
+#[derive(Debug, Default)]
+struct DaemonWorkflowLoader {
+    last_modified: Option<SystemTime>,
+    revision: u64,
+}
+
+impl DaemonWorkflowLoader {
+    async fn load(&mut self, workflow: &Path) -> Result<LoadedDaemonWorkflow, SymphonyError> {
+        let definition = load_workflow(workflow).await?;
+        let config = resolve_config(&definition, workflow)?;
+        let modified = fs::metadata(workflow)
+            .await
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    SymphonyError::MissingWorkflowFile(workflow.to_path_buf())
+                } else {
+                    SymphonyError::Io(error)
+                }
+            })?
+            .modified()
+            .ok();
+        let reloaded = self.last_modified != modified;
+        if reloaded {
+            self.revision += 1;
+            self.last_modified = modified;
+        }
+        Ok(LoadedDaemonWorkflow {
+            config,
+            revision: self.revision,
+            reloaded,
+        })
+    }
+}
+
+fn emit_daemon_tick(
+    options: &DaemonOptions,
+    tick: usize,
+    loaded: &LoadedDaemonWorkflow,
+) -> Result<(), SymphonyError> {
     emit(
-        json_output,
+        options.json,
         "info",
         "orchestration",
         "daemon_tick_completed",
         json!({
-            "project": project,
-            "workflow": workflow,
-            "maxConcurrentAgents": config.max_concurrent_agents
+            "project": options.project,
+            "workflow": options.workflow,
+            "tick": tick,
+            "workflowRevision": loaded.revision,
+            "workflowReloaded": loaded.reloaded,
+            "pollingIntervalMs": loaded.config.polling_interval_ms,
+            "maxConcurrentAgents": loaded.config.max_concurrent_agents
         }),
-    )?;
-    Ok(())
+    )
 }
 
 pub async fn print_report(
@@ -1636,5 +1737,71 @@ Body
         assert_eq!(error.code(), "command_failed");
         assert_eq!(error.exit_code(), 30);
         assert!(error.to_string().contains("nope"));
+    }
+
+    #[tokio::test]
+    async fn daemon_workflow_loader_detects_reloaded_workflow() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workflow = tempdir.path().join("WORKFLOW.md");
+        fs::write(
+            &workflow,
+            r#"---
+agent:
+  max_concurrent_agents: 1
+polling:
+  interval_ms: 25
+---
+Prompt
+"#,
+        )
+        .await
+        .unwrap();
+        let mut loader = DaemonWorkflowLoader::default();
+
+        let first = loader.load(&workflow).await.unwrap();
+        sleep(Duration::from_millis(20)).await;
+        fs::write(
+            &workflow,
+            r#"---
+agent:
+  max_concurrent_agents: 4
+polling:
+  interval_ms: 50
+---
+Prompt
+"#,
+        )
+        .await
+        .unwrap();
+        let second = loader.load(&workflow).await.unwrap();
+        let third = loader.load(&workflow).await.unwrap();
+
+        assert!(first.reloaded);
+        assert_eq!(first.revision, 1);
+        assert_eq!(first.config.max_concurrent_agents, 1);
+        assert!(second.reloaded);
+        assert_eq!(second.revision, 2);
+        assert_eq!(second.config.max_concurrent_agents, 4);
+        assert_eq!(second.config.polling_interval_ms, 50);
+        assert!(!third.reloaded);
+        assert_eq!(third.revision, 2);
+    }
+
+    #[tokio::test]
+    async fn daemon_rejects_zero_tick_limit() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let error = daemon(DaemonOptions {
+            project: "project-1".to_string(),
+            workflow: tempdir.path().join("WORKFLOW.md"),
+            json: true,
+            watch: true,
+            max_ticks: Some(0),
+            poll_interval_ms: Some(1),
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        assert!(error.to_string().contains("max_ticks"));
     }
 }

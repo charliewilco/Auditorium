@@ -375,6 +375,8 @@ Every `symphony` command supports `--help` through Clap-generated help text. The
 
 The CLI writes human-oriented status to stderr unless `--json` is supported and enabled. JSON run mode emits newline-delimited JSON events followed by a final JSON report payload.
 
+`symphony daemon` runs one scheduling tick by default. Use `--watch` to keep the daemon alive and reload `WORKFLOW.md` before each tick. `--max-ticks` and `--poll-interval-ms` make watch mode deterministic for smoke tests and local validation.
+
 Exit behavior is stable by error class:
 
 - `20`: missing workflow file.

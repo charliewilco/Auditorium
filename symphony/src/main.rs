@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use symphony::{
-    daemon_once, doctor, init_workflow, print_report, run_issue, DoctorOptions, RunOptions,
+    daemon, doctor, init_workflow, print_report, run_issue, DaemonOptions, DoctorOptions,
+    RunOptions,
 };
 
 #[derive(Parser)]
@@ -74,6 +75,15 @@ enum Commands {
         /// Emit NDJSON events.
         #[arg(long)]
         json: bool,
+        /// Keep running and reload WORKFLOW.md between scheduling ticks.
+        #[arg(long)]
+        watch: bool,
+        /// Stop after this many ticks. Mainly useful for deterministic tests and smoke runs.
+        #[arg(long)]
+        max_ticks: Option<usize>,
+        /// Override the workflow polling interval while watching.
+        #[arg(long)]
+        poll_interval_ms: Option<u64>,
     },
     /// Print a saved run report.
     Report {
@@ -123,7 +133,20 @@ async fn main() {
             project,
             workflow,
             json,
-        } => daemon_once(project, workflow, json).await,
+            watch,
+            max_ticks,
+            poll_interval_ms,
+        } => {
+            daemon(DaemonOptions {
+                project,
+                workflow,
+                json,
+                watch,
+                max_ticks,
+                poll_interval_ms,
+            })
+            .await
+        }
         Commands::Report {
             run,
             workspace_root,
