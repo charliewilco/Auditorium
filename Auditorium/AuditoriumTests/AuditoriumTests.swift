@@ -1397,6 +1397,57 @@ struct AuditoriumTests {
 		#expect(manifest.branchName == ticketRun.branchName)
 	}
 
+	@Test func mockOrchestratorUsesInjectedSourceProviderForPullRequests() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .genericGit)
+		let project = Project(
+			name: "Protocol Source",
+			repositoryProviderKind: .genericGit,
+			repositoryName: "local/protocol-source",
+			repositoryURL: "file:///tmp/protocol-source",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "SRC-101",
+			title: "Use injected source provider",
+			body: "The orchestrator should create PRs through the source provider protocol.",
+			status: .ready,
+			labels: ["providers"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockSourceProvider: sourceProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let pullRequest = try #require(context.fetch(FetchDescriptor<PullRequestRecord>()).first)
+
+		#expect(pullRequest.provider == .genericGit)
+		#expect(pullRequest.url == "https://example.com/local/protocol-source/pull/source-provider")
+		#expect(sourceProvider.createdPullRequestTitles == ["SRC-101: Use injected source provider"])
+	}
+
 	@Test func processCommandCancelsRunningProcess() async {
 		let task = Task {
 			try await ProcessCommand.run(executable: "/bin/sh", arguments: ["-lc", "sleep 5"])
@@ -1782,6 +1833,36 @@ private struct MockGitHubResponse: Sendable {
 		self.payload = payload
 		self.statusCode = statusCode
 		self.headers = headers
+	}
+}
+
+private final class StaticSourceCodeProvider: SourceCodeProvider {
+	let kind: RepositoryProviderKind
+	let authentication = ProviderAuthenticationDescriptor(method: .none, displayName: "Static Source", oauth: nil)
+	private(set) var createdPullRequestTitles: [String] = []
+
+	init(kind: RepositoryProviderKind) {
+		self.kind = kind
+	}
+
+	func listRepositories() async throws -> [RepositoryDescriptor] {
+		[]
+	}
+
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+	}
+
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		createdPullRequestTitles.append(request.title)
+		return PullRequestDescriptor(
+			title: request.title,
+			url: URL(string: "https://example.com/\(request.repository.fullName)/pull/source-provider")!,
+			branchName: request.branchName,
+			targetBranch: request.targetBranch,
+			status: .open,
+			checksStatus: .passed
+		)
 	}
 }
 

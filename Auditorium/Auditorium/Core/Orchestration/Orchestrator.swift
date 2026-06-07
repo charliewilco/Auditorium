@@ -7,18 +7,21 @@ final class Orchestrator {
 	private let runtimeDetection: RuntimeDetectionService
 	private let reportGenerator: ReportGenerator
 	private let symphonyRunner: SymphonyCLIProcessRunner
+	private let mockSourceProvider: any SourceCodeProvider
 	private var activeTask: Task<Void, Never>?
 
 	init(
 		workspaceService: ApplicationWorkspaceService,
 		runtimeDetection: RuntimeDetectionService,
 		reportGenerator: ReportGenerator,
-		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner()
+		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner(),
+		mockSourceProvider: (any SourceCodeProvider)? = nil
 	) {
 		self.workspaceService = workspaceService
 		self.runtimeDetection = runtimeDetection
 		self.reportGenerator = reportGenerator
 		self.symphonyRunner = symphonyRunner
+		self.mockSourceProvider = mockSourceProvider ?? MockGitHubRepositoryProvider()
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
@@ -97,7 +100,7 @@ final class Orchestrator {
 					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 					continue
 				}
-				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: agent, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
+				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: agent, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
 			}
 		}
 
@@ -284,6 +287,7 @@ final class Orchestrator {
 		run: RunRecord,
 		runtime: MockRuntimeProvider,
 		agent: MockCodexAgentProvider,
+		sourceProvider: any SourceCodeProvider,
 		context: ModelContext,
 		workflowPolicyMarkdown: String
 	) async throws {
@@ -338,8 +342,7 @@ final class Orchestrator {
 
 		switch finalOutcome ?? .completed {
 		case .completed:
-			let provider = MockGitHubRepositoryProvider()
-			let pr = try await provider.createPullRequest(PullRequestRequest(
+			let pr = try await sourceProvider.createPullRequest(PullRequestRequest(
 				title: "\(ticket.externalID): \(ticket.title)",
 				body: finalSummary,
 				branchName: workspace.branchName,
@@ -351,7 +354,7 @@ final class Orchestrator {
 			ticketRun.pullRequestURL = pr.url.absoluteString
 			ticketRun.summary = finalSummary
 			ticketRun.confidence = 0.86
-			context.insert(PullRequestRecord(provider: repository.provider, ticketRunID: ticketRun.id, title: pr.title, url: pr.url.absoluteString, branchName: pr.branchName, targetBranch: pr.targetBranch, status: pr.status, checksStatus: pr.checksStatus))
+			context.insert(PullRequestRecord(provider: sourceProvider.kind, ticketRunID: ticketRun.id, title: pr.title, url: pr.url.absoluteString, branchName: pr.branchName, targetBranch: pr.targetBranch, status: pr.status, checksStatus: pr.checksStatus))
 		case .blocked:
 			ticket.status = .blocked
 			ticketRun.status = .blocked

@@ -56,8 +56,8 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Queue/orchestration code depends on protocols or registry lookups, not hard-coded concrete provider types.
-- [ ] Adding `LinearIssueTrackerProvider` requires no queue/run/report UI changes.
+- [x] Queue/orchestration code depends on protocols or registry lookups, not hard-coded concrete provider types.
+- [x] Adding `LinearIssueTrackerProvider` requires no queue/run/report UI changes.
 
 ## 3. GitHub OAuth And Credentials
 
@@ -421,6 +421,7 @@ Acceptance gate:
 - [x] Swift tests for report generation.
 - [x] Swift tests for workspace paths.
 - [x] Swift tests for provider normalization.
+- [x] Swift tests for source-provider injection in mock orchestration.
 - [x] Swift tests for runtime detection.
 - [x] Swift tests for Apple Container preflight.
 - [x] Swift tests for Codex CLI preflight.
