@@ -171,6 +171,93 @@ struct AuditoriumTests {
 		#expect(try context.fetch(FetchDescriptor<IssueTrackerRecord>()).isEmpty)
 	}
 
+	@Test func modelIntegrityValidatorAcceptsValidProjectCreationRows() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let draft = ProjectDraft()
+		draft.name = "Integrity Test"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.importDemoTickets = false
+
+		_ = try ProjectCreationService().createProject(from: draft, context: context, workspaceService: ApplicationWorkspaceService(rootDirectory: root))
+
+		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
+	}
+
+	@Test func modelIntegrityValidatorFlagsCorruptPersistedRows() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let project = Project(
+			name: "Corrupt",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		project.name = " "
+		project.repositoryProviderKindRaw = "dropbox"
+		let event = RuntimeEventRecord(runID: UUID(), level: .info, category: .orchestration, message: "Event", metadataJSON: "{")
+		event.levelRaw = "verbose"
+		let ticketRun = TicketRunRecord(runID: UUID(), ticketID: UUID(), status: .running, retryCount: -1, confidence: 1.5)
+		context.insert(project)
+		context.insert(event)
+		context.insert(ticketRun)
+		try context.save()
+
+		let issues = try ModelIntegrityValidator.validate(context: context)
+		let fields = Set(issues.map { "\($0.model).\($0.field)" })
+
+		#expect(fields.contains("Project.name"))
+		#expect(fields.contains("Project.repositoryProviderKindRaw"))
+		#expect(fields.contains("RuntimeEventRecord.levelRaw"))
+		#expect(fields.contains("RuntimeEventRecord.metadataJSON"))
+		#expect(fields.contains("TicketRunRecord.retryCount"))
+		#expect(fields.contains("TicketRunRecord.confidence"))
+	}
+
+	@Test func modelIntegrityValidatorDetectsSecretMaterialInPersistedRows() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let projectID = UUID()
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "SEC-1",
+			title: "Do not persist tokens",
+			body: "Leaked token github_pat_1234567890abcdefghijklmnopqrst",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/1",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub",
+			keychainAccount: "gho_1234567890abcdefghijklmnopqrst"
+		)
+		context.insert(ticket)
+		context.insert(account)
+		try context.save()
+
+		let issues = try ModelIntegrityValidator.validate(context: context)
+		let secretFields = Set(issues.filter { $0.reason.contains("secret") }.map { "\($0.model).\($0.field)" })
+
+		#expect(secretFields == Set(["TicketRecord.body", "ProviderAccountRecord.keychainAccount"]))
+	}
+
 	@Test func ticketDescriptorNormalizesProviderFields() {
 		let ticket = TicketRecord(
 			provider: .githubIssues,
