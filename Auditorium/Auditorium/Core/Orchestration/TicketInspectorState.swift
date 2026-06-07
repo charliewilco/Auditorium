@@ -11,6 +11,14 @@ struct TicketInspectorState: Equatable {
 	let failureText: String
 	let nextAction: String
 	let timelineMessages: [String]
+	let canAddToQueue: Bool
+	let canRemoveFromQueue: Bool
+	let canRunTicket: Bool
+	let canRetryTicket: Bool
+	let canCancelRun: Bool
+	let canOpenIssueTracker: Bool
+	let canOpenPullRequest: Bool
+	let canRevealWorkspace: Bool
 
 	init(
 		ticket: TicketRecord,
@@ -28,6 +36,14 @@ struct TicketInspectorState: Equatable {
 		failureText = latestRun?.failureReason ?? "No failure recorded."
 		nextAction = Self.nextAction(ticket: ticket, queueItem: queueItem, latestRun: latestRun)
 		timelineMessages = events.sorted { $0.timestamp < $1.timestamp }.map(\.message)
+		canAddToQueue = queueItem == nil
+		canRemoveFromQueue = queueItem != nil
+		canCancelRun = latestRun.map { Self.isCancelable($0.status) } ?? false
+		canRunTicket = canCancelRun == false
+		canRetryTicket = latestRun.map { Self.isRetryable($0.status) } ?? false
+		canOpenIssueTracker = Self.hasWebURL(ticket.webURL)
+		canOpenPullRequest = latestRun?.pullRequestURL.map(Self.hasWebURL) ?? false
+		canRevealWorkspace = latestRun?.workspacePath.isEmpty == false
 	}
 
 	private static func nextAction(ticket: TicketRecord, queueItem: QueueItemRecord?, latestRun: TicketRunRecord?) -> String {
@@ -41,5 +57,30 @@ struct TicketInspectorState: Equatable {
 			return "Inspect validation failure and retry."
 		}
 		return queueItem == nil ? "Add this ticket to the queue." : "Run the queue when ready."
+	}
+
+	private nonisolated static func isCancelable(_ status: TicketRunStatus) -> Bool {
+		switch status {
+		case .pending, .preparing, .running:
+			return true
+		case .blocked, .needsReview, .completed, .failed, .canceled:
+			return false
+		}
+	}
+
+	private nonisolated static func isRetryable(_ status: TicketRunStatus) -> Bool {
+		switch status {
+		case .blocked, .failed, .canceled:
+			return true
+		case .pending, .preparing, .running, .needsReview, .completed:
+			return false
+		}
+	}
+
+	private nonisolated static func hasWebURL(_ value: String) -> Bool {
+		guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else {
+			return false
+		}
+		return scheme == "http" || scheme == "https"
 	}
 }

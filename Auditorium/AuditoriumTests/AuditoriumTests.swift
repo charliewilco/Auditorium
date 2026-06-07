@@ -1258,6 +1258,104 @@ struct AuditoriumTests {
 		#expect(state.confidence == "91%")
 		#expect(state.nextAction == "Review the pull request and merge if acceptable.")
 		#expect(state.timelineMessages == ["First", "Second"])
+		#expect(state.canAddToQueue == false)
+		#expect(state.canRemoveFromQueue)
+		#expect(state.canRunTicket)
+		#expect(state.canRetryTicket == false)
+		#expect(state.canCancelRun == false)
+		#expect(state.canOpenIssueTracker)
+		#expect(state.canOpenPullRequest)
+		#expect(state.canRevealWorkspace)
+	}
+
+	@Test func ticketInspectorStateEnablesCancelForActiveRuns() {
+		let projectID = UUID()
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "102",
+			title: "Cancelable inspector state",
+			body: "Body",
+			status: .running,
+			labels: ["ui"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/102",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: projectID
+		)
+		let run = RunRecord(projectID: projectID, status: .running, totalTickets: 1)
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			workspacePath: "",
+			containerID: "local",
+			branchName: "auditorium/issue-102",
+			status: .running
+		)
+
+		let state = TicketInspectorState(ticket: ticket, queueItem: nil, latestRun: ticketRun, events: [])
+
+		#expect(state.canAddToQueue)
+		#expect(state.canRemoveFromQueue == false)
+		#expect(state.canRunTicket == false)
+		#expect(state.canRetryTicket == false)
+		#expect(state.canCancelRun)
+		#expect(state.canOpenIssueTracker)
+		#expect(state.canOpenPullRequest == false)
+		#expect(state.canRevealWorkspace == false)
+	}
+
+	@Test func ticketMarkdownStatusIncludesEventTimeline() {
+		let projectID = UUID()
+		let project = Project(
+			id: projectID,
+			name: "Auditorium",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "103",
+			title: "Markdown status",
+			body: "Body",
+			status: .running,
+			labels: ["ui"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/103",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: projectID
+		)
+		let run = RunRecord(projectID: projectID, status: .running, totalTickets: 1)
+		let ticketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: ticket.id,
+			workspacePath: "/tmp/auditorium/workspace",
+			branchName: "auditorium/issue-103",
+			status: .running
+		)
+		let events = [
+			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 10), level: .info, category: .agent, message: "Started agent"),
+			RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: Date(timeIntervalSince1970: 20), level: .success, category: .agent, message: "Wrote patch")
+		]
+
+		let markdown = TicketStatusFormatter.markdownStatus(ticket: ticket, project: project, queueItem: nil, ticketRun: ticketRun, events: events)
+
+		#expect(markdown.contains("# Ticket Status"))
+		#expect(markdown.contains("Repository: charliewilco/Auditorium"))
+		#expect(markdown.contains("Branch: auditorium/issue-103"))
+		#expect(markdown.contains("## Timeline"))
+		#expect(markdown.contains("- Started agent at"))
+		#expect(markdown.contains("- Wrote patch at"))
 	}
 
 	@Test func workflowPolicyParserReadsFrontMatter() throws {

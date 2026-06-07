@@ -11,6 +11,7 @@ struct TicketInspectorView: View {
 	let removeFromQueue: () -> Void
 	let runTicket: () -> Void
 	let retryTicket: () -> Void
+	let cancelRun: () -> Void
 
 	var body: some View {
 		ScrollView {
@@ -50,7 +51,7 @@ struct TicketInspectorView: View {
 							}
 						}
 					}
-					actions(ticket: ticket)
+					actions(ticket: ticket, inspectorState: inspectorState)
 				} else {
 					EmptyStateView(symbol: "sidebar.right", title: "No Ticket Selected", message: "Select a ticket to inspect orchestration state.")
 						.frame(height: 360)
@@ -86,33 +87,35 @@ struct TicketInspectorView: View {
 		.frame(maxWidth: .infinity, alignment: .leading)
 	}
 
-	private func actions(ticket: TicketRecord) -> some View {
+	private func actions(ticket: TicketRecord, inspectorState: TicketInspectorState) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
 			Text("Actions")
 				.font(.headline)
 			LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
 				Button("Add to Queue", action: addToQueue)
-					.disabled(queueItem != nil)
+					.disabled(inspectorState.canAddToQueue == false)
 				Button("Remove", action: removeFromQueue)
-					.disabled(queueItem == nil)
+					.disabled(inspectorState.canRemoveFromQueue == false)
 				Button("Run Ticket", action: runTicket)
+					.disabled(inspectorState.canRunTicket == false)
 				Button("Retry", action: retryTicket)
-					.disabled(latestRun == nil)
-				Button("Cancel") {}
-					.disabled(true)
+					.disabled(inspectorState.canRetryTicket == false)
+				Button("Cancel", action: cancelRun)
+					.disabled(inspectorState.canCancelRun == false)
 				Button("Issue Tracker") {
 					open(ticket.webURL)
 				}
+				.disabled(inspectorState.canOpenIssueTracker == false)
 				Button("Pull Request") {
 					open(latestRun?.pullRequestURL)
 				}
-				.disabled(latestRun?.pullRequestURL == nil)
+				.disabled(inspectorState.canOpenPullRequest == false)
 				Button("Workspace") {
 					if let path = latestRun?.workspacePath, path.isEmpty == false {
 						NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
 					}
 				}
-				.disabled(latestRun?.workspacePath.isEmpty != false)
+				.disabled(inspectorState.canRevealWorkspace == false)
 				Button("Copy Debug Summary") {
 					copy("\(ticket.externalID) \(ticket.status.title) \(latestRun?.summary ?? "")")
 				}

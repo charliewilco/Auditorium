@@ -66,7 +66,8 @@ struct RootView: View {
 							addToQueue: addSelectedTicketToQueue,
 							removeFromQueue: removeSelectedTicketFromQueue,
 							runTicket: runSelectedTicket,
-							retryTicket: runSelectedTicket
+							retryTicket: runSelectedTicket,
+							cancelRun: cancelActiveRun
 						)
 						.frame(width: 340)
 					}
@@ -217,6 +218,10 @@ struct RootView: View {
 		}
 		appState.selectedDestination = .runs
 		orchestrator?.runQueue(projectID: project.id, concurrency: appState.queueConcurrency, context: modelContext)
+	}
+
+	private func cancelActiveRun() {
+		orchestrator?.cancel()
 	}
 
 	private func dryRun() {

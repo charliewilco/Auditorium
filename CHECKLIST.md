@@ -312,17 +312,17 @@ Acceptance gate:
 - [x] Show latest run state.
 - [x] Show workspace/container/branch/PR fields.
 - [x] Show timeline events.
-- [~] Add queue/run/retry/open/copy actions.
-- [ ] Wire all actions to real implementations.
-- [ ] Copy markdown status with real event timeline.
-- [ ] Open issue tracker URL.
-- [ ] Open PR URL.
-- [ ] Open workspace in Finder.
-- [ ] Cancel active ticket run.
+- [x] Add queue/run/retry/open/copy actions.
+- [x] Wire all actions to real implementations.
+- [x] Copy markdown status with real event timeline.
+- [x] Open issue tracker URL.
+- [x] Open PR URL.
+- [x] Open workspace in Finder.
+- [x] Cancel active ticket run.
 
 Acceptance gate:
 
-- [ ] Inspector is a reliable single-ticket operations panel during and after a real run.
+- [~] Inspector is a reliable single-ticket operations panel during and after a real run.
 
 ## 17. Settings And Security
 
@@ -439,6 +439,7 @@ Acceptance gate:
 - [x] Swift tests for cancellation.
 - [x] Swift tests for bounded concurrency.
 - [x] Swift tests for per-ticket failure recovery and continued queue execution.
+- [x] Swift tests for ticket inspector action availability and markdown status timeline.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.
