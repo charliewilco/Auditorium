@@ -15,9 +15,9 @@ struct TicketBrowserView: View {
 		var result = tickets
 		if appState.ticketSearchText.isEmpty == false {
 			result = result.filter {
-				$0.title.localizedCaseInsensitiveContains(appState.ticketSearchText) ||
-				$0.externalID.localizedCaseInsensitiveContains(appState.ticketSearchText) ||
-				$0.labels.contains { $0.localizedCaseInsensitiveContains(appState.ticketSearchText) }
+				$0.title.localizedCaseInsensitiveContains(appState.ticketSearchText)
+					|| $0.externalID.localizedCaseInsensitiveContains(appState.ticketSearchText)
+					|| $0.labels.contains { $0.localizedCaseInsensitiveContains(appState.ticketSearchText) }
 			}
 		}
 		if let statusFilter {
@@ -38,11 +38,17 @@ struct TicketBrowserView: View {
 	}
 
 	var body: some View {
+		@Bindable var appState = appState
 		VStack(spacing: 0) {
 			toolbar
 			if filteredTickets.isEmpty {
-				EmptyStateView(symbol: "ticket", title: "No Tickets", message: "Open the demo project or adjust filters to see imported issue work.")
-			} else {
+				EmptyStateView(
+					symbol: "ticket",
+					title: "No Tickets",
+					message: "Open the demo project or adjust filters to see imported issue work."
+				)
+			}
+			else {
 				Table(filteredTickets, selection: $selectedTickets) {
 					TableColumn("Ticket") { ticket in
 						HStack {
@@ -76,7 +82,12 @@ struct TicketBrowserView: View {
 			}
 		}
 		.navigationTitle("Tickets")
-		.searchable(text: Binding(get: { appState.ticketSearchText }, set: { appState.ticketSearchText = $0 }), prompt: "Search tickets")
+		.searchable(text: $appState.ticketSearchText, isPresented: $appState.isTicketSearchPresented, prompt: "Search tickets")
+		.onChange(of: selectedTickets) { _, selectedTickets in
+			if let ticketID = selectedTickets.first {
+				appState.inspectTicket(ticketID)
+			}
+		}
 	}
 
 	private var toolbar: some View {

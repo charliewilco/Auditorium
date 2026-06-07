@@ -125,6 +125,15 @@ struct RootView: View {
 		.onReceive(NotificationCenter.default.publisher(for: .runQueueCommand)) { _ in
 			runQueue()
 		}
+		.onReceive(NotificationCenter.default.publisher(for: .dryRunCommand)) { _ in
+			dryRun()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: .focusTicketSearchCommand)) { _ in
+			appState.handle(.findTickets)
+		}
+		.onReceive(NotificationCenter.default.publisher(for: .inspectTicketCommand)) { _ in
+			appState.handle(.inspectSelectedTicket, firstTicketID: projectTickets.first?.id)
+		}
 	}
 
 	private func reconcileInterruptedRunsIfNeeded() {

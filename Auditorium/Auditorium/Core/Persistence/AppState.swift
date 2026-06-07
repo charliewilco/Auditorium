@@ -12,6 +12,7 @@ final class AppState {
 	var isShowingProjectWizard = false
 	var isShowingWelcome = true
 	var ticketSearchText = ""
+	var isTicketSearchPresented = false
 	var queueConcurrency = 3
 	var isRunningQueue = false
 
@@ -22,5 +23,29 @@ final class AppState {
 	func selectProject(_ id: UUID) {
 		selectedProjectID = id
 		isShowingWelcome = false
+	}
+
+	func showTicketSearch() {
+		selectedDestination = .tickets
+		isTicketSearchPresented = true
+	}
+
+	func inspectSelectedOrFirstTicket(_ firstTicketID: UUID?) {
+		if selectedTicketID == nil {
+			selectedTicketID = firstTicketID
+		}
+	}
+
+	func handle(_ command: AppCommand, firstTicketID: UUID? = nil) {
+		switch command {
+		case .newProject:
+			isShowingProjectWizard = true
+		case .findTickets:
+			showTicketSearch()
+		case .inspectSelectedTicket:
+			inspectSelectedOrFirstTicket(firstTicketID)
+		case .runQueue, .dryRun:
+			break
+		}
 	}
 }

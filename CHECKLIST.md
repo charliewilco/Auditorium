@@ -294,7 +294,7 @@ Acceptance gate:
 - [x] Settings screen.
 - [ ] Replace mock-only text with real provider states.
 - [ ] Improve empty/error states.
-- [ ] Add focused keyboard shortcut handling for all required commands.
+- [x] Add focused keyboard shortcut handling for all required commands.
 - [ ] Verify layout on multiple window sizes.
 - [ ] Verify no text overlap.
 - [ ] Add visual proof/screenshots for acceptance flow.

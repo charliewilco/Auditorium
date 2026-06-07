@@ -12,7 +12,8 @@ struct AuditoriumApp: App {
 			let environment = ProcessInfo.processInfo.environment
 			let shouldUseEphemeralStore = environment["XCTestConfigurationFilePath"] != nil || environment["CI"] == "true"
 			modelContainer = try AppSchema.makeModelContainer(inMemory: shouldUseEphemeralStore)
-		} catch {
+		}
+		catch {
 			fatalError("Could not create ModelContainer: \(error)")
 		}
 		if ProcessInfo.processInfo.environment["AUDITORIUM_EXPORT_SCREENSHOTS"] != nil {
@@ -31,27 +32,26 @@ struct AuditoriumApp: App {
 		.modelContainer(modelContainer)
 		.commands {
 			CommandGroup(replacing: .newItem) {
-				Button("New Project") {
-					appState.isShowingProjectWizard = true
+				Button(AppCommand.newProject.title) {
+					appState.handle(.newProject)
 				}
 				.keyboardShortcut("n", modifiers: .command)
 			}
 			CommandMenu("Auditorium") {
-				Button("Run Queue") {
-					NotificationCenter.default.post(name: .runQueueCommand, object: nil)
+				Button(AppCommand.runQueue.title) {
+					post(.runQueue)
 				}
 				.keyboardShortcut("r", modifiers: .command)
-				Button("Dry Run") {
-					NotificationCenter.default.post(name: .dryRunCommand, object: nil)
+				Button(AppCommand.dryRun.title) {
+					post(.dryRun)
 				}
 				.keyboardShortcut("r", modifiers: [.command, .shift])
-				Button("Find Tickets") {
-					appState.selectedDestination = .tickets
-					NotificationCenter.default.post(name: .focusTicketSearchCommand, object: nil)
+				Button(AppCommand.findTickets.title) {
+					post(.findTickets)
 				}
 				.keyboardShortcut("f", modifiers: .command)
-				Button("Inspect Selected Ticket") {
-					NotificationCenter.default.post(name: .inspectTicketCommand, object: nil)
+				Button(AppCommand.inspectSelectedTicket.title) {
+					post(.inspectSelectedTicket)
 				}
 				.keyboardShortcut(.space, modifiers: [])
 			}
@@ -64,11 +64,9 @@ struct AuditoriumApp: App {
 				.modelContainer(modelContainer)
 		}
 	}
-}
 
-extension Notification.Name {
-	static let runQueueCommand = Notification.Name("RunQueueCommand")
-	static let dryRunCommand = Notification.Name("DryRunCommand")
-	static let focusTicketSearchCommand = Notification.Name("FocusTicketSearchCommand")
-	static let inspectTicketCommand = Notification.Name("InspectTicketCommand")
+	private func post(_ command: AppCommand) {
+		guard let notificationName = command.notificationName else { return }
+		NotificationCenter.default.post(name: notificationName, object: nil)
+	}
 }

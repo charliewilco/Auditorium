@@ -165,6 +165,39 @@ struct AuditoriumCoreTests {
 		#expect(editor.hasUnsavedChanges == false)
 	}
 
+	@Test func appCommandsHaveStableNotificationNamesForMenuActions() {
+		#expect(AppCommand.allCases.map(\.title) == ["New Project", "Run Queue", "Dry Run", "Find Tickets", "Inspect Selected Ticket"])
+		let notifications = AppCommand.allCases.compactMap(\.notificationName)
+
+		#expect(notifications.count == 4)
+		#expect(Set(notifications.map(\.rawValue)).count == notifications.count)
+		#expect(AppCommand.newProject.notificationName == nil)
+	}
+
+	@Test func appStateHandlesProjectAndTicketSearchCommands() {
+		let appState = AppState()
+
+		appState.handle(.newProject)
+		#expect(appState.isShowingProjectWizard)
+
+		appState.handle(.findTickets)
+		#expect(appState.selectedDestination == .tickets)
+		#expect(appState.isTicketSearchPresented)
+	}
+
+	@Test func appStateInspectCommandSelectsFirstTicketOnlyWhenNeeded() {
+		let appState = AppState()
+		let firstTicketID = UUID()
+		let selectedTicketID = UUID()
+
+		appState.handle(.inspectSelectedTicket, firstTicketID: firstTicketID)
+		#expect(appState.selectedTicketID == firstTicketID)
+
+		appState.selectedTicketID = selectedTicketID
+		appState.handle(.inspectSelectedTicket, firstTicketID: UUID())
+		#expect(appState.selectedTicketID == selectedTicketID)
+	}
+
 	@Test func orchestrationRunPlanSnapshotsEnabledQueueInOrder() {
 		let projectID = UUID()
 		let first = QueueItemRecord(
