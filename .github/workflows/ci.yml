@@ -7,15 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  macos:
-    name: macOS app
+  swift:
+    name: Swift package
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: xcodebuild build -project Auditorium/Auditorium.xcodeproj -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
+        run: swift build
       - name: Test
-        run: xcodebuild test -project Auditorium/Auditorium.xcodeproj -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
+        run: swift test
+
+  macos:
+    name: macOS app smoke
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app target
+        run: xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 
   rust:
     name: symphony

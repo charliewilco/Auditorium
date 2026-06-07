@@ -153,6 +153,7 @@ struct DemoModeState: Equatable {
 		isDemoProject && usesOfflineRuntime && hasStoredCredentials == false
 	}
 
+	@MainActor
 	init(project: Project?, repository: RepositoryRecord?, issueTracker: IssueTrackerRecord?) {
 		guard let project else {
 			isDemoProject = false

@@ -173,6 +173,8 @@ The CLI uses:
 
 ```text
 .
+├── Auditorium.xcworkspace/
+├── Package.swift
 ├── Auditorium/
 │   ├── Auditorium.xcodeproj/
 │   ├── Auditorium/
@@ -182,6 +184,8 @@ The CLI uses:
 │   │   └── Features/
 │   ├── AuditoriumTests/
 │   └── AuditoriumUITests/
+├── Tests/
+│   └── AuditoriumCoreTests/
 ├── symphony/
 │   └── src/
 ├── SPEC.md
@@ -224,28 +228,40 @@ Demo mode does not require network access, GitHub credentials, Codex, Docker, or
 
 ## Quick Start: macOS App
 
-Open the Xcode project:
+Open the Xcode workspace:
 
 ```sh
-open Auditorium/Auditorium.xcodeproj
+open Auditorium.xcworkspace
 ```
 
-Build from the command line:
+Build the package core:
+
+```sh
+swift build
+```
+
+Run package tests:
+
+```sh
+swift test
+```
+
+Build the native app target from the command line:
 
 ```sh
 xcodebuild build \
-	-project Auditorium/Auditorium.xcodeproj \
+	-workspace Auditorium.xcworkspace \
 	-scheme Auditorium \
 	-configuration Debug \
 	-destination 'platform=macOS,arch=arm64' \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
-Run tests:
+Run the Xcode app test bundle when you need app-integration coverage:
 
 ```sh
 xcodebuild test \
-	-project Auditorium/Auditorium.xcodeproj \
+	-workspace Auditorium.xcworkspace \
 	-scheme Auditorium \
 	-configuration Debug \
 	-destination 'platform=macOS,arch=arm64' \
@@ -492,22 +508,34 @@ Test Rust:
 cargo test --all-targets
 ```
 
-Build macOS app:
+Build Swift package core:
+
+```sh
+swift build
+```
+
+Test Swift package core:
+
+```sh
+swift test
+```
+
+Build macOS app smoke target:
 
 ```sh
 xcodebuild build \
-	-project Auditorium/Auditorium.xcodeproj \
+	-workspace Auditorium.xcworkspace \
 	-scheme Auditorium \
 	-configuration Debug \
 	-destination 'platform=macOS,arch=arm64' \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
-Test macOS app:
+Test macOS app integration target:
 
 ```sh
 xcodebuild test \
-	-project Auditorium/Auditorium.xcodeproj \
+	-workspace Auditorium.xcworkspace \
 	-scheme Auditorium \
 	-configuration Debug \
 	-destination 'platform=macOS,arch=arm64' \
@@ -517,10 +545,11 @@ xcodebuild test \
 Run all local checks:
 
 ```sh
+swift build
+swift test
 cargo fmt --all --check
 cargo test --all-targets
-xcodebuild build -project Auditorium/Auditorium.xcodeproj -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
-xcodebuild test -project Auditorium/Auditorium.xcodeproj -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
+xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 ```
 
 ## Contributing Direction
@@ -534,7 +563,7 @@ The next useful implementation slices are:
 5. Implement `CodexCLIProcessAgentProvider` for the Mac app.
 6. Add Apple Container and Docker execution providers.
 7. Connect the Mac app to the `symphony` CLI for headless runs.
-8. Expand CI to cover app build/tests and Rust formatting/tests.
+8. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
 
 Keep the product small and observable. The best v0 is not a general agent platform; it is a trustworthy GitHub issue-to-pull-request loop with excellent local inspection.
 

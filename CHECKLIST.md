@@ -446,6 +446,7 @@ Acceptance gate:
 - [x] Swift tests for interrupted run reconciliation on app relaunch.
 - [x] Swift tests for offline demo state, reset cleanup, and full mock run.
 - [x] Swift tests for pull request human-review-only policy.
+- [x] SwiftPM `AuditoriumCore` package tests for package-first core coverage.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.
@@ -465,6 +466,7 @@ Acceptance gate:
 - [x] Focused Swift unit target passes.
 - [x] Full Xcode scheme tests are reliable.
 - [x] GitHub Actions macOS build workflow.
+- [x] GitHub Actions SwiftPM core build/test workflow.
 - [x] GitHub Actions Rust test workflow.
 - [ ] Release build configuration.
 - [ ] Signing/entitlements review.
