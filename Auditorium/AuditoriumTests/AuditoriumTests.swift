@@ -2150,6 +2150,7 @@ struct AuditoriumTests {
 		#expect(policy.openPullRequest)
 		#expect(policy.handoffStatus == "Needs Review")
 		#expect(policy.updateIssueLabels == false)
+		#expect(policy.validationCommand == nil)
 		#expect(policy.prompt.contains("autonomous coding agent"))
 	}
 
@@ -2168,6 +2169,23 @@ struct AuditoriumTests {
 		#expect(policy.concurrency == 4)
 		#expect(policy.maxRetries == 3)
 		#expect(policy.maxRetryBackoffMilliseconds == 8_000)
+	}
+
+	@Test func workflowPolicyParserReadsValidationCommand() throws {
+		let policy = try WorkflowPolicyParser().parse(
+			"""
+			---
+			run_tests: true
+			validation:
+			  command: "swift test --filter AuditoriumCoreTests"
+			---
+			Validate before publishing.
+			"""
+		)
+
+		#expect(policy.runTests)
+		#expect(policy.validationCommand == "swift test --filter AuditoriumCoreTests")
+		#expect(policy.prompt == "Validate before publishing.")
 	}
 
 	@Test func orchestrationPlanSnapshotsEnabledQueueIntoBoundedBatches() {
@@ -2366,6 +2384,35 @@ struct AuditoriumTests {
 		#expect(log.contains("Exit code: 0"))
 		#expect(log.contains("prompt-ok"))
 		#expect(log.contains("stderr-line"))
+	}
+
+	@Test func codexAgentProviderIncludesWorkflowPromptBody() async throws {
+		let root = try makeAgentWorkspace()
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workflow = """
+			---
+			run_tests: false
+			---
+			Follow custom workflow instructions from the policy body.
+			"""
+		let provider = CodexCLIProcessAgentProvider(
+			executablePath: "/bin/sh",
+			arguments: [
+				"-lc",
+				"case \"$0\" in *\"Follow custom workflow instructions\"*) printf 'workflow-prompt-ok\\n' ;; *) printf 'missing workflow prompt\\n' >&2; exit 9 ;; esac",
+			]
+		)
+		let stream = try await provider.runAgent(
+			makeAgentRunRequest(workspace: root, title: "Prompt Body", policyMarkdown: workflow)
+		)
+		var events: [AgentEvent] = []
+
+		for try await event in stream {
+			events.append(event)
+		}
+
+		#expect(events.contains { $0.message == "codex_stdout: workflow-prompt-ok" })
+		#expect(events.last?.outcome == .completed)
 	}
 
 	@Test func codexAgentProviderMapsNonZeroExitToFailedOutcome() async throws {
@@ -2914,6 +2961,180 @@ struct AuditoriumTests {
 		#expect(sourceProvider.createdPullRequestTitles.isEmpty)
 		#expect(try context.fetch(FetchDescriptor<PullRequestRecord>()).isEmpty)
 		#expect(events.contains { $0.message == "Workflow policy disabled pull request creation for 103." })
+	}
+
+	@Test func localWorkspaceCodexRunsWorkflowValidationBeforePublishing() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "codex_completed",
+				summary: "Validated before PR.",
+				outcome: .completed
+			)
+		])
+		let workflow = """
+			---
+			concurrency: 1
+			max_retries: 0
+			branch_prefix: "auditorium"
+			run_tests: true
+			open_pull_request: true
+			validation:
+			  command: "printf 'validation-ok\\n'; touch validation-ran"
+			---
+			Run validation before opening a PR.
+			"""
+		let project = Project(
+			name: "Validation Before PR",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: workflow
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "104",
+			title: "Validate Before PR",
+			body: "Validation should run before publish.",
+			status: .ready,
+			labels: ["policy"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/104",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let workspacePath = workspace.workspacePath(projectID: project.id, ticketExternalID: "104")
+
+		#expect(run.status == .completed)
+		#expect(ticketRun.status == .needsReview)
+		#expect(FileManager.default.fileExists(atPath: workspacePath.appending(path: "validation-ran").path()))
+		#expect(events.contains { $0.category == .tests && $0.message == "Running workflow validation command." })
+		#expect(events.contains { $0.category == .tests && $0.message == "validation_stdout: validation-ok" })
+		#expect(events.contains { $0.category == .tests && $0.message == "Workflow validation passed." })
+		#expect(sourceProvider.commitPaths == [workspacePath])
+		#expect(sourceProvider.pushedBranches == ["auditorium/104-validate-before-pr"])
+		#expect(sourceProvider.createdPullRequestTitles == ["104: Validate Before PR"])
+	}
+
+	@Test func localWorkspaceCodexValidationFailureBlocksPublishing() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(
+				level: .success,
+				category: .agent,
+				message: "codex_completed",
+				summary: "Validation should fail.",
+				outcome: .completed
+			)
+		])
+		let workflow = """
+			---
+			concurrency: 1
+			max_retries: 0
+			branch_prefix: "auditorium"
+			run_tests: true
+			open_pull_request: true
+			validation:
+			  command: "printf 'validation-nope\\n' >&2; exit 42"
+			---
+			Fail validation before publishing.
+			"""
+		let project = Project(
+			name: "Validation Failure",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: workflow
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "105",
+			title: "Validation Failure",
+			body: "Validation should block publish.",
+			status: .ready,
+			labels: ["policy"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/105",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+
+		#expect(run.status == .failed)
+		#expect(ticket.status == .failed)
+		#expect(ticketRun.status == .failed)
+		#expect(ticketRun.retryCount == 1)
+		#expect(events.contains { $0.category == .tests && $0.message == "validation_stderr: validation-nope" })
+		#expect(events.contains { $0.category == .tests && $0.message == "Workflow validation failed with exit code 42." })
+		#expect(sourceProvider.commitPaths.isEmpty)
+		#expect(sourceProvider.pushedBranches.isEmpty)
+		#expect(sourceProvider.createdPullRequestTitles.isEmpty)
+		#expect(try context.fetch(FetchDescriptor<PullRequestRecord>()).isEmpty)
 	}
 
 	@Test func localWorkspaceCodexRunsQueueItemsWithBoundedOverlap() async throws {
@@ -3770,7 +3991,9 @@ extension AuditoriumTests {
 		return root
 	}
 
-	fileprivate func makeAgentRunRequest(workspace: URL, title: String) -> AgentRunRequest {
+	fileprivate func makeAgentRunRequest(workspace: URL, title: String, policyMarkdown: String = WorkflowPolicy.defaultMarkdown)
+		-> AgentRunRequest
+	{
 		let ticket = TicketDescriptor(
 			provider: .githubIssues,
 			externalID: "COD-101",
@@ -3796,7 +4019,7 @@ extension AuditoriumTests {
 			defaultBranch: "main"
 		)
 		let workspace = WorkspaceDescriptor(path: workspace, runtimeID: "local-test", branchName: "auditorium/cod-101")
-		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: WorkflowPolicy.defaultMarkdown)
+		return AgentRunRequest(ticket: ticket, repository: repository, workspace: workspace, policyMarkdown: policyMarkdown)
 	}
 
 	fileprivate func writeLegacyV1Store(at storeURL: URL) throws -> MigrationFixtureIDs {

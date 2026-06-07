@@ -346,7 +346,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] Workflow policy controls concurrency, retries, branch prefix, tests, PR creation, and agent prompt.
+- [x] Workflow policy controls concurrency, retries, branch prefix, tests, PR creation, and agent prompt.
 
 ## 19. Rust `symphony` CLI
 

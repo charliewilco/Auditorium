@@ -74,6 +74,7 @@ struct WorkflowPolicyEditorView: View {
 					workflowSummaryItem("Backoff", "\(policy.maxRetryBackoffMilliseconds / 1_000)s")
 					workflowSummaryItem("Branch", policy.branchPrefix)
 					workflowSummaryItem("Tests", policy.runTests ? "On" : "Off")
+					workflowSummaryItem("Validation", policy.validationCommand ?? "Not configured")
 					workflowSummaryItem("Pull Request", policy.openPullRequest ? "On" : "Off")
 				}
 			}

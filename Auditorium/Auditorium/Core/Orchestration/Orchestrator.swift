@@ -696,6 +696,13 @@ final class Orchestrator {
 
 		switch finalOutcome ?? .completed {
 		case .completed:
+			try await runWorkflowValidationIfNeeded(
+				policy: policy,
+				workspace: workspace,
+				ticketRun: ticketRun,
+				run: run,
+				context: context
+			)
 			if commitAndPush {
 				let didCommit = try await nonRetryableAsync {
 					try await sourceProvider.commitChanges(
@@ -804,6 +811,107 @@ final class Orchestrator {
 		}
 		ticket.updatedAt = .now
 		ticketRun.endedAt = .now
+		try ModelIntegrityValidator.save(context: context)
+	}
+
+	private func runWorkflowValidationIfNeeded(
+		policy: ParsedWorkflowPolicy,
+		workspace: WorkspaceDescriptor,
+		ticketRun: TicketRunRecord,
+		run: RunRecord,
+		context: ModelContext
+	) async throws {
+		guard policy.runTests else {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .info,
+					category: .tests,
+					message: "Workflow policy disabled validation."
+				)
+			)
+			try ModelIntegrityValidator.save(context: context)
+			return
+		}
+		guard let command = policy.validationCommand else {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .warning,
+					category: .tests,
+					message: "Workflow policy requested validation but no validation.command was configured."
+				)
+			)
+			try ModelIntegrityValidator.save(context: context)
+			return
+		}
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .info,
+				category: .tests,
+				message: "Running workflow validation command."
+			)
+		)
+		try ModelIntegrityValidator.save(context: context)
+		let result = try await ProcessCommand.runStreaming(
+			executable: "/bin/sh",
+			arguments: ["-lc", command],
+			workingDirectory: workspace.path,
+			allowsNonZeroExit: true
+		)
+		if result.standardOutput.isEmpty == false {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .info,
+					category: .tests,
+					message: "validation_stdout: \(result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))"
+				)
+			)
+		}
+		if result.standardError.isEmpty == false {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .warning,
+					category: .tests,
+					message: "validation_stderr: \(result.standardError.trimmingCharacters(in: .whitespacesAndNewlines))"
+				)
+			)
+		}
+		guard result.exitCode == 0 else {
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					level: .error,
+					category: .tests,
+					message: "Workflow validation failed with exit code \(result.exitCode)."
+				)
+			)
+			try ModelIntegrityValidator.save(context: context)
+			throw ProcessCommandError.failed(
+				executable: "/bin/sh",
+				arguments: ["-lc", command],
+				exitCode: result.exitCode,
+				stderr: result.standardError
+			)
+		}
+		context.insert(
+			RuntimeEventRecord(
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				level: .success,
+				category: .tests,
+				message: "Workflow validation passed."
+			)
+		)
 		try ModelIntegrityValidator.save(context: context)
 	}
 

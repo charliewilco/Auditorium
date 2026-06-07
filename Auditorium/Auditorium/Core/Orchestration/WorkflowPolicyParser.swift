@@ -9,6 +9,7 @@ struct ParsedWorkflowPolicy: Sendable, Equatable {
 	let openPullRequest: Bool
 	let handoffStatus: String?
 	let updateIssueLabels: Bool
+	let validationCommand: String?
 	let prompt: String
 }
 
@@ -40,6 +41,7 @@ struct WorkflowPolicyParser {
 		let openPullRequest = try boolValue(values["open_pull_request"], defaultValue: true, name: "open_pull_request")
 		let handoffStatus = optionalString(values["handoff_status"])
 		let updateIssueLabels = try boolValue(values["update_issue_labels"], defaultValue: false, name: "update_issue_labels")
+		let validationCommand = optionalString(values["validation.command"])
 		return ParsedWorkflowPolicy(
 			concurrency: concurrency,
 			maxRetries: maxRetries,
@@ -49,6 +51,7 @@ struct WorkflowPolicyParser {
 			openPullRequest: openPullRequest,
 			handoffStatus: handoffStatus,
 			updateIssueLabels: updateIssueLabels,
+			validationCommand: validationCommand,
 			prompt: parts.body.trimmingCharacters(in: .whitespacesAndNewlines)
 		)
 	}
@@ -81,14 +84,22 @@ struct WorkflowPolicyParser {
 
 	private func parseFrontMatter(_ frontMatter: String) -> [String: String] {
 		var values: [String: String] = [:]
+		var section: String?
 		for line in frontMatter.components(separatedBy: .newlines) {
 			let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
 			guard trimmed.isEmpty == false, trimmed.hasPrefix("#") == false, let separator = trimmed.firstIndex(of: ":") else {
 				continue
 			}
+			let isNested = line.first?.isWhitespace == true
 			let key = String(trimmed[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
 			let value = String(trimmed[trimmed.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-			values[key] = value
+			if isNested, let section {
+				values["\(section).\(key)"] = value
+			}
+			else {
+				values[key] = value
+				section = value.isEmpty ? key : nil
+			}
 		}
 		return values
 	}

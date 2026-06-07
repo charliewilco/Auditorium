@@ -586,6 +586,8 @@ struct WorkflowPolicy {
 		branch_prefix: "auditorium"
 		run_tests: true
 		open_pull_request: true
+		validation:
+		  command: ""
 		---
 		You are an autonomous coding agent working on a single issue.
 		Your job:
