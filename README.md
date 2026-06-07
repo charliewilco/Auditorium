@@ -384,10 +384,13 @@ Every `symphony` command supports `--help` through Clap-generated help text. The
 - `symphony init`
 - `symphony doctor`
 - `symphony run`
+- `symphony run-queue`
 - `symphony daemon`
 - `symphony report`
 
-The CLI writes human-oriented status to stderr unless `--json` is supported and enabled. JSON run mode emits newline-delimited JSON events followed by a final JSON report payload.
+The CLI writes human-oriented status to stderr unless `--json` is supported and enabled. JSON run mode emits newline-delimited JSON events followed by a final JSON report payload. Queue JSON mode emits queue events, per-ticket report payloads, and typed coordination messages.
+
+`symphony run-queue --repo OWNER/NAME --issues 1,4,7 --workflow WORKFLOW.md --workspace-root .auditorium/workspaces --json` runs multiple issues through one queue-level orchestration. It enforces `agent.max_concurrent_agents`, writes an append-only coordination journal to `<workspace-root>/coordination/<run-id>.jsonl`, and injects bounded related-work summaries into later agent prompts at launch time.
 
 `symphony daemon` runs one scheduling tick by default. Use `--watch` to keep the daemon alive and reload `WORKFLOW.md` before each tick. `--max-ticks` and `--poll-interval-ms` make watch mode deterministic for smoke tests and local validation.
 

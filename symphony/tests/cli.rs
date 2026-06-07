@@ -138,6 +138,64 @@ exit 0
     );
 }
 
+fn write_fake_queue_toolchain(bin_dir: &Path) {
+    fs::create_dir_all(bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("gh"),
+        r#"#!/bin/sh
+set -eu
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  issue="$3"
+  cat <<JSON
+{
+  "id":"I_queue_${issue}",
+  "number":${issue},
+  "title":"Queue issue ${issue}",
+  "body":"Exercise queue bounded concurrency for #${issue}.",
+  "url":"https://github.com/acme/app/issues/${issue}",
+  "labels":[{"name":"runtime"}],
+  "assignees":[],
+  "state":"OPEN",
+  "createdAt":"2026-06-01T00:00:00Z",
+  "updatedAt":"2026-06-02T00:00:00Z"
+}
+JSON
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
+  printf '{"defaultBranchRef":{"name":"main"}}\n'
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  git clone "$SYMPHONY_TEST_REMOTE_REPO" "$4" >/dev/null 2>&1
+  git -C "$4" config user.name "Auditorium Bot"
+  git -C "$4" config user.email "auditorium@example.invalid"
+  exit 0
+fi
+echo "unexpected gh invocation: $@" >&2
+exit 1
+"#,
+    );
+    write_executable(
+        &bin_dir.join("codex-queue"),
+        r#"#!/bin/sh
+set -eu
+lock="$SYMPHONY_TEST_ACTIVE_LOCK"
+violation="$SYMPHONY_TEST_OVERLAP_FILE"
+if ! mkdir "$lock" 2>/dev/null; then
+  printf 'overlap detected\n' >> "$violation"
+  exit 77
+fi
+trap 'rmdir "$lock"' EXIT
+printf 'start %s\n' "$(pwd)" >> "$SYMPHONY_TEST_INVOCATIONS"
+sleep 0.2
+printf 'queue change\n' >> queue-output.txt
+printf 'done %s\n' "$(pwd)" >> "$SYMPHONY_TEST_INVOCATIONS"
+exit 0
+"#,
+    );
+}
+
 fn path_with_fake_tools(bin_dir: &Path) -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
     format!("{}:{existing}", bin_dir.display())
@@ -391,6 +449,98 @@ Fix {{{{ issue.identifier }}}}.
     assert!(prompt.contains("## Related work already observed"));
     assert!(prompt.contains("finding from #1"));
     assert!(prompt.contains("changed_files from #1"));
+}
+
+#[test]
+fn run_queue_real_path_honors_configured_bounded_concurrency() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    let bin_dir = tempdir.path().join("bin");
+    let remote = prepare_bare_remote(&tempdir);
+    let active_lock = tempdir.path().join("active-agent");
+    let overlap_file = tempdir.path().join("overlap.txt");
+    let invocations = tempdir.path().join("invocations.txt");
+    write_fake_queue_toolchain(&bin_dir);
+
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+agent:
+  max_concurrent_agents: 1
+validation:
+  command: ""
+codex:
+  command: "{}"
+branch_prefix: "auditorium"
+run_tests: false
+open_pull_request: false
+---
+Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
+"#,
+            workspace_root.display(),
+            bin_dir.join("codex-queue").display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args([
+            "run-queue",
+            "--repo",
+            "acme/app",
+            "--issues",
+            "1,2",
+            "--workflow",
+        ])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .env("SYMPHONY_TEST_REMOTE_REPO", &remote)
+        .env("SYMPHONY_TEST_ACTIVE_LOCK", &active_lock)
+        .env("SYMPHONY_TEST_OVERLAP_FILE", &overlap_file)
+        .env("SYMPHONY_TEST_INVOCATIONS", &invocations)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(
+        !overlap_file.exists(),
+        "fake codex detected overlapping agent executions: {}",
+        fs::read_to_string(&overlap_file).unwrap_or_default()
+    );
+    let invocation_log = fs::read_to_string(&invocations).unwrap();
+    assert_eq!(invocation_log.matches("start ").count(), 2);
+    assert_eq!(invocation_log.matches("done ").count(), 2);
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "queue_started"
+            && value["metadata"]["maxConcurrentAgents"] == 1));
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["run_id"]
+                .as_str()
+                .is_some_and(|run_id| run_id.contains("queue-1-2")))
+            .count(),
+        2
+    );
+    assert!(workspace_root
+        .join("_1")
+        .join("repo")
+        .join("queue-output.txt")
+        .exists());
+    assert!(workspace_root
+        .join("_2")
+        .join("repo")
+        .join("queue-output.txt")
+        .exists());
 }
 
 #[test]

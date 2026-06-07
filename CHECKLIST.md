@@ -366,6 +366,7 @@ Acceptance gate:
 - [x] Add report generator.
 - [x] Add NDJSON event output for app ingestion.
 - [x] Add stable error codes.
+- [x] Add queue-level run command with coordination bus, journal, prompt enrichment, and bounded concurrency.
 
 Acceptance gate:
 
@@ -379,6 +380,7 @@ Acceptance gate:
 - [x] `symphony doctor`
 - [x] `symphony doctor --json`
 - [x] `symphony run --repo OWNER/NAME --issue ISSUE_NUMBER`
+- [x] `symphony run-queue --repo OWNER/NAME --issues ISSUE_NUMBERS`
 - [x] `symphony daemon --project PROJECT_ID`
 - [x] `symphony report --run RUN_ID`
 
@@ -399,7 +401,7 @@ Acceptance gate:
 Acceptance gate:
 
 - [~] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
-	- App coordinator now invokes `symphony` for Local Workspace + Codex, passes stored GitHub credentials through the process environment, persists streamed events before process exit, and stores real PR URLs from CLI summaries. A full manual UI run against GitHub is still tracked in final acceptance.
+	- App coordinator now invokes one queue-level `symphony run-queue` for Local Workspace + Codex, passes stored GitHub credentials through the process environment, decodes streamed queue/coordination NDJSON, mirrors coordination notes into SwiftData, and stores real PR URLs from CLI summaries. A full manual UI run against GitHub is still tracked in final acceptance.
 
 ## 22. Testing
 
@@ -446,6 +448,7 @@ Acceptance gate:
 - [x] Rust tests for daemon stale-running reconciliation.
 - [x] Rust tests for quoted Codex command parsing and argv handoff.
 - [x] Rust integration test for non-mock GitHub issue, workspace, Codex, validation, git push, PR, and report flow.
+- [x] Rust tests for `run-queue` coordination NDJSON, JSONL journal replay, deterministic prompt enrichment, and queue-level bounded concurrency.
 - [x] UI smoke tests that are not template-only.
 - [x] Manual acceptance checklist with screenshots.
 
@@ -457,7 +460,8 @@ Acceptance gate:
 
 - [x] Local macOS Debug build passes.
 - [x] Focused Swift unit target passes.
-- [x] Full Xcode scheme tests are reliable.
+- [ ] Full Xcode scheme tests are reliable.
+	- Current full run still fails `AuditoriumTests.codexAgentProviderCancelsRunningProcessWhenStreamConsumerCancels()` and `AuditoriumTests.orchestratorPersistsSymphonyEventsWhileProcessRuns()`. Focused queue coordination Xcode tests pass.
 - [x] GitHub Actions macOS build workflow.
 - [x] GitHub Actions SwiftPM core build/test workflow.
 - [x] GitHub Actions Rust test workflow.

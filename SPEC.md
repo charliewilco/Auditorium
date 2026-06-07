@@ -640,6 +640,7 @@ Required commands:
 symphony init
 symphony doctor
 symphony run --repo OWNER/NAME --issue ISSUE_NUMBER
+symphony run-queue --repo OWNER/NAME --issues ISSUE_NUMBERS
 symphony daemon --project PROJECT_ID
 symphony report --run RUN_ID
 ```
@@ -663,6 +664,14 @@ Command behavior:
 	- Emit events.
 	- Create PR if policy enables it.
 	- Write report.
+
+- `run-queue`
+	- Run multiple GitHub issues through one queue-level orchestrator.
+	- Enforce `agent.max_concurrent_agents`.
+	- Maintain a queue-level coordination bus.
+	- Write an append-only JSONL coordination journal.
+	- Emit queue, ticket, and coordination NDJSON.
+	- Enrich later agent prompts with bounded related-work summaries at launch boundaries.
 
 - `daemon`
 	- Poll eligible GitHub issues.
@@ -803,6 +812,9 @@ Required Rust CLI tests:
 - Bounded concurrency.
 - Retry backoff.
 - JSON event output.
+- Queue-level bounded concurrency.
+- Coordination journal replay.
+- Prompt enrichment relevance and caps.
 - Report generation.
 - `doctor --json` output.
 
@@ -828,9 +840,10 @@ v0 is complete only when all are true:
 16. Markdown report is generated and saved.
 17. `symphony doctor` works.
 18. `symphony run` works for one GitHub issue.
-19. Swift tests pass.
-20. Rust tests pass.
-21. macOS app builds cleanly.
+19. `symphony run-queue` works for a bounded queue run.
+20. Swift tests pass.
+21. Rust tests pass.
+22. macOS app builds cleanly.
 
 ## Current Prototype Gaps
 
