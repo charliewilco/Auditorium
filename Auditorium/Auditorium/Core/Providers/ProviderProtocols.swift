@@ -17,8 +17,35 @@ protocol SourceCodeProvider {
 	var authentication: ProviderAuthenticationDescriptor { get }
 
 	func listRepositories() async throws -> [RepositoryDescriptor]
+	func fetchRepository(fullName: String) async throws -> RepositoryDescriptor
 	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws
+	func ticketBranchName(for ticket: TicketDescriptor, prefix: String) -> String
+	func createBranch(named branchName: String, in repositoryPath: URL) async throws
+	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool
+	func pushBranch(named branchName: String, from repositoryPath: URL) async throws
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor
+}
+
+extension SourceCodeProvider {
+	func fetchRepository(fullName: String) async throws -> RepositoryDescriptor {
+		throw ProviderError.notImplemented("\(kind.title) repository metadata")
+	}
+
+	func ticketBranchName(for ticket: TicketDescriptor, prefix: String) -> String {
+		GitBranchName.make(prefix: prefix, ticketExternalID: ticket.externalID, ticketTitle: ticket.title)
+	}
+
+	func createBranch(named branchName: String, in repositoryPath: URL) async throws {
+		throw ProviderError.notImplemented("\(kind.title) branch creation")
+	}
+
+	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool {
+		throw ProviderError.notImplemented("\(kind.title) commits")
+	}
+
+	func pushBranch(named branchName: String, from repositoryPath: URL) async throws {
+		throw ProviderError.notImplemented("\(kind.title) branch push")
+	}
 }
 
 protocol IssueTrackerProvider {

@@ -259,6 +259,82 @@ struct AuditoriumTests {
 		#expect(firstQuery.first(named: "sort")?.value == "pushed")
 	}
 
+	@Test func githubRepositoryProviderFetchesRepositoryMetadata() async throws {
+		let payload = """
+		{
+			"name": "Auditorium",
+			"full_name": "charliewilco/Auditorium",
+			"clone_url": "https://github.com/charliewilco/Auditorium.git",
+			"html_url": "https://github.com/charliewilco/Auditorium",
+			"default_branch": "main",
+			"owner": { "login": "charliewilco" }
+		}
+		"""
+		let transport = RecordingGitHubTransport(responses: [MockGitHubResponse(payload: payload)])
+		let client = GitHubAPIClient(token: "test", transport: transport)
+		let provider = GitHubRepositoryProvider(client: client)
+
+		let repository = try await provider.fetchRepository(fullName: "charliewilco/Auditorium")
+		let requestURLs = await transport.requestedURLs()
+
+		#expect(repository.fullName == "charliewilco/Auditorium")
+		#expect(repository.defaultBranch == "main")
+		#expect(requestURLs.first?.path == "/repos/charliewilco/Auditorium")
+	}
+
+	@Test func sourceProviderCreatesDeterministicTicketBranchNames() {
+		let provider = GitHubRepositoryProvider()
+		let ticket = TicketDescriptor(
+			provider: .githubIssues,
+			externalID: "ISSUE #42",
+			title: "Fix OAuth Refresh Race!",
+			body: "",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: nil,
+			createdAt: Date(timeIntervalSince1970: 0),
+			updatedAt: Date(timeIntervalSince1970: 0),
+			estimatedComplexity: 1,
+			blockedBy: []
+		)
+
+		let first = provider.ticketBranchName(for: ticket, prefix: "Auditorium Tickets")
+		let second = provider.ticketBranchName(for: ticket, prefix: "Auditorium Tickets")
+
+		#expect(first == second)
+		#expect(first == "auditorium-tickets/issue-42-fix-oauth-refresh-race")
+	}
+
+	@Test func githubRepositoryProviderCommitsAndPushesBranchWithoutForce() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumGitTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let remote = root.appending(path: "remote.git")
+		let local = root.appending(path: "local")
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		try await git(["init", "--bare", "--initial-branch=main", remote.path()])
+		try await git(["clone", remote.path(), local.path()])
+		try await git(["config", "user.name", "Auditorium Tests"], in: local)
+		try await git(["config", "user.email", "auditorium-tests@local.invalid"], in: local)
+		try "initial\n".write(to: local.appending(path: "README.md"), atomically: true, encoding: .utf8)
+		try await git(["add", "README.md"], in: local)
+		try await git(["commit", "-m", "Initial commit"], in: local)
+		try await git(["push", "-u", "origin", "main"], in: local)
+		let provider = GitHubRepositoryProvider()
+		let branch = "auditorium/issue-42-test-branch"
+
+		try await provider.createBranch(named: branch, in: local)
+		try "changed\n".write(to: local.appending(path: "CHANGELOG.md"), atomically: true, encoding: .utf8)
+		let committed = try await provider.commitChanges(in: local, message: "Apply test change")
+		try await provider.pushBranch(named: branch, from: local)
+		let remoteBranches = try await git(["--git-dir", remote.path(), "branch", "--list", branch])
+
+		#expect(committed)
+		#expect(remoteBranches.standardOutput.contains(branch))
+		#expect(GitHubRepositoryProvider.pushArguments(branchName: branch).contains("--force") == false)
+	}
+
 	@Test func githubIssueProviderNormalizesIssuesAndSkipsPullRequests() async throws {
 		let payload = """
 		[
@@ -1343,6 +1419,11 @@ private actor RecordingGitHubTransport: GitHubAPITransport {
 	func requestedBodyStrings() -> [String] {
 		bodyStrings
 	}
+}
+
+@discardableResult
+private func git(_ arguments: [String], in workingDirectory: URL? = nil) async throws -> ProcessResult {
+	try await ProcessCommand.run(executable: "/usr/bin/git", arguments: arguments, workingDirectory: workingDirectory)
 }
 
 private extension [URLQueryItem] {

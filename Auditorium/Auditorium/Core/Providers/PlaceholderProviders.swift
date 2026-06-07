@@ -31,6 +31,10 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 		try await requireClient().listRepositories()
 	}
 
+	func fetchRepository(fullName: String) async throws -> RepositoryDescriptor {
+		try await requireClient().repository(fullName: fullName)
+	}
+
 	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
 		if FileManager.default.fileExists(atPath: path.appending(path: ".git").path()) {
 			_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["fetch", "--all", "--prune"], workingDirectory: path)
@@ -40,8 +44,41 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 		_ = try await ProcessCommand.run(executable: "/usr/bin/env", arguments: ["gh", "repo", "clone", repository.fullName, path.path()])
 	}
 
+	func ticketBranchName(for ticket: TicketDescriptor, prefix: String) -> String {
+		GitBranchName.make(prefix: prefix, ticketExternalID: ticket.externalID, ticketTitle: ticket.title)
+	}
+
+	func createBranch(named branchName: String, in repositoryPath: URL) async throws {
+		let existing = try await ProcessCommand.runStreaming(
+			executable: "/usr/bin/git",
+			arguments: ["rev-parse", "--verify", branchName],
+			workingDirectory: repositoryPath,
+			allowsNonZeroExit: true
+		)
+		let arguments = existing.exitCode == 0 ? ["checkout", branchName] : ["checkout", "-b", branchName]
+		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: arguments, workingDirectory: repositoryPath)
+	}
+
+	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool {
+		let status = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["status", "--porcelain"], workingDirectory: repositoryPath)
+		guard status.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+			return false
+		}
+		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["add", "-A"], workingDirectory: repositoryPath)
+		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["-c", "user.name=Auditorium", "-c", "user.email=auditorium@local.invalid", "commit", "-m", message], workingDirectory: repositoryPath)
+		return true
+	}
+
+	func pushBranch(named branchName: String, from repositoryPath: URL) async throws {
+		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: Self.pushArguments(branchName: branchName), workingDirectory: repositoryPath)
+	}
+
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
 		try await requireClient().createPullRequest(request)
+	}
+
+	nonisolated static func pushArguments(branchName: String) -> [String] {
+		["push", "-u", "origin", branchName]
 	}
 
 	private func requireClient() throws -> GitHubAPIClient {

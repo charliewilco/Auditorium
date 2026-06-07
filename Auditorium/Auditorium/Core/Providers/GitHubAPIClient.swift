@@ -33,6 +33,11 @@ struct GitHubAPIClient: Sendable {
 		return repositories.map(\.descriptor)
 	}
 
+	func repository(fullName: String) async throws -> RepositoryDescriptor {
+		let repository: GitHubRepositoryPayload = try await get(path: "/repos/\(fullName)")
+		return repository.descriptor
+	}
+
 	func listIssues(repositoryFullName: String, filter: GitHubIssueFilter = GitHubIssueFilter()) async throws -> [TicketDescriptor] {
 		var page = 1
 		var issues: [GitHubIssuePayload] = []

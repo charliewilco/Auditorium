@@ -83,12 +83,12 @@ Acceptance gate:
 ## 4. GitHub Source-Code Provider
 
 - [x] List repositories visible to authenticated user.
-- [ ] Fetch repository metadata.
+- [x] Fetch repository metadata.
 - [x] Clone repository into project repository path.
 - [x] Update existing clone safely.
-- [ ] Create deterministic ticket branch names.
-- [ ] Commit agent changes.
-- [ ] Push ticket branch.
+- [x] Create deterministic ticket branch names.
+- [x] Commit agent changes.
+- [x] Push ticket branch.
 - [x] Open pull request.
 - [ ] Fetch PR/check status.
 - [x] Add tests with mocked GitHub API responses.
@@ -96,7 +96,7 @@ Acceptance gate:
 Acceptance gate:
 
 - [ ] A queued issue can produce a GitHub PR URL from a real repository.
-- [ ] Provider never force-pushes or rewrites history without explicit policy.
+- [x] Provider never force-pushes or rewrites history without explicit policy.
 
 ## 5. GitHub Issues Provider
 
