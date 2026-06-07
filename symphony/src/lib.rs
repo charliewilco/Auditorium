@@ -160,6 +160,7 @@ pub struct RunReport {
     pub repo: String,
     pub issue: NormalizedIssue,
     pub workspace_path: PathBuf,
+    pub workspace_manifest_path: PathBuf,
     pub branch_name: String,
     pub status: String,
     pub pull_request_url: Option<String>,
@@ -168,6 +169,19 @@ pub struct RunReport {
     pub validation_output: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceManifest {
+    pub run_id: String,
+    pub repo: String,
+    pub issue_identifier: String,
+    pub issue_number: u64,
+    pub workspace_path: PathBuf,
+    pub repo_path: PathBuf,
+    pub branch_name: String,
+    pub workflow_path: PathBuf,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +283,16 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
     let workspace = prepare_workspace(&config, &issue).await?;
     let repo_path = workspace.join("repo");
     let branch_name = branch_name(&config.branch_prefix, &issue);
+    let workspace_manifest_path = write_workspace_manifest(
+        &run_id,
+        &issue,
+        &workspace,
+        &repo_path,
+        &branch_name,
+        &options.workflow,
+        started_at,
+    )
+    .await?;
     emit(
         options.json,
         "info",
@@ -284,6 +308,7 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
             &run_id,
             &issue,
             &workspace,
+            &workspace_manifest_path,
             &branch_name,
             "mock_completed",
             None,
@@ -437,6 +462,7 @@ pub async fn run_issue(options: RunOptions) -> Result<(), SymphonyError> {
         &run_id,
         &issue,
         &workspace,
+        &workspace_manifest_path,
         &branch_name,
         status,
         pr_url,
@@ -784,6 +810,32 @@ async fn prepare_workspace(
     fs::create_dir_all(&workspace).await?;
     fs::create_dir_all(config.workspace_root.join("reports")).await?;
     Ok(workspace)
+}
+
+async fn write_workspace_manifest(
+    run_id: &str,
+    issue: &NormalizedIssue,
+    workspace: &Path,
+    repo_path: &Path,
+    branch_name: &str,
+    workflow_path: &Path,
+    created_at: DateTime<Utc>,
+) -> Result<PathBuf, SymphonyError> {
+    let manifest = WorkspaceManifest {
+        run_id: run_id.to_string(),
+        repo: issue.repo.clone(),
+        issue_identifier: issue.identifier.clone(),
+        issue_number: issue.number,
+        workspace_path: workspace.to_path_buf(),
+        repo_path: repo_path.to_path_buf(),
+        branch_name: branch_name.to_string(),
+        workflow_path: workflow_path.to_path_buf(),
+        created_at,
+    };
+    let manifest_path = workspace.join("workspace-manifest.json");
+    let data = serde_json::to_vec_pretty(&manifest)?;
+    fs::write(&manifest_path, data).await?;
+    Ok(manifest_path)
 }
 
 async fn fetch_github_issue(repo: &str, issue: u64) -> Result<NormalizedIssue, SymphonyError> {
@@ -1194,6 +1246,7 @@ async fn write_report(
     run_id: &str,
     issue: &NormalizedIssue,
     workspace: &Path,
+    workspace_manifest_path: &Path,
     branch_name: &str,
     status: &str,
     pull_request_url: Option<String>,
@@ -1210,6 +1263,7 @@ async fn write_report(
         run_id,
         issue,
         workspace,
+        workspace_manifest_path,
         branch_name,
         status,
         pull_request_url.as_deref(),
@@ -1224,6 +1278,7 @@ async fn write_report(
         repo: issue.repo.clone(),
         issue: issue.clone(),
         workspace_path: workspace.to_path_buf(),
+        workspace_manifest_path: workspace_manifest_path.to_path_buf(),
         branch_name: branch_name.to_string(),
         status: status.to_string(),
         pull_request_url,
@@ -1239,6 +1294,7 @@ fn render_report_markdown(
     run_id: &str,
     issue: &NormalizedIssue,
     workspace: &Path,
+    workspace_manifest_path: &Path,
     branch_name: &str,
     status: &str,
     pull_request_url: Option<&str>,
@@ -1261,11 +1317,12 @@ fn render_report_markdown(
         .map(|output| format!("```text\n{}\n```", output.trim()))
         .unwrap_or_else(|| "No validation command was run.".to_string());
     format!(
-        "# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Changed Files\n{}\n\n## Validation\n{}\n",
+        "# Auditorium Symphony Run\n\nRun ID: {run_id}\nRepository: {}\nIssue: {} {}\nStatus: {status}\nBranch: {branch_name}\nWorkspace: {}\nWorkspace Manifest: {}\nPull Request: {}\nStarted: {}\nEnded: {}\n\n## Issue\n{}\n\n## Changed Files\n{}\n\n## Validation\n{}\n",
         issue.repo,
         issue.identifier,
         issue.title,
         workspace.display(),
+        workspace_manifest_path.display(),
         pull_request_url.unwrap_or("None"),
         started_at.to_rfc3339(),
         ended_at.to_rfc3339(),
@@ -1656,12 +1713,14 @@ Body
             .unwrap();
         let issue = mock_issue("acme/app", 12);
         let workspace = config.workspace_root.join("#12");
+        let manifest_path = workspace.join("workspace-manifest.json");
 
         let report = write_report(
             &config,
             "run-12",
             &issue,
             &workspace,
+            &manifest_path,
             "auditorium/issue-12-mock-auditorium-issue",
             "completed",
             Some("https://github.com/acme/app/pull/34".to_string()),
@@ -1674,7 +1733,9 @@ Body
         let markdown = fs::read_to_string(&report.report_path).await.unwrap();
 
         assert_eq!(report.status, "completed");
+        assert_eq!(report.workspace_manifest_path, manifest_path);
         assert!(markdown.contains("# Auditorium Symphony Run"));
+        assert!(markdown.contains("Workspace Manifest:"));
         assert!(markdown.contains("Pull Request: https://github.com/acme/app/pull/34"));
         assert!(markdown.contains("- `README.md`"));
         assert!(markdown.contains("tests passed"));
@@ -1697,6 +1758,7 @@ Body
             "run-12",
             &issue,
             Path::new("/tmp/workspaces/_12"),
+            Path::new("/tmp/workspaces/_12/workspace-manifest.json"),
             "auditorium/issue-12-mock-auditorium-issue",
             "completed",
             None,
@@ -1708,8 +1770,48 @@ Body
 
         assert_eq!(
             markdown,
-            "# Auditorium Symphony Run\n\nRun ID: run-12\nRepository: acme/app\nIssue: #12 Mock Auditorium issue\nStatus: completed\nBranch: auditorium/issue-12-mock-auditorium-issue\nWorkspace: /tmp/workspaces/_12\nPull Request: None\nStarted: 2026-06-07T01:02:03+00:00\nEnded: 2026-06-07T01:04:05+00:00\n\n## Issue\nThe setup flow needs a clearer credential state.\n\n## Changed Files\nNo changed files detected.\n\n## Validation\nNo validation command was run.\n"
+            "# Auditorium Symphony Run\n\nRun ID: run-12\nRepository: acme/app\nIssue: #12 Mock Auditorium issue\nStatus: completed\nBranch: auditorium/issue-12-mock-auditorium-issue\nWorkspace: /tmp/workspaces/_12\nWorkspace Manifest: /tmp/workspaces/_12/workspace-manifest.json\nPull Request: None\nStarted: 2026-06-07T01:02:03+00:00\nEnded: 2026-06-07T01:04:05+00:00\n\n## Issue\nThe setup flow needs a clearer credential state.\n\n## Changed Files\nNo changed files detected.\n\n## Validation\nNo validation command was run.\n"
         );
+    }
+
+    #[tokio::test]
+    async fn write_workspace_manifest_persists_inspectable_json() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path().join("_44");
+        fs::create_dir_all(&workspace).await.unwrap();
+        let repo_path = workspace.join("repo");
+        let workflow_path = tempdir.path().join("WORKFLOW.md");
+        let issue = mock_issue("acme/app", 44);
+        let created_at = DateTime::parse_from_rfc3339("2026-06-07T01:02:03Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let manifest_path = write_workspace_manifest(
+            "run-44",
+            &issue,
+            &workspace,
+            &repo_path,
+            "auditorium/issue-44-mock-auditorium-issue",
+            &workflow_path,
+            created_at,
+        )
+        .await
+        .unwrap();
+        let manifest: WorkspaceManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).await.unwrap()).unwrap();
+
+        assert_eq!(manifest.run_id, "run-44");
+        assert_eq!(manifest.repo, "acme/app");
+        assert_eq!(manifest.issue_identifier, "#44");
+        assert_eq!(manifest.issue_number, 44);
+        assert_eq!(manifest.workspace_path, workspace);
+        assert_eq!(manifest.repo_path, repo_path);
+        assert_eq!(
+            manifest.branch_name,
+            "auditorium/issue-44-mock-auditorium-issue"
+        );
+        assert_eq!(manifest.workflow_path, workflow_path);
+        assert_eq!(manifest.created_at, created_at);
     }
 
     #[tokio::test]

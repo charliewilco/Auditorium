@@ -15,6 +15,38 @@ struct AuditoriumTests {
 		#expect(first.path().contains("bur-101-fix-oauth"))
 	}
 
+	@Test func workspaceManifestPersistsInspectableJSON() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let service = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = UUID()
+		let runID = UUID()
+		let ticketRunID = UUID()
+		let ticketID = UUID()
+		let workspace = service.workspacePath(projectID: projectID, ticketExternalID: "MAN-101")
+		let manifest = WorkspaceManifest(
+			projectID: projectID,
+			runID: runID,
+			ticketRunID: ticketRunID,
+			ticketID: ticketID,
+			ticketExternalID: "MAN-101",
+			repository: "charliewilco/Auditorium",
+			workspacePath: workspace.path(),
+			branchName: "auditorium/man-101",
+			runtimeProvider: RuntimeProviderKind.mockRuntime.rawValue,
+			agentProvider: AgentProviderKind.mockAgent.rawValue,
+			createdAt: Date(timeIntervalSince1970: 1_780_000_000)
+		)
+
+		let url = try service.writeWorkspaceManifest(manifest, workspace: workspace)
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		let decoded = try decoder.decode(WorkspaceManifest.self, from: Data(contentsOf: url))
+
+		#expect(url == service.workspaceManifestPath(workspace: workspace))
+		#expect(decoded == manifest)
+	}
+
 	@Test func queueOrderingMovesItems() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -794,6 +826,61 @@ struct AuditoriumTests {
 		#expect(ticketRun.status == .needsReview)
 		#expect(ticketRun.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/7")
 		#expect(reports.contains { $0.filePath == reportPath })
+	}
+
+	@Test func mockOrchestratorWritesWorkspaceManifestPerTicketRun() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let project = Project(
+			name: "Manifest",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "MAN-101",
+			title: "Write manifest",
+			body: "Persist a workspace manifest.",
+			status: .ready,
+			labels: ["workspace"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let orchestrator = Orchestrator(workspaceService: workspace, runtimeDetection: RuntimeDetectionService(staticChecks: []), reportGenerator: ReportGenerator())
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let manifestURL = workspace.workspaceManifestPath(workspace: URL(fileURLWithPath: ticketRun.workspacePath))
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		let manifest = try decoder.decode(WorkspaceManifest.self, from: Data(contentsOf: manifestURL))
+
+		#expect(FileManager.default.fileExists(atPath: manifestURL.path()))
+		#expect(manifest.projectID == project.id)
+		#expect(manifest.runID == run.id)
+		#expect(manifest.ticketRunID == ticketRun.id)
+		#expect(manifest.ticketID == ticket.id)
+		#expect(manifest.ticketExternalID == "MAN-101")
+		#expect(manifest.repository == "charliewilco/Auditorium")
+		#expect(manifest.branchName == ticketRun.branchName)
 	}
 
 	@Test func processCommandCancelsRunningProcess() async {

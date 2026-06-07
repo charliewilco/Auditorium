@@ -300,6 +300,23 @@ final class Orchestrator {
 		ticketRun.containerID = workspace.containerID
 		ticketRun.branchName = workspace.branchName
 		ticketRun.logPath = workspaceService.logsDirectory(projectID: project.id).appending(path: "\(ticket.externalID).log").path()
+		let manifestURL = try workspaceService.writeWorkspaceManifest(
+			WorkspaceManifest(
+				projectID: project.id,
+				runID: run.id,
+				ticketRunID: ticketRun.id,
+				ticketID: ticket.id,
+				ticketExternalID: ticket.externalID,
+				repository: repository.fullName,
+				workspacePath: workspace.path.path(),
+				branchName: workspace.branchName,
+				runtimeProvider: project.runtimeProviderKind.rawValue,
+				agentProvider: project.agentProviderKind.rawValue,
+				createdAt: .now
+			),
+			workspace: workspace.path
+		)
+		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Workspace manifest written to \(manifestURL.path())."))
 		ticketRun.status = .running
 		let handle = try await runtime.startExecution(RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown))
 		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .info, category: .runtime, message: "Runtime handle \(handle.id) started."))

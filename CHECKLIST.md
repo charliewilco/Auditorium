@@ -241,7 +241,7 @@ Acceptance gate:
 - [ ] Clone/update repository into workspace or project repository area.
 - [ ] Decide and document workspace reuse policy.
 - [ ] Add cleanup policy for canceled/terminal issues.
-- [ ] Add workspace manifest per ticket run.
+- [x] Add workspace manifest per ticket run.
 - [ ] Add Finder reveal for project/repo/workspace paths.
 
 Acceptance gate:

@@ -196,6 +196,7 @@ fn run_mock_json_writes_workspace_report_and_final_payload() {
         "auditorium/issue-77-mock-auditorium-issue"
     );
     assert!(PathBuf::from(report["report_path"].as_str().unwrap()).exists());
+    assert!(PathBuf::from(report["workspace_manifest_path"].as_str().unwrap()).exists());
     assert!(workspace_root.join("_77").is_dir());
 }
 
