@@ -16,23 +16,42 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 		AsyncThrowingStream { continuation in
 			let task = Task {
 				do {
-					continuation.yield(AgentEvent(level: .info, category: .agent, message: "codex_started", summary: nil, outcome: nil))
+					continuation.yield(
+						AgentEvent(level: .info, category: .agent, message: "codex_started", summary: nil, outcome: nil)
+					)
 					let result = try await ProcessCommand.runStreaming(
 						executable: executablePath,
 						arguments: arguments + [prompt(for: request)],
 						workingDirectory: request.workspace.path,
 						onStandardOutputLine: { line in
-							continuation.yield(AgentEvent(level: .info, category: .agent, message: "codex_stdout: \(line)", summary: nil, outcome: nil))
+							continuation.yield(
+								AgentEvent(
+									level: .info,
+									category: .agent,
+									message: "codex_stdout: \(line)",
+									summary: nil,
+									outcome: nil
+								)
+							)
 						},
 						onStandardErrorLine: { line in
-							continuation.yield(AgentEvent(level: .warning, category: .agent, message: "codex_stderr: \(line)", summary: nil, outcome: nil))
+							continuation.yield(
+								AgentEvent(
+									level: .warning,
+									category: .agent,
+									message: "codex_stderr: \(line)",
+									summary: nil,
+									outcome: nil
+								)
+							)
 						},
 						allowsNonZeroExit: true
 					)
 					let logURL = try writeLog(result, workspacePath: request.workspace.path)
 					continuation.yield(Self.finalEvent(result: result, logURL: logURL))
 					continuation.finish()
-				} catch {
+				}
+				catch {
 					continuation.finish(throwing: error)
 				}
 			}
@@ -59,16 +78,16 @@ struct CodexCLIProcessAgentProvider: AgentProvider {
 		try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
 		let logURL = logDirectory.appending(path: "codex.log")
 		let log = """
-		# Codex CLI Log
+			# Codex CLI Log
 
-		Exit code: \(result.exitCode)
+			Exit code: \(result.exitCode)
 
-		## stdout
-		\(result.standardOutput)
+			## stdout
+			\(result.standardOutput)
 
-		## stderr
-		\(result.standardError)
-		"""
+			## stderr
+			\(result.standardError)
+			"""
 		try log.write(to: logURL, atomically: true, encoding: .utf8)
 		return logURL
 	}

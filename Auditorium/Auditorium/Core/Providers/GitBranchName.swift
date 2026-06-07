@@ -18,7 +18,8 @@ struct GitBranchName {
 			if CharacterSet.alphanumerics.contains(scalar) {
 				output.unicodeScalars.append(scalar)
 				previousWasSeparator = false
-			} else if previousWasSeparator == false {
+			}
+			else if previousWasSeparator == false {
 				output.append("-")
 				previousWasSeparator = true
 			}

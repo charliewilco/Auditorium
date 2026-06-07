@@ -29,14 +29,16 @@ struct RunReconciliationService {
 				if let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) {
 					reconcile(ticket: ticket, previousTicketRunStatus: previousStatus, now: now)
 				}
-				context.insert(RuntimeEventRecord(
-					runID: run.id,
-					ticketRunID: ticketRun.id,
-					timestamp: now,
-					level: .error,
-					category: .orchestration,
-					message: "Ticket run reconciled as failed after app relaunch."
-				))
+				context.insert(
+					RuntimeEventRecord(
+						runID: run.id,
+						ticketRunID: ticketRun.id,
+						timestamp: now,
+						level: .error,
+						category: .orchestration,
+						message: "Ticket run reconciled as failed after app relaunch."
+					)
+				)
 			}
 			run.status = .failed
 			run.endedAt = now
@@ -44,14 +46,17 @@ struct RunReconciliationService {
 			run.failedTickets = relatedTicketRuns.filter { $0.status == .failed }.count
 			run.blockedTickets = relatedTicketRuns.filter { $0.status == .blocked }.count
 			run.pullRequestsCreated = relatedTicketRuns.filter { $0.pullRequestURL != nil }.count
-			run.summary = "Run was interrupted during a previous app session. Reconciled \(reconciledTicketRunsForRun) unfinished ticket runs."
-			context.insert(RuntimeEventRecord(
-				runID: run.id,
-				timestamp: now,
-				level: .error,
-				category: .orchestration,
-				message: "Run reconciled as failed after app relaunch."
-			))
+			run.summary =
+				"Run was interrupted during a previous app session. Reconciled \(reconciledTicketRunsForRun) unfinished ticket runs."
+			context.insert(
+				RuntimeEventRecord(
+					runID: run.id,
+					timestamp: now,
+					level: .error,
+					category: .orchestration,
+					message: "Run reconciled as failed after app relaunch."
+				)
+			)
 		}
 
 		if reconciledRuns > 0 {

@@ -41,33 +41,37 @@ struct DemoDataSeeder {
 			projectID: project.id
 		)
 		context.insert(repository)
-		context.insert(IssueTrackerRecord(
-			provider: .githubIssues,
-			displayName: Self.repositoryFullName,
-			sourceIdentifier: Self.repositoryFullName,
-			filterName: "Ready for agent",
-			webURL: "\(Self.repositoryURL)/issues",
-			projectID: project.id
-		))
+		context.insert(
+			IssueTrackerRecord(
+				provider: .githubIssues,
+				displayName: Self.repositoryFullName,
+				sourceIdentifier: Self.repositoryFullName,
+				filterName: "Ready for agent",
+				webURL: "\(Self.repositoryURL)/issues",
+				projectID: project.id
+			)
+		)
 
 		for demoTicket in DemoTickets.all {
 			let descriptor = demoTicket.descriptor
-			context.insert(TicketRecord(
-				provider: descriptor.provider,
-				externalID: descriptor.externalID,
-				title: descriptor.title,
-				body: descriptor.body,
-				status: descriptor.status,
-				labels: descriptor.labels,
-				assignee: descriptor.assignee,
-				priority: descriptor.priority,
-				webURL: descriptor.webURL?.absoluteString ?? "",
-				createdAt: descriptor.createdAt,
-				updatedAt: descriptor.updatedAt,
-				estimatedComplexity: descriptor.estimatedComplexity,
-				blockedBy: descriptor.blockedBy,
-				sourceProjectID: project.id
-			))
+			context.insert(
+				TicketRecord(
+					provider: descriptor.provider,
+					externalID: descriptor.externalID,
+					title: descriptor.title,
+					body: descriptor.body,
+					status: descriptor.status,
+					labels: descriptor.labels,
+					assignee: descriptor.assignee,
+					priority: descriptor.priority,
+					webURL: descriptor.webURL?.absoluteString ?? "",
+					createdAt: descriptor.createdAt,
+					updatedAt: descriptor.updatedAt,
+					estimatedComplexity: descriptor.estimatedComplexity,
+					blockedBy: descriptor.blockedBy,
+					sourceProjectID: project.id
+				)
+			)
 		}
 
 		try workspaceService.ensureProjectLayout(projectID: project.id)
@@ -87,10 +91,8 @@ struct DemoDataSeeder {
 	}
 
 	static func isDemoProject(_ project: Project) -> Bool {
-		project.name == projectName &&
-			project.repositoryName == repositoryFullName &&
-			project.runtimeProviderKind == .mockRuntime &&
-			project.agentProviderKind == .mockAgent
+		project.name == projectName && project.repositoryName == repositoryFullName && project.runtimeProviderKind == .mockRuntime
+			&& project.agentProviderKind == .mockAgent
 	}
 
 	private func deleteProjectTree(projectID: UUID, context: ModelContext) throws {
@@ -101,7 +103,9 @@ struct DemoDataSeeder {
 		let ticketIDs = Set(tickets.map(\.id))
 		let runs = try context.fetch(FetchDescriptor<RunRecord>()).filter { $0.projectID == projectID }
 		let runIDs = Set(runs.map(\.id))
-		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>()).filter { runIDs.contains($0.runID) || ticketIDs.contains($0.ticketID) }
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>()).filter {
+			runIDs.contains($0.runID) || ticketIDs.contains($0.ticketID)
+		}
 		let ticketRunIDs = Set(ticketRuns.map(\.id))
 
 		try context.fetch(FetchDescriptor<RuntimeEventRecord>())
@@ -199,7 +203,8 @@ enum DemoTickets {
 		DemoTicketSeed(
 			externalID: "BUR-101",
 			title: "Fix OAuth refresh race condition",
-			body: "Session refresh can overlap during app launch and timeline hydration, occasionally replacing a fresh token with a stale response.",
+			body:
+				"Session refresh can overlap during app launch and timeline hydration, occasionally replacing a fresh token with a stale response.",
 			labels: ["auth", "race-condition"],
 			priority: .urgent,
 			complexity: 8
@@ -275,6 +280,6 @@ enum DemoTickets {
 			labels: ["accessibility", "timeline"],
 			priority: .high,
 			complexity: 6
-		)
+		),
 	]
 }

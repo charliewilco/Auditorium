@@ -41,13 +41,15 @@ struct SymphonyDoctorStatusView: View {
 }
 
 #Preview {
-	SymphonyDoctorStatusView(status: SymphonyDoctorStatus(
-		state: .available,
-		detail: "symphony doctor passed 4 checks.",
-		workflowDetail: "Workflow is valid for github; workspace /tmp/work; max agents 3.",
-		checks: [
-			SymphonyDoctorCheck(id: "git --version", name: "git --version", isOK: true, detail: "git version 2.50.0", code: nil)
-		]
-	))
+	SymphonyDoctorStatusView(
+		status: SymphonyDoctorStatus(
+			state: .available,
+			detail: "symphony doctor passed 4 checks.",
+			workflowDetail: "Workflow is valid for github; workspace /tmp/work; max agents 3.",
+			checks: [
+				SymphonyDoctorCheck(id: "git --version", name: "git --version", isOK: true, detail: "git version 2.50.0", code: nil)
+			]
+		)
+	)
 	.padding()
 }

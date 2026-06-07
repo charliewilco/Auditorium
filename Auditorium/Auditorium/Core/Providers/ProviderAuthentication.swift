@@ -25,7 +25,7 @@ struct OAuthAuthorizationDescriptor: Sendable {
 			URLQueryItem(name: "client_id", value: clientID),
 			URLQueryItem(name: "redirect_uri", value: redirectURI),
 			URLQueryItem(name: "scope", value: scopes.joined(separator: " ")),
-			URLQueryItem(name: "state", value: state)
+			URLQueryItem(name: "state", value: state),
 		]
 		return components?.url
 	}

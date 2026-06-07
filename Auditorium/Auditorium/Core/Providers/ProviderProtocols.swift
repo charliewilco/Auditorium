@@ -72,8 +72,9 @@ extension IssueTrackerProvider {
 
 	func applyWorkflowHandoffLabel(ticketID: String, policy: ParsedWorkflowPolicy) async throws {
 		guard policy.updateIssueLabels,
-			  let handoffStatus = policy.handoffStatus?.trimmingCharacters(in: .whitespacesAndNewlines),
-			  handoffStatus.isEmpty == false else {
+			let handoffStatus = policy.handoffStatus?.trimmingCharacters(in: .whitespacesAndNewlines),
+			handoffStatus.isEmpty == false
+		else {
 			return
 		}
 		try await addLabels(ticketID: ticketID, labels: [handoffStatus])

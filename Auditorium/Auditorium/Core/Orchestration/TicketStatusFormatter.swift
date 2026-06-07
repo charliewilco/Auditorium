@@ -11,7 +11,8 @@ enum TicketStatusFormatter {
 		let branch = ticketRun?.branchName.isEmpty == false ? ticketRun?.branchName ?? "None" : "None"
 		let pullRequest = ticketRun?.pullRequestURL ?? "None"
 		let currentState = currentState(ticket: ticket, ticketRun: ticketRun)
-		let timeline = events
+		let timeline =
+			events
 			.sorted { $0.timestamp < $1.timestamp }
 			.suffix(8)
 			.map { "- \($0.message) at \($0.timestamp.formatted(date: .omitted, time: .shortened))" }
@@ -19,22 +20,22 @@ enum TicketStatusFormatter {
 		let suggested = suggestedAction(ticket: ticket, ticketRun: ticketRun, queueItem: queueItem)
 
 		return """
-		# Ticket Status
-		Ticket: \(ticket.externalID) \(ticket.title)
-		Status: \(ticket.status.title)
-		Repository: \(project?.repositoryName ?? "Unknown")
-		Branch: \(branch)
-		Pull Request: \(pullRequest)
+			# Ticket Status
+			Ticket: \(ticket.externalID) \(ticket.title)
+			Status: \(ticket.status.title)
+			Repository: \(project?.repositoryName ?? "Unknown")
+			Branch: \(branch)
+			Pull Request: \(pullRequest)
 
-		## Current State
-		\(currentState)
+			## Current State
+			\(currentState)
 
-		## Timeline
-		\(timeline.isEmpty ? "- No runtime events yet." : timeline)
+			## Timeline
+			\(timeline.isEmpty ? "- No runtime events yet." : timeline)
 
-		## Suggested Action
-		\(suggested)
-		"""
+			## Suggested Action
+			\(suggested)
+			"""
 	}
 
 	private static func currentState(ticket: TicketRecord, ticketRun: TicketRunRecord?) -> String {

@@ -28,7 +28,8 @@ struct GenericCLIAgentConfiguration: Equatable, Sendable {
 		if executable.contains("/") {
 			self.executablePath = executable
 			self.arguments = Array(tokens.dropFirst())
-		} else {
+		}
+		else {
 			self.executablePath = "/usr/bin/env"
 			self.arguments = tokens
 		}
@@ -57,7 +58,8 @@ struct GenericCLIAgentConfiguration: Equatable, Sendable {
 			if let activeQuote = quote {
 				if character == activeQuote {
 					quote = nil
-				} else {
+				}
+				else {
 					current.append(character)
 				}
 				continue
@@ -104,23 +106,42 @@ struct GenericShellAgentProvider: AgentProvider {
 		AsyncThrowingStream { continuation in
 			let task = Task {
 				do {
-					continuation.yield(AgentEvent(level: .info, category: .agent, message: "generic_cli_started", summary: nil, outcome: nil))
+					continuation.yield(
+						AgentEvent(level: .info, category: .agent, message: "generic_cli_started", summary: nil, outcome: nil)
+					)
 					let result = try await ProcessCommand.runStreaming(
 						executable: configuration.executablePath,
 						arguments: configuration.arguments(prompt: prompt(for: request)),
 						workingDirectory: request.workspace.path,
 						onStandardOutputLine: { line in
-							continuation.yield(AgentEvent(level: .info, category: .agent, message: "generic_cli_stdout: \(line)", summary: nil, outcome: nil))
+							continuation.yield(
+								AgentEvent(
+									level: .info,
+									category: .agent,
+									message: "generic_cli_stdout: \(line)",
+									summary: nil,
+									outcome: nil
+								)
+							)
 						},
 						onStandardErrorLine: { line in
-							continuation.yield(AgentEvent(level: .warning, category: .agent, message: "generic_cli_stderr: \(line)", summary: nil, outcome: nil))
+							continuation.yield(
+								AgentEvent(
+									level: .warning,
+									category: .agent,
+									message: "generic_cli_stderr: \(line)",
+									summary: nil,
+									outcome: nil
+								)
+							)
 						},
 						allowsNonZeroExit: true
 					)
 					let logURL = try writeLog(result, workspacePath: request.workspace.path)
 					continuation.yield(Self.finalEvent(result: result, logURL: logURL))
 					continuation.finish()
-				} catch {
+				}
+				catch {
 					continuation.finish(throwing: error)
 				}
 			}
@@ -147,17 +168,17 @@ struct GenericShellAgentProvider: AgentProvider {
 		try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
 		let logURL = logDirectory.appending(path: "generic-cli.log")
 		let log = """
-		# Generic CLI Agent Log
+			# Generic CLI Agent Log
 
-		Command: \(configuration.commandLine)
-		Exit code: \(result.exitCode)
+			Command: \(configuration.commandLine)
+			Exit code: \(result.exitCode)
 
-		## stdout
-		\(result.standardOutput)
+			## stdout
+			\(result.standardOutput)
 
-		## stderr
-		\(result.standardError)
-		"""
+			## stderr
+			\(result.standardError)
+			"""
 		try log.write(to: logURL, atomically: true, encoding: .utf8)
 		return logURL
 	}

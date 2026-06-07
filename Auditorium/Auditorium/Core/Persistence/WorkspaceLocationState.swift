@@ -18,13 +18,14 @@ struct WorkspaceLocationState: Equatable {
 		let repositoryDirectory: URL
 		if let localPath = repository?.localPath, localPath.isEmpty == false {
 			repositoryDirectory = URL(fileURLWithPath: localPath)
-		} else {
+		}
+		else {
 			repositoryDirectory = workspaceService.repositoryDirectory(projectID: project.id)
 		}
 		items = [
 			Item(id: "project", title: "Project", url: projectDirectory),
 			Item(id: "repository", title: "Repository", url: repositoryDirectory),
-			Item(id: "workspaces", title: "Workspaces", url: workspaceService.workspacesDirectory(projectID: project.id))
+			Item(id: "workspaces", title: "Workspaces", url: workspaceService.workspacesDirectory(projectID: project.id)),
 		]
 	}
 }

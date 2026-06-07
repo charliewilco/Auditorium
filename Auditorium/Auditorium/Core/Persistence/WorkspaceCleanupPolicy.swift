@@ -34,7 +34,8 @@ struct WorkspaceCleanupResult: Equatable {
 }
 
 extension ApplicationWorkspaceService {
-	func cleanupTicketWorkspaces(projectID: UUID, ticketRuns: [TicketRunRecord], policy: WorkspaceCleanupPolicy) throws -> WorkspaceCleanupResult {
+	func cleanupTicketWorkspaces(projectID: UUID, ticketRuns: [TicketRunRecord], policy: WorkspaceCleanupPolicy) throws -> WorkspaceCleanupResult
+	{
 		let workspacesRoot = workspacesDirectory(projectID: projectID).standardizedFileURL
 		var removed = 0
 		var preserved = 0
@@ -54,7 +55,8 @@ extension ApplicationWorkspaceService {
 			if FileManager.default.fileExists(atPath: workspace.path()) {
 				try FileManager.default.removeItem(at: workspace)
 				removed += 1
-			} else {
+			}
+			else {
 				preserved += 1
 			}
 		}
