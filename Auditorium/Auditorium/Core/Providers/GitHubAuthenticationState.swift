@@ -1,5 +1,36 @@
 import Foundation
 
+struct GitHubAccountSelection: Equatable, Identifiable {
+	let id: UUID
+	let displayName: String
+	let providerKindRaw: String
+	let keychainAccount: String
+}
+
+struct GitHubCredentialSelectionService {
+	func availableAccounts(
+		from providerAccounts: [ProviderAccountRecord],
+		secretReader: (String) throws -> String?
+	) -> [GitHubAccountSelection] {
+		providerAccounts.compactMap { account in
+			guard
+				account.providerKindRaw == RepositoryProviderKind.github.rawValue
+					|| account.providerKindRaw == IssueProviderKind.githubIssues.rawValue,
+				let token = try? secretReader(account.keychainAccount)?.trimmingCharacters(in: .whitespacesAndNewlines),
+				token.isEmpty == false
+			else {
+				return nil
+			}
+			return GitHubAccountSelection(
+				id: account.id,
+				displayName: account.displayName,
+				providerKindRaw: account.providerKindRaw,
+				keychainAccount: account.keychainAccount
+			)
+		}
+	}
+}
+
 struct GitHubAuthenticationState: Equatable {
 	enum Status: Equatable {
 		case disconnected
@@ -33,7 +64,8 @@ struct GitHubAuthenticationState: Equatable {
 		if (try? secretReader(account.keychainAccount))?.isEmpty == false {
 			status = .connected
 			detail = "Connected. Secret material is stored in Keychain."
-		} else {
+		}
+		else {
 			status = .missingSecret
 			detail = "Credential metadata exists, but the Keychain secret is missing."
 		}

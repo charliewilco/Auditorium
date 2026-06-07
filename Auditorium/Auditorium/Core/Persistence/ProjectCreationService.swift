@@ -44,40 +44,50 @@ struct ProjectCreationService {
 		let repositoryAccountID: UUID?
 		let issueAccountID: UUID?
 		if draft.repositoryProviderKind == .github, draft.issueProviderKind == .githubIssues {
-			let sharedCredential =
-				draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-				? draft.issueCredential : draft.repositoryCredential
-			let sharedAccountID = try storeCredentialIfNeeded(
-				sharedCredential,
-				providerKind: draft.repositoryProviderKind.rawValue,
-				displayName: "GitHub OAuth for \(draft.trimmedRepositoryName)",
-				projectID: project.id,
-				credentialRole: "github-oauth",
-				context: context,
-				keychainService: keychainService
-			)
+			let sharedAccountID: UUID?
+			if let selectedAccountID = draft.selectedRepositoryAccountID ?? draft.selectedIssueAccountID {
+				sharedAccountID = try existingProviderAccountID(selectedAccountID, context: context)
+			}
+			else {
+				let sharedCredential =
+					draft.repositoryCredential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+					? draft.issueCredential : draft.repositoryCredential
+				sharedAccountID = try storeCredentialIfNeeded(
+					sharedCredential,
+					providerKind: draft.repositoryProviderKind.rawValue,
+					displayName: "GitHub OAuth for \(draft.trimmedRepositoryName)",
+					projectID: project.id,
+					credentialRole: "github-oauth",
+					context: context,
+					keychainService: keychainService
+				)
+			}
 			repositoryAccountID = sharedAccountID
 			issueAccountID = sharedAccountID
 		}
 		else {
-			repositoryAccountID = try storeCredentialIfNeeded(
-				draft.repositoryCredential,
-				providerKind: draft.repositoryProviderKind.rawValue,
-				displayName: "\(draft.repositoryProviderKind.title) for \(draft.trimmedRepositoryName)",
-				projectID: project.id,
-				credentialRole: "repository",
-				context: context,
-				keychainService: keychainService
-			)
-			issueAccountID = try storeCredentialIfNeeded(
-				draft.issueCredential,
-				providerKind: draft.issueProviderKind.rawValue,
-				displayName: "\(draft.issueProviderKind.title) for \(draft.issueSourceName)",
-				projectID: project.id,
-				credentialRole: "issues",
-				context: context,
-				keychainService: keychainService
-			)
+			repositoryAccountID =
+				try draft.selectedRepositoryAccountID.map { try existingProviderAccountID($0, context: context) }
+				?? storeCredentialIfNeeded(
+					draft.repositoryCredential,
+					providerKind: draft.repositoryProviderKind.rawValue,
+					displayName: "\(draft.repositoryProviderKind.title) for \(draft.trimmedRepositoryName)",
+					projectID: project.id,
+					credentialRole: "repository",
+					context: context,
+					keychainService: keychainService
+				)
+			issueAccountID =
+				try draft.selectedIssueAccountID.map { try existingProviderAccountID($0, context: context) }
+				?? storeCredentialIfNeeded(
+					draft.issueCredential,
+					providerKind: draft.issueProviderKind.rawValue,
+					displayName: "\(draft.issueProviderKind.title) for \(draft.issueSourceName)",
+					projectID: project.id,
+					credentialRole: "issues",
+					context: context,
+					keychainService: keychainService
+				)
 		}
 
 		context.insert(project)
@@ -114,6 +124,15 @@ struct ProjectCreationService {
 		try workspaceService.ensureProjectLayout(projectID: project.id)
 		try ModelIntegrityValidator.save(context: context)
 		return project.id
+	}
+
+	@MainActor
+	private func existingProviderAccountID(_ accountID: UUID, context: ModelContext) throws -> UUID {
+		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+		guard accounts.contains(where: { $0.id == accountID }) else {
+			throw ProjectCreationError.validation("Selected GitHub account could not be found.")
+		}
+		return accountID
 	}
 
 	@MainActor

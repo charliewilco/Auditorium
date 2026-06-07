@@ -174,6 +174,76 @@ struct AuditoriumCoreTests {
 		#expect(options.first { $0.title == "@octo" }?.subtitle == "1 assigned issue")
 	}
 
+	@Test func githubCredentialSelectionOnlyIncludesAccountsWithSecrets() throws {
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let connected = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Connected",
+			keychainAccount: "connected-\(UUID().uuidString)"
+		)
+		let missingSecret = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Missing",
+			keychainAccount: "missing-\(UUID().uuidString)"
+		)
+		let unsupported = ProviderAccountRecord(
+			providerKindRaw: "linear",
+			displayName: "Linear",
+			keychainAccount: "linear-\(UUID().uuidString)"
+		)
+		try keychain.storeSecret("gho_connected", account: connected.keychainAccount)
+		defer { try? keychain.deleteSecret(account: connected.keychainAccount) }
+
+		let selections = GitHubCredentialSelectionService().availableAccounts(
+			from: [missingSecret, unsupported, connected]
+		) { account in
+			try keychain.readSecret(account: account)
+		}
+
+		#expect(selections.map(\.id) == [connected.id])
+		#expect(selections.first?.displayName == "GitHub Connected")
+	}
+
+	@Test func projectCreationReusesSelectedGitHubAccount() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Existing",
+			keychainAccount: "existing-\(UUID().uuidString)"
+		)
+		try keychain.storeSecret("gho_existing", account: account.keychainAccount)
+		defer { try? keychain.deleteSecret(account: account.keychainAccount) }
+		context.insert(account)
+		try context.save()
+		let draft = ProjectDraft()
+		draft.name = "Existing Account"
+		draft.repositoryName = "charliewilco/Auditorium"
+		draft.repositoryURL = "https://github.com/charliewilco/Auditorium"
+		draft.defaultBranch = "main"
+		draft.issueSourceName = "charliewilco/Auditorium"
+		draft.issueSourceIdentifier = "charliewilco/Auditorium"
+		draft.selectedRepositoryAccountID = account.id
+		draft.importDemoTickets = false
+
+		let projectID = try ProjectCreationService().createProject(
+			from: draft,
+			context: context,
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root),
+			keychainService: keychain
+		)
+
+		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+		let repository = try #require(context.fetch(FetchDescriptor<RepositoryRecord>()).first { $0.projectID == projectID })
+		let issueTracker = try #require(context.fetch(FetchDescriptor<IssueTrackerRecord>()).first { $0.projectID == projectID })
+		#expect(accounts.map(\.id) == [account.id])
+		#expect(repository.providerAccountID == account.id)
+		#expect(issueTracker.providerAccountID == account.id)
+	}
+
 	@Test func modelIntegrityValidatorRejectsPersistedSecretMaterial() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

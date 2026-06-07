@@ -124,7 +124,7 @@ Acceptance gate:
 - [x] Default to GitHub Issues provider.
 - [x] Persist project, repository, issue tracker, workflow policy, and optional demo tickets.
 - [x] Show OAuth-shaped credential step.
-- [ ] Select GitHub account.
+- [x] Select GitHub account.
 - [x] Select repository from real GitHub data.
 - [x] Select issue filter/query from real GitHub Issues data.
 - [x] Validate required fields before advancing each step.

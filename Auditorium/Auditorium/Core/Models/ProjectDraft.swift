@@ -36,7 +36,7 @@ enum ProjectSetupStep: Int, CaseIterable, Identifiable {
 		case .repositoryProvider:
 			return nil
 		case .repositoryCredentials:
-			return draft.trimmedRepositoryCredential.isEmpty
+			return draft.hasRepositoryCredential == false
 				? "Connect GitHub or paste an access token before selecting a repository." : nil
 		case .repository:
 			if draft.trimmedName.isEmpty {
@@ -97,12 +97,14 @@ final class ProjectDraft {
 	var repositoryURL = "https://github.com/charlie/burton-ios"
 	var defaultBranch = "next"
 	var repositoryCredential = ""
+	var selectedRepositoryAccountID: UUID?
 	var issueProviderKind: IssueProviderKind = .githubIssues
 	var issueSourceName = "charlie/burton-ios"
 	var issueSourceIdentifier = "charlie/burton-ios"
 	var issueFilterName = "Ready for agent"
 	var issueTrackerURL = "https://github.com/charlie/burton-ios/issues"
 	var issueCredential = ""
+	var selectedIssueAccountID: UUID?
 	var runtimeProviderKind: RuntimeProviderKind = .mockRuntime
 	var agentProviderKind: AgentProviderKind = .mockAgent
 	var concurrency = 3
@@ -138,8 +140,16 @@ final class ProjectDraft {
 		issueCredential.trimmingCharacters(in: .whitespacesAndNewlines)
 	}
 
+	var hasRepositoryCredential: Bool {
+		!trimmedRepositoryCredential.isEmpty || selectedRepositoryAccountID != nil
+	}
+
+	var hasIssueCredential: Bool {
+		!trimmedIssueCredential.isEmpty || selectedIssueAccountID != nil
+	}
+
 	var hasGitHubCredential: Bool {
-		!trimmedRepositoryCredential.isEmpty || !trimmedIssueCredential.isEmpty
+		hasRepositoryCredential || hasIssueCredential
 	}
 
 	var trimmedIssueSourceName: String {

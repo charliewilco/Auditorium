@@ -7,6 +7,7 @@ struct ProjectSetupWizard: View {
 	@Environment(\.modelContext) private var modelContext
 	@Environment(\.appServices) private var services
 	let onCreate: (UUID) -> Void
+	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
 	@State private var step = 0
 	@State private var draft = ProjectDraft()
 	@State private var availableRepositories: [RepositoryDescriptor] = []
@@ -79,7 +80,9 @@ struct ProjectSetupWizard: View {
 				title: "\(draft.repositoryProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
 				text: Binding(get: { draft.repositoryCredential }, set: { draft.repositoryCredential = $0 }),
-				connect: { Task { await connectGitHub() } }
+				selectedAccountID: draft.selectedRepositoryAccountID,
+				connect: { Task { await connectGitHub() } },
+				selectAccount: { selectSavedGitHubAccount($0, useForRepository: true) }
 			)
 		case .repository:
 			VStack(alignment: .leading, spacing: 14) {
@@ -137,7 +140,9 @@ struct ProjectSetupWizard: View {
 				title: "\(draft.issueProviderKind.title) Credentials",
 				placeholder: "GitHub OAuth access token",
 				text: Binding(get: { draft.issueCredential }, set: { draft.issueCredential = $0 }),
-				connect: { Task { await connectGitHub() } }
+				selectedAccountID: draft.selectedIssueAccountID,
+				connect: { Task { await connectGitHub() } },
+				selectAccount: { selectSavedGitHubAccount($0, useForRepository: false) }
 			)
 		case .issueSource:
 			VStack(alignment: .leading, spacing: 14) {
@@ -260,6 +265,12 @@ struct ProjectSetupWizard: View {
 		isLoadingIssueFilters || draft.hasGitHubCredential == false || draft.trimmedIssueSourceIdentifier.isEmpty
 	}
 
+	private var githubAccountSelections: [GitHubAccountSelection] {
+		GitHubCredentialSelectionService().availableAccounts(from: providerAccounts) { account in
+			try services.keychain.readSecret(account: account)
+		}
+	}
+
 	private func providerGrid<T: Identifiable & Hashable>(_ values: [T], selected: T, choose: @escaping (T) -> Void) -> some View {
 		let columns = [GridItem(.adaptive(minimum: 240), spacing: 12)]
 		return LazyVGrid(columns: columns, spacing: 12) {
@@ -281,7 +292,14 @@ struct ProjectSetupWizard: View {
 		}
 	}
 
-	private func oauthForm(title: String, placeholder: String, text: Binding<String>, connect: @escaping () -> Void) -> some View {
+	private func oauthForm(
+		title: String,
+		placeholder: String,
+		text: Binding<String>,
+		selectedAccountID: UUID?,
+		connect: @escaping () -> Void,
+		selectAccount: @escaping (GitHubAccountSelection) -> Void
+	) -> some View {
 		VStack(alignment: .leading, spacing: 14) {
 			Text(title)
 				.font(.headline)
@@ -289,6 +307,21 @@ struct ProjectSetupWizard: View {
 				.font(.subheadline.weight(.semibold))
 			Text("Auditorium uses one GitHub OAuth connection for source code and issues.")
 				.foregroundStyle(.secondary)
+			if !githubAccountSelections.isEmpty {
+				HStack {
+					Menu("Use Saved GitHub Account") {
+						ForEach(githubAccountSelections) { selection in
+							Button(selection.displayName) {
+								selectAccount(selection)
+							}
+						}
+					}
+					if let selectedAccount = githubAccountSelections.first(where: { $0.id == selectedAccountID }) {
+						Text("Selected \(selectedAccount.displayName)")
+							.foregroundStyle(.secondary)
+					}
+				}
+			}
 			TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
 			HStack {
 				Button("Connect with GitHub") {
@@ -345,7 +378,41 @@ struct ProjectSetupWizard: View {
 			let token = try await service.pollToken(clientID: clientID, deviceCode: deviceCode)
 			draft.repositoryCredential = token.accessToken
 			draft.issueCredential = token.accessToken
+			draft.selectedRepositoryAccountID = nil
+			draft.selectedIssueAccountID = nil
 			oauthMessage = "GitHub connected with scopes: \(token.scope)"
+		}
+		catch {
+			oauthMessage = error.localizedDescription
+		}
+	}
+
+	private func selectSavedGitHubAccount(_ selection: GitHubAccountSelection, useForRepository: Bool) {
+		do {
+			let token =
+				try services.keychain.readSecret(account: selection.keychainAccount)?.trimmingCharacters(in: .whitespacesAndNewlines)
+				?? ""
+			guard token.isEmpty == false else {
+				oauthMessage = "Selected GitHub account is missing its Keychain secret."
+				return
+			}
+			if useForRepository {
+				draft.repositoryCredential = token
+				draft.selectedRepositoryAccountID = selection.id
+				if draft.trimmedIssueCredential.isEmpty {
+					draft.issueCredential = token
+					draft.selectedIssueAccountID = selection.id
+				}
+			}
+			else {
+				draft.issueCredential = token
+				draft.selectedIssueAccountID = selection.id
+				if draft.trimmedRepositoryCredential.isEmpty {
+					draft.repositoryCredential = token
+					draft.selectedRepositoryAccountID = selection.id
+				}
+			}
+			oauthMessage = "Using saved GitHub account \(selection.displayName)."
 		}
 		catch {
 			oauthMessage = error.localizedDescription
