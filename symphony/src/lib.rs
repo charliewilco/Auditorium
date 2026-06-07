@@ -125,6 +125,8 @@ pub struct WorkflowDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowConfig {
     pub tracker_kind: String,
+    pub active_states: Vec<String>,
+    pub terminal_states: Vec<String>,
     pub polling_interval_ms: u64,
     pub workspace_root: PathBuf,
     pub max_concurrent_agents: usize,
@@ -182,6 +184,25 @@ pub struct WorkspaceManifest {
     pub branch_name: String,
     pub workflow_path: PathBuf,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulerRunState {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Blocked,
+    Canceled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerItem {
+    pub issue_identifier: String,
+    pub issue_state: String,
+    pub run_state: SchedulerRunState,
+    pub retry_count: usize,
+    pub not_before_tick: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -684,6 +705,10 @@ pub fn resolve_config(
 
     let config = WorkflowConfig {
         tracker_kind,
+        active_states: string_array_from_map(tracker, "active_states")
+            .unwrap_or_else(|| vec!["open".to_string()]),
+        terminal_states: string_array_from_map(tracker, "terminal_states")
+            .unwrap_or_else(|| vec!["closed".to_string()]),
         polling_interval_ms: int_from_map(polling, "interval_ms").unwrap_or(30_000),
         workspace_root: absolute_path(&workspace_root, workflow_dir),
         max_concurrent_agents: int_from_map(agent, "max_concurrent_agents").unwrap_or(3) as usize,
@@ -763,6 +788,19 @@ fn int_from_map(mapping: Option<&serde_yaml::Mapping>, key: &str) -> Option<u64>
     mapping
         .and_then(|mapping| mapping_value(mapping, key))
         .and_then(yaml_u64)
+}
+
+fn string_array_from_map(mapping: Option<&serde_yaml::Mapping>, key: &str) -> Option<Vec<String>> {
+    mapping
+        .and_then(|mapping| mapping_value(mapping, key))
+        .and_then(|value| value.as_sequence())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(|value| value.to_lowercase())
+                .collect()
+        })
 }
 
 fn yaml_u64(value: &serde_yaml::Value) -> Option<u64> {
@@ -1108,6 +1146,53 @@ fn merge_changed_files(committed: &[String], uncommitted: &[String]) -> Vec<Stri
         }
     }
     files
+}
+
+pub fn retry_backoff_ms(config: &WorkflowConfig, retry_count: usize) -> u64 {
+    if retry_count == 0 {
+        return 0;
+    }
+    let multiplier = 1u64
+        .checked_shl((retry_count - 1).min(20) as u32)
+        .unwrap_or(1);
+    config
+        .polling_interval_ms
+        .saturating_mul(multiplier)
+        .min(config.max_retry_backoff_ms)
+}
+
+pub fn dispatch_batch(
+    items: &[SchedulerItem],
+    config: &WorkflowConfig,
+    running_count: usize,
+    tick: u64,
+) -> Vec<SchedulerItem> {
+    let capacity = config.max_concurrent_agents.saturating_sub(running_count);
+    items
+        .iter()
+        .filter(|item| is_dispatch_eligible(item, config, tick))
+        .take(capacity)
+        .cloned()
+        .collect()
+}
+
+pub fn is_dispatch_eligible(item: &SchedulerItem, config: &WorkflowConfig, tick: u64) -> bool {
+    if tick < item.not_before_tick {
+        return false;
+    }
+    let issue_state = item.issue_state.to_lowercase();
+    if !config.active_states.contains(&issue_state) || config.terminal_states.contains(&issue_state)
+    {
+        return false;
+    }
+    match item.run_state {
+        SchedulerRunState::Pending => true,
+        SchedulerRunState::Failed => item.retry_count < config.max_retries,
+        SchedulerRunState::Running
+        | SchedulerRunState::Completed
+        | SchedulerRunState::Blocked
+        | SchedulerRunState::Canceled => false,
+    }
 }
 
 async fn remote_branch_exists(repo_path: &Path, branch_name: &str) -> bool {
@@ -1497,6 +1582,8 @@ Body
 
         assert_eq!(config.tracker_kind, "github");
         assert_eq!(config.polling_interval_ms, 30_000);
+        assert_eq!(config.active_states, vec!["open"]);
+        assert_eq!(config.terminal_states, vec!["closed"]);
         assert_eq!(
             config.workspace_root,
             PathBuf::from("/tmp/project/.auditorium/symphony-workspaces")
@@ -1512,6 +1599,25 @@ Body
             config.codex_command,
             "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
         );
+    }
+
+    #[test]
+    fn parses_tracker_state_filters_for_dispatch() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  kind: github
+  active_states: ["open", "ready"]
+  terminal_states: ["closed", "merged"]
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(config.active_states, vec!["open", "ready"]);
+        assert_eq!(config.terminal_states, vec!["closed", "merged"]);
     }
 
     #[test]
@@ -1532,6 +1638,117 @@ Body
             files,
             vec!["README.md", "symphony/src/lib.rs", "WORKFLOW.md"]
         );
+    }
+
+    #[test]
+    fn dispatch_batch_enforces_bounded_concurrency_and_queue_order() {
+        let workflow = parse_workflow(
+            r#"---
+agent:
+  max_concurrent_agents: 3
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let items = vec![
+            scheduler_item("#1", "open", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#2", "open", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#3", "open", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#4", "open", SchedulerRunState::Pending, 0, 0),
+        ];
+
+        let selected = dispatch_batch(&items, &config, 1, 10);
+
+        assert_eq!(
+            selected
+                .iter()
+                .map(|item| item.issue_identifier.as_str())
+                .collect::<Vec<_>>(),
+            vec!["#1", "#2"]
+        );
+    }
+
+    #[test]
+    fn dispatch_eligibility_skips_terminal_blocked_canceled_and_running_items() {
+        let workflow = parse_workflow(
+            r#"---
+tracker:
+  kind: github
+  active_states: ["open", "ready"]
+  terminal_states: ["closed"]
+agent:
+  max_concurrent_agents: 10
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let items = vec![
+            scheduler_item("#1", "open", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#2", "closed", SchedulerRunState::Pending, 0, 0),
+            scheduler_item("#3", "ready", SchedulerRunState::Running, 0, 0),
+            scheduler_item("#4", "open", SchedulerRunState::Blocked, 0, 0),
+            scheduler_item("#5", "open", SchedulerRunState::Canceled, 0, 0),
+            scheduler_item("#6", "ready", SchedulerRunState::Completed, 0, 0),
+        ];
+
+        let selected = dispatch_batch(&items, &config, 0, 1);
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].issue_identifier, "#1");
+    }
+
+    #[test]
+    fn failed_items_retry_only_within_policy_after_backoff_tick() {
+        let workflow = parse_workflow(
+            r#"---
+polling:
+  interval_ms: 1000
+agent:
+  max_concurrent_agents: 10
+  max_retry_backoff_ms: 5000
+max_retries: 2
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+        let items = vec![
+            scheduler_item("#1", "open", SchedulerRunState::Failed, 1, 5),
+            scheduler_item("#2", "open", SchedulerRunState::Failed, 2, 0),
+            scheduler_item("#3", "open", SchedulerRunState::Failed, 1, 10),
+        ];
+
+        let selected = dispatch_batch(&items, &config, 0, 5);
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].issue_identifier, "#1");
+    }
+
+    #[test]
+    fn retry_backoff_uses_exponential_delay_capped_by_workflow() {
+        let workflow = parse_workflow(
+            r#"---
+polling:
+  interval_ms: 1000
+agent:
+  max_retry_backoff_ms: 2500
+---
+Body
+"#,
+        )
+        .unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(retry_backoff_ms(&config, 0), 0);
+        assert_eq!(retry_backoff_ms(&config, 1), 1000);
+        assert_eq!(retry_backoff_ms(&config, 2), 2000);
+        assert_eq!(retry_backoff_ms(&config, 3), 2500);
+        assert_eq!(retry_backoff_ms(&config, 10), 2500);
     }
 
     #[test]
@@ -1905,5 +2122,21 @@ Prompt
 
         assert_eq!(error.code(), "invalid_config");
         assert!(error.to_string().contains("max_ticks"));
+    }
+
+    fn scheduler_item(
+        issue_identifier: &str,
+        issue_state: &str,
+        run_state: SchedulerRunState,
+        retry_count: usize,
+        not_before_tick: u64,
+    ) -> SchedulerItem {
+        SchedulerItem {
+            issue_identifier: issue_identifier.to_string(),
+            issue_state: issue_state.to_string(),
+            run_state,
+            retry_count,
+            not_before_tick,
+        }
     }
 }

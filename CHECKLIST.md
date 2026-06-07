@@ -371,7 +371,7 @@ Acceptance gate:
 - [x] Add workflow loader.
 - [x] Add typed config layer.
 - [x] Add workspace manager.
-- [~] Add orchestrator.
+- [~] Add orchestrator with tested scheduler/retry policy; GitHub polling/reconciliation remain.
 - [x] Add Codex process runner.
 - [x] Add report generator.
 - [x] Add NDJSON event output for app ingestion.
@@ -429,6 +429,7 @@ Acceptance gate:
 - [x] Swift tests for bounded concurrency.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
+- [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.
 - [ ] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
 
