@@ -209,7 +209,7 @@ Acceptance gate:
 - [x] Generate report after mock run.
 - [x] Block run before records/workspaces when runtime or agent preflight fails.
 - [x] Accept concurrency value.
-- [~] Enforce bounded concurrency.
+- [x] Enforce bounded concurrency.
 - [~] Implement retry policy from workflow.
 - [~] Implement cancellation state transitions.
 - [x] Implement per-ticket failure recovery.
@@ -219,7 +219,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] Enabled queue items run with bounded concurrency and durable state transitions.
+- [x] Enabled queue items run with bounded concurrency and durable state transitions.
 - [ ] Canceled/failed/retried runs produce accurate ticket and run records.
 
 ## 12. Workspace Management

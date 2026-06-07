@@ -2912,6 +2912,86 @@ struct AuditoriumTests {
 		#expect(events.contains { $0.message == "Workflow policy disabled pull request creation for 103." })
 	}
 
+	@Test func localWorkspaceCodexRunsQueueItemsWithBoundedOverlap() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github)
+		let probe = AgentConcurrencyProbe(releaseAfter: 2)
+		let agentProvider = ProbedAgentProvider(probe: probe)
+		let project = Project(
+			name: "Bounded Local Codex",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let firstTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "401",
+			title: "First concurrent ticket",
+			body: "Runs in the first bounded batch.",
+			status: .ready,
+			labels: ["concurrency"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/401",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		let secondTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "402",
+			title: "Second concurrent ticket",
+			body: "Runs alongside the first ticket.",
+			status: .ready,
+			labels: ["concurrency"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/402",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(firstTicket)
+		context.insert(secondTicket)
+		context.insert(QueueItemRecord(ticketID: firstTicket.id, projectID: project.id, position: 0, priority: .medium))
+		context.insert(QueueItemRecord(ticketID: secondTicket.id, projectID: project.id, position: 1, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 2, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
+
+		#expect(await probe.observedMaxActiveCount() == 2)
+		#expect(run.completedTickets == 2)
+		#expect(run.pullRequestsCreated == 2)
+		#expect(ticketRuns.allSatisfy { $0.status == .needsReview })
+		#expect(sourceProvider.commitPaths.count == 2)
+		#expect(sourceProvider.pushedBranches.count == 2)
+		#expect(Set(sourceProvider.createdPullRequestTitles) == ["401: First concurrent ticket", "402: Second concurrent ticket"])
+	}
+
 	@Test func localWorkspaceCodexRecoversTicketFailureAndContinuesQueue() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -3716,6 +3796,61 @@ private struct StaticAgentProvider: AgentProvider {
 				continuation.yield(event)
 			}
 			continuation.finish()
+		}
+	}
+}
+
+private actor AgentConcurrencyProbe {
+	let releaseAfter: Int
+	private var activeCount = 0
+	private var maxActiveCount = 0
+	private var startedCount = 0
+
+	init(releaseAfter: Int) {
+		self.releaseAfter = releaseAfter
+	}
+
+	func enter() async {
+		activeCount += 1
+		startedCount += 1
+		maxActiveCount = max(maxActiveCount, activeCount)
+		let deadline = Date().addingTimeInterval(1)
+		while startedCount < releaseAfter && Date() < deadline {
+			try? await Task.sleep(nanoseconds: 10_000_000)
+		}
+	}
+
+	func leave() {
+		activeCount -= 1
+	}
+
+	func observedMaxActiveCount() -> Int {
+		maxActiveCount
+	}
+}
+
+private struct ProbedAgentProvider: AgentProvider {
+	let probe: AgentConcurrencyProbe
+
+	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
+		AsyncThrowingStream { continuation in
+			let task = Task {
+				await probe.enter()
+				continuation.yield(
+					AgentEvent(
+						level: .success,
+						category: .agent,
+						message: "codex_completed_\(request.ticket.externalID)",
+						summary: "Completed \(request.ticket.externalID).",
+						outcome: .completed
+					)
+				)
+				await probe.leave()
+				continuation.finish()
+			}
+			continuation.onTermination = { _ in
+				task.cancel()
+			}
 		}
 	}
 }

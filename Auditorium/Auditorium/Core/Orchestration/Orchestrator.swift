@@ -147,26 +147,19 @@ final class Orchestrator {
 				)
 			)
 			try ModelIntegrityValidator.save(context: context)
-			for item in batch {
-				try Task.checkCancellation()
-				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
-					let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
-				else {
-					continue
-				}
-				try await processTicketWithRecovery(
-					project: project,
-					repository: repository,
-					ticket: ticket,
-					ticketRun: ticketRun,
-					run: run,
-					runtime: runtime,
-					agent: mockAgentProvider,
-					sourceProvider: mockSourceProvider,
-					context: context,
-					workflowPolicyMarkdown: plan.workflowPolicyMarkdown
-				)
-			}
+			try await processBatchWithRecovery(
+				batch,
+				project: project,
+				repository: repository,
+				tickets: tickets,
+				ticketRuns: ticketRuns,
+				run: run,
+				runtime: runtime,
+				agent: mockAgentProvider,
+				sourceProvider: mockSourceProvider,
+				context: context,
+				workflowPolicyMarkdown: plan.workflowPolicyMarkdown
+			)
 		}
 
 		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -267,27 +260,20 @@ final class Orchestrator {
 				)
 			)
 			try ModelIntegrityValidator.save(context: context)
-			for item in batch {
-				try Task.checkCancellation()
-				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
-					let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
-				else {
-					continue
-				}
-				try await processTicketWithRecovery(
-					project: project,
-					repository: repository,
-					ticket: ticket,
-					ticketRun: ticketRun,
-					run: run,
-					runtime: runtime,
-					agent: codexAgentProvider,
-					sourceProvider: sourceProvider,
-					context: context,
-					workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
-					commitAndPush: true
-				)
-			}
+			try await processBatchWithRecovery(
+				batch,
+				project: project,
+				repository: repository,
+				tickets: tickets,
+				ticketRuns: ticketRuns,
+				run: run,
+				runtime: runtime,
+				agent: codexAgentProvider,
+				sourceProvider: sourceProvider,
+				context: context,
+				workflowPolicyMarkdown: plan.workflowPolicyMarkdown,
+				commitAndPush: true
+			)
 		}
 
 		let completed = ticketRuns.filter { $0.status == .completed || $0.status == .needsReview }.count
@@ -814,6 +800,57 @@ final class Orchestrator {
 		catch {
 			markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
 			try ModelIntegrityValidator.save(context: context)
+		}
+	}
+
+	private func processBatchWithRecovery(
+		_ batch: [QueueRunSnapshot],
+		project: Project,
+		repository: RepositoryDescriptor,
+		tickets: [TicketRecord],
+		ticketRuns: [TicketRunRecord],
+		run: RunRecord,
+		runtime: any RuntimeProvider,
+		agent: any AgentProvider,
+		sourceProvider: any SourceCodeProvider,
+		context: ModelContext,
+		workflowPolicyMarkdown: String,
+		commitAndPush: Bool = false
+	) async throws {
+		let tasks = batch.compactMap { item -> Task<Void, Error>? in
+			guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
+				let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
+			else {
+				return nil
+			}
+			return Task { @MainActor in
+				try Task.checkCancellation()
+				try await processTicketWithRecovery(
+					project: project,
+					repository: repository,
+					ticket: ticket,
+					ticketRun: ticketRun,
+					run: run,
+					runtime: runtime,
+					agent: agent,
+					sourceProvider: sourceProvider,
+					context: context,
+					workflowPolicyMarkdown: workflowPolicyMarkdown,
+					commitAndPush: commitAndPush
+				)
+			}
+		}
+
+		do {
+			for task in tasks {
+				try await task.value
+			}
+		}
+		catch {
+			for task in tasks {
+				task.cancel()
+			}
+			throw error
 		}
 	}
 
