@@ -70,6 +70,63 @@ struct AuditoriumTests {
 		#expect(state.items[1].url == URL(fileURLWithPath: "/tmp/custom-repository"))
 	}
 
+	@Test func defaultWorkspaceCleanupPolicyPreservesTerminalWorkspaces() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let service = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = UUID()
+		let canceledWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-101")
+		let completedWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-102")
+		try FileManager.default.createDirectory(at: canceledWorkspace, withIntermediateDirectories: true)
+		try FileManager.default.createDirectory(at: completedWorkspace, withIntermediateDirectories: true)
+		let ticketRuns = [
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: canceledWorkspace.path(), status: .canceled),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: completedWorkspace.path(), status: .completed)
+		]
+
+		let result = try service.cleanupTicketWorkspaces(projectID: projectID, ticketRuns: ticketRuns, policy: .preserveAll)
+
+		#expect(result == WorkspaceCleanupResult(scanned: 2, removed: 0, preserved: 2, skippedUnsafePaths: []))
+		#expect(FileManager.default.fileExists(atPath: canceledWorkspace.path()))
+		#expect(FileManager.default.fileExists(atPath: completedWorkspace.path()))
+	}
+
+	@Test func workspaceCleanupRemovesCanceledAndTerminalWorkspacesWithoutReview() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let service = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = UUID()
+		let canceledWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-201")
+		let failedWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-202")
+		let blockedWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-203")
+		let completedWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-204")
+		let reviewWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-205")
+		let runningWorkspace = service.workspacePath(projectID: projectID, ticketExternalID: "CLEAN-206")
+		for workspace in [canceledWorkspace, failedWorkspace, blockedWorkspace, completedWorkspace, reviewWorkspace, runningWorkspace] {
+			try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+		}
+		let unsafePath = root.deletingLastPathComponent().appending(path: "outside-auditorium").path()
+		let ticketRuns = [
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: canceledWorkspace.path(), status: .canceled),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: failedWorkspace.path(), status: .failed),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: blockedWorkspace.path(), status: .blocked),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: completedWorkspace.path(), status: .completed),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: reviewWorkspace.path(), status: .needsReview, pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/205"),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: runningWorkspace.path(), status: .running),
+			TicketRunRecord(runID: UUID(), ticketID: UUID(), workspacePath: unsafePath, status: .canceled)
+		]
+
+		let result = try service.cleanupTicketWorkspaces(projectID: projectID, ticketRuns: ticketRuns, policy: .removeCanceledAndTerminalWithoutReview)
+
+		#expect(result == WorkspaceCleanupResult(scanned: 7, removed: 4, preserved: 3, skippedUnsafePaths: [unsafePath]))
+		#expect(FileManager.default.fileExists(atPath: canceledWorkspace.path()) == false)
+		#expect(FileManager.default.fileExists(atPath: failedWorkspace.path()) == false)
+		#expect(FileManager.default.fileExists(atPath: blockedWorkspace.path()) == false)
+		#expect(FileManager.default.fileExists(atPath: completedWorkspace.path()) == false)
+		#expect(FileManager.default.fileExists(atPath: reviewWorkspace.path()))
+		#expect(FileManager.default.fileExists(atPath: runningWorkspace.path()))
+	}
+
 	@Test func workspaceManifestPersistsInspectableJSON() throws {
 		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: root) }

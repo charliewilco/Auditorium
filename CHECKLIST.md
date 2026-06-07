@@ -240,7 +240,7 @@ Acceptance gate:
 - [x] Add workspace path tests.
 - [x] Clone/update repository into workspace or project repository area.
 - [x] Decide and document workspace reuse policy.
-- [ ] Add cleanup policy for canceled/terminal issues.
+- [x] Add cleanup policy for canceled/terminal issues.
 - [x] Add workspace manifest per ticket run.
 - [x] Add Finder reveal for project/repo/workspace paths.
 
@@ -422,6 +422,7 @@ Acceptance gate:
 - [x] Swift tests for report failure guidance and PR/check status.
 - [x] Swift tests for workspace paths.
 - [x] Swift tests for project/repository/workspace reveal path derivation.
+- [x] Swift tests for workspace cleanup policy.
 - [x] Swift tests for provider normalization.
 - [x] Swift tests for source-provider injection in mock orchestration.
 - [x] Swift tests for runtime detection.
