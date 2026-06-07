@@ -20,9 +20,11 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 	init(token: String? = nil, client: GitHubAPIClient? = nil) {
 		if let client {
 			self.client = client
-		} else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+		}
+		else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
 			self.client = GitHubAPIClient(token: token)
-		} else {
+		}
+		else {
 			self.client = nil
 		}
 	}
@@ -37,7 +39,11 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 
 	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
 		if FileManager.default.fileExists(atPath: path.appending(path: ".git").path()) {
-			_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["fetch", "--all", "--prune"], workingDirectory: path)
+			_ = try await ProcessCommand.run(
+				executable: "/usr/bin/git",
+				arguments: ["fetch", "--all", "--prune"],
+				workingDirectory: path
+			)
 			return
 		}
 		try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -60,17 +66,29 @@ final class GitHubRepositoryProvider: SourceCodeProvider {
 	}
 
 	func commitChanges(in repositoryPath: URL, message: String) async throws -> Bool {
-		let status = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["status", "--porcelain"], workingDirectory: repositoryPath)
+		let status = try await ProcessCommand.run(
+			executable: "/usr/bin/git",
+			arguments: ["status", "--porcelain"],
+			workingDirectory: repositoryPath
+		)
 		guard status.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
 			return false
 		}
 		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["add", "-A"], workingDirectory: repositoryPath)
-		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: ["-c", "user.name=Auditorium", "-c", "user.email=auditorium@local.invalid", "commit", "-m", message], workingDirectory: repositoryPath)
+		_ = try await ProcessCommand.run(
+			executable: "/usr/bin/git",
+			arguments: ["-c", "user.name=Auditorium", "-c", "user.email=auditorium@local.invalid", "commit", "-m", message],
+			workingDirectory: repositoryPath
+		)
 		return true
 	}
 
 	func pushBranch(named branchName: String, from repositoryPath: URL) async throws {
-		_ = try await ProcessCommand.run(executable: "/usr/bin/git", arguments: Self.pushArguments(branchName: branchName), workingDirectory: repositoryPath)
+		_ = try await ProcessCommand.run(
+			executable: "/usr/bin/git",
+			arguments: Self.pushArguments(branchName: branchName),
+			workingDirectory: repositoryPath
+		)
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
@@ -97,32 +115,48 @@ struct GitLabRepositoryProvider: SourceCodeProvider {
 	let kind = RepositoryProviderKind.gitlab
 
 	func listRepositories() async throws -> [RepositoryDescriptor] { throw ProviderError.notImplemented("GitLab Repository Provider") }
-	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws { throw ProviderError.notImplemented("GitLab Repository Provider") }
-	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor { throw ProviderError.notImplemented("GitLab Repository Provider") }
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		throw ProviderError.notImplemented("GitLab Repository Provider")
+	}
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		throw ProviderError.notImplemented("GitLab Repository Provider")
+	}
 }
 
 struct BitbucketRepositoryProvider: SourceCodeProvider {
 	let kind = RepositoryProviderKind.bitbucket
 
 	func listRepositories() async throws -> [RepositoryDescriptor] { throw ProviderError.notImplemented("Bitbucket Repository Provider") }
-	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws { throw ProviderError.notImplemented("Bitbucket Repository Provider") }
-	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor { throw ProviderError.notImplemented("Bitbucket Repository Provider") }
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		throw ProviderError.notImplemented("Bitbucket Repository Provider")
+	}
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		throw ProviderError.notImplemented("Bitbucket Repository Provider")
+	}
 }
 
 struct AzureDevOpsRepositoryProvider: SourceCodeProvider {
 	let kind = RepositoryProviderKind.azureDevOps
 
 	func listRepositories() async throws -> [RepositoryDescriptor] { throw ProviderError.notImplemented("Azure DevOps Repository Provider") }
-	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws { throw ProviderError.notImplemented("Azure DevOps Repository Provider") }
-	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor { throw ProviderError.notImplemented("Azure DevOps Repository Provider") }
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		throw ProviderError.notImplemented("Azure DevOps Repository Provider")
+	}
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		throw ProviderError.notImplemented("Azure DevOps Repository Provider")
+	}
 }
 
 struct GenericGitRepositoryProvider: SourceCodeProvider {
 	let kind = RepositoryProviderKind.genericGit
 
 	func listRepositories() async throws -> [RepositoryDescriptor] { throw ProviderError.notImplemented("Generic Git Repository Provider") }
-	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws { throw ProviderError.notImplemented("Generic Git Repository Provider") }
-	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor { throw ProviderError.notImplemented("Generic Git Repository Provider") }
+	func cloneOrUpdate(repository: RepositoryDescriptor, into path: URL) async throws {
+		throw ProviderError.notImplemented("Generic Git Repository Provider")
+	}
+	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		throw ProviderError.notImplemented("Generic Git Repository Provider")
+	}
 }
 
 final class GitHubIssueTrackerProvider: IssueTrackerProvider {
@@ -132,14 +166,21 @@ final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 	private let issueFilter: GitHubIssueFilter
 	private let client: GitHubAPIClient?
 
-	init(repositoryFullName: String? = nil, issueFilter: GitHubIssueFilter = GitHubIssueFilter(), token: String? = nil, client: GitHubAPIClient? = nil) {
+	init(
+		repositoryFullName: String? = nil,
+		issueFilter: GitHubIssueFilter = GitHubIssueFilter(),
+		token: String? = nil,
+		client: GitHubAPIClient? = nil
+	) {
 		self.repositoryFullName = repositoryFullName
 		self.issueFilter = issueFilter
 		if let client {
 			self.client = client
-		} else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+		}
+		else if let token, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
 			self.client = GitHubAPIClient(token: token)
-		} else {
+		}
+		else {
 			self.client = nil
 		}
 	}
@@ -232,20 +273,20 @@ struct AzureBoardsIssueTrackerProvider: IssueTrackerProvider {
 	let kind = IssueProviderKind.azureBoards
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor] { throw ProviderError.notImplemented("Azure Boards Issue Provider") }
-	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws { throw ProviderError.notImplemented("Azure Boards Issue Provider") }
+	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {
+		throw ProviderError.notImplemented("Azure Boards Issue Provider")
+	}
 	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("Azure Boards Issue Provider") }
 }
 
 typealias AzureBoardsIssueProvider = AzureBoardsIssueTrackerProvider
 
 struct AppleContainerRuntimeProvider: RuntimeProvider {
-	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor { throw ProviderError.notImplemented("Apple Container Runtime Provider") }
-	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle { throw ProviderError.notImplemented("Apple Container Runtime Provider") }
+	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor {
+		throw ProviderError.notImplemented("Apple Container Runtime Provider")
+	}
+	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle {
+		throw ProviderError.notImplemented("Apple Container Runtime Provider")
+	}
 	func stopExecution(handle: RuntimeExecutionHandle) async throws { throw ProviderError.notImplemented("Apple Container Runtime Provider") }
-}
-
-struct DockerRuntimeProvider: RuntimeProvider {
-	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor { throw ProviderError.notImplemented("Docker Runtime Provider") }
-	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle { throw ProviderError.notImplemented("Docker Runtime Provider") }
-	func stopExecution(handle: RuntimeExecutionHandle) async throws { throw ProviderError.notImplemented("Docker Runtime Provider") }
 }

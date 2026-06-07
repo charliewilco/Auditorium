@@ -431,7 +431,6 @@ Creation must use a transient draft object and commit SwiftData records only on 
 Runtime providers:
 
 - Apple Container
-- Docker
 - Local Workspace
 - Mock Runtime
 
@@ -439,7 +438,7 @@ v0:
 
 - Mock Runtime must work offline.
 - Apple Container must be detected accurately but may remain execution-placeholder until implemented.
-- Docker and Local Workspace may be placeholders.
+- Local Workspace must support real v0 execution.
 
 Preflight:
 

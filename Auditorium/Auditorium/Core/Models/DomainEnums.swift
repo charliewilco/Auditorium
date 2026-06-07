@@ -59,7 +59,6 @@ enum IssueProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
 
 enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
 	case appleContainer
-	case docker
 	case localWorkspace
 	case mockRuntime
 
@@ -68,7 +67,6 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var title: String {
 		switch self {
 		case .appleContainer: "Apple Container"
-		case .docker: "Docker"
 		case .localWorkspace: "Local Workspace"
 		case .mockRuntime: "Mock Runtime"
 		}
@@ -77,7 +75,6 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var symbol: String {
 		switch self {
 		case .appleContainer: "cube.box"
-		case .docker: "shippingbox"
 		case .localWorkspace: "folder"
 		case .mockRuntime: "cpu"
 		}
@@ -86,7 +83,6 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var runtimeHealthCheckID: String {
 		switch self {
 		case .appleContainer: "apple-container"
-		case .docker: "docker"
 		case .localWorkspace: "git"
 		case .mockRuntime: "mock-runtime"
 		}

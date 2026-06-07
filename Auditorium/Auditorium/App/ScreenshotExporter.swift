@@ -5,7 +5,10 @@ import SwiftUI
 enum ScreenshotExporter {
 	static func exportAndExit() {
 		do {
-			let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["AUDITORIUM_SCREENSHOT_DIR"] ?? "/tmp/auditorium-screenshots", isDirectory: true)
+			let directory = URL(
+				fileURLWithPath: ProcessInfo.processInfo.environment["AUDITORIUM_SCREENSHOT_DIR"] ?? "/tmp/auditorium-screenshots",
+				isDirectory: true
+			)
 			try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 			let data = ScreenshotData.make()
 			let state = AppState()
@@ -64,7 +67,8 @@ enum ScreenshotExporter {
 			)
 			print("Wrote Auditorium screenshots to \(directory.path())")
 			NSApp.terminate(nil)
-		} catch {
+		}
+		catch {
 			fputs("Screenshot export failed: \(error)\n", stderr)
 			exit(1)
 		}
@@ -76,7 +80,8 @@ enum ScreenshotExporter {
 		guard let image = renderer.nsImage,
 			let tiff = image.tiffRepresentation,
 			let representation = NSBitmapImageRep(data: tiff),
-			let png = representation.representation(using: .png, properties: [:]) else {
+			let png = representation.representation(using: .png, properties: [:])
+		else {
 			throw ScreenshotExportError.renderFailed(name)
 		}
 		try png.write(to: directory.appending(path: name))
@@ -116,7 +121,7 @@ private struct ScreenshotShell<Content: View>: View {
 				.frame(width: 720, height: 800)
 			Divider()
 			ScreenshotInspector(data: data.inspector, project: data.project)
-			.frame(width: 340, height: 800)
+				.frame(width: 340, height: 800)
 		}
 		.frame(width: 1280, height: 800)
 		.onAppear {
@@ -154,7 +159,10 @@ private struct ScreenshotSidebar: View {
 					}
 					.padding(.horizontal, 10)
 					.padding(.vertical, 7)
-					.background(destination == selected ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 7))
+					.background(
+						destination == selected ? Color.accentColor.opacity(0.16) : .clear,
+						in: RoundedRectangle(cornerRadius: 7)
+					)
 					.foregroundStyle(destination == selected ? Color.accentColor : Color.primary)
 				}
 			}
@@ -170,10 +178,19 @@ private struct ScreenshotDashboard: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 18) {
-			ScreenshotHeader(title: data.project.name, subtitle: "Visual agent orchestration for \(data.project.repositoryName)", badge: "Mock Runtime")
+			ScreenshotHeader(
+				title: data.project.name,
+				subtitle: "Visual agent orchestration for \(data.project.repositoryName)",
+				badge: "Mock Runtime"
+			)
 			LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
 				ScreenshotStat(title: "Open Tickets", value: "10", symbol: "ticket", tint: .blue)
-				ScreenshotStat(title: "Queued Tickets", value: "6", symbol: "text.line.first.and.arrowtriangle.forward", tint: .purple)
+				ScreenshotStat(
+					title: "Queued Tickets",
+					value: "6",
+					symbol: "text.line.first.and.arrowtriangle.forward",
+					tint: .purple
+				)
 				ScreenshotStat(title: "Running Agents", value: "0", symbol: "cpu", tint: .orange)
 				ScreenshotStat(title: "Completed Today", value: "1", symbol: "checkmark.circle.fill", tint: .green)
 				ScreenshotStat(title: "PRs Created", value: "3", symbol: "arrow.triangle.pull", tint: .indigo)
@@ -297,10 +314,18 @@ private struct ScreenshotRunDetail: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: 16) {
 			ScreenshotHeader(title: "Run \(data.run.id.uuidString.prefix(8))", subtitle: data.run.summary, badge: data.run.status.title)
-			ScreenshotProgress(value: Double(data.run.completedTickets + data.run.failedTickets + data.run.blockedTickets) / Double(data.run.totalTickets))
+			ScreenshotProgress(
+				value: Double(data.run.completedTickets + data.run.failedTickets + data.run.blockedTickets)
+					/ Double(data.run.totalTickets)
+			)
 			LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
 				ScreenshotStat(title: "Total", value: "\(data.run.totalTickets)", symbol: "ticket", tint: .blue)
-				ScreenshotStat(title: "Completed", value: "\(data.run.completedTickets)", symbol: "checkmark.circle.fill", tint: .green)
+				ScreenshotStat(
+					title: "Completed",
+					value: "\(data.run.completedTickets)",
+					symbol: "checkmark.circle.fill",
+					tint: .green
+				)
 				ScreenshotStat(title: "Failed", value: "\(data.run.failedTickets)", symbol: "xmark.octagon.fill", tint: .red)
 				ScreenshotStat(title: "Blocked", value: "\(data.run.blockedTickets)", symbol: "hand.raised.fill", tint: .yellow)
 			}
@@ -354,7 +379,11 @@ private struct ScreenshotSettings: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
-			ScreenshotHeader(title: "Settings", subtitle: "Accounts, providers, runtime health, security, reports, and logs", badge: "Local-first")
+			ScreenshotHeader(
+				title: "Settings",
+				subtitle: "Accounts, providers, runtime health, security, reports, and logs",
+				badge: "Local-first"
+			)
 			ScreenshotPanel(title: "Runtime Providers", symbol: "cpu") {
 				ForEach(data.runtimeHealth) { health in
 					HStack {
@@ -656,23 +685,31 @@ private struct ScreenshotData {
 			TicketRunRecord(
 				runID: run.id,
 				ticketID: ticket.id,
-				workspacePath: "~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Workspaces/\(ticket.externalID.lowercased())",
+				workspacePath:
+					"~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Workspaces/\(ticket.externalID.lowercased())",
 				containerID: "mock-\(ticket.externalID.lowercased())",
-				branchName: "auditorium/\(ticket.externalID.lowercased())-\(ticket.title.lowercased().replacingOccurrences(of: " ", with: "-"))",
+				branchName:
+					"auditorium/\(ticket.externalID.lowercased())-\(ticket.title.lowercased().replacingOccurrences(of: " ", with: "-"))",
 				status: index == 2 ? .blocked : index == 3 ? .failed : .needsReview,
 				startedAt: now.addingTimeInterval(Double(-650 + index * 45)),
 				endedAt: now.addingTimeInterval(Double(-420 + index * 55)),
 				retryCount: index == 3 ? 1 : 0,
 				logPath: "~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Logs/\(ticket.externalID).log",
 				pullRequestURL: [0, 1, 5].contains(index) ? "https://example.com/charlie/burton-ios/pull/\(123 + index)" : nil,
-				summary: index == 3 ? "Validation failed while exercising SessionStore refresh coverage." : "Implementation completed and is ready for review.",
-				failureReason: index == 2 ? "Needs product confirmation for cache expiration behavior." : index == 3 ? "Swift Testing assertion failed for stale token replacement." : nil,
+				summary: index == 3
+					? "Validation failed while exercising SessionStore refresh coverage."
+					: "Implementation completed and is ready for review.",
+				failureReason: index == 2
+					? "Needs product confirmation for cache expiration behavior."
+					: index == 3 ? "Swift Testing assertion failed for stale token replacement." : nil,
 				confidence: index == 3 ? 0.42 : index == 2 ? 0.54 : 0.88
 			)
 		}
 		let events = makeEvents(run: run, ticketRuns: ticketRuns, tickets: Array(tickets.prefix(6)), now: now)
 		let pullRequests = ticketRuns.compactMap { ticketRun -> PullRequestRecord? in
-			guard let url = ticketRun.pullRequestURL, let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else { return nil }
+			guard let url = ticketRun.pullRequestURL, let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
+				return nil
+			}
 			return PullRequestRecord(
 				provider: .github,
 				ticketRunID: ticketRun.id,
@@ -694,31 +731,100 @@ private struct ScreenshotData {
 			filePath: "~/Library/Application Support/Auditorium/Projects/\(project.id.uuidString)/Reports/run-\(run.id.uuidString).md"
 		)
 		let runtimeHealth = [
-			RuntimeHealthCheck(id: "apple-container", name: "Apple Container", state: .unsupported, detail: "Apple Container is gated until macOS 26+.", version: nil),
-			RuntimeHealthCheck(id: "docker", name: "Docker", state: .needsSetup, detail: "docker CLI was not found.", version: nil),
+			RuntimeHealthCheck(
+				id: "apple-container",
+				name: "Apple Container",
+				state: .unsupported,
+				detail: "Apple Container is gated until macOS 26+.",
+				version: nil
+			),
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
 			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/opt/homebrew/bin/codex", version: nil),
-			RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil)
+			RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),
 		]
-		return ScreenshotData(project: project, tickets: tickets, queueItems: queueItems, run: run, ticketRuns: ticketRuns, events: events, pullRequests: pullRequests, report: report, runtimeHealth: runtimeHealth)
+		return ScreenshotData(
+			project: project,
+			tickets: tickets,
+			queueItems: queueItems,
+			run: run,
+			ticketRuns: ticketRuns,
+			events: events,
+			pullRequests: pullRequests,
+			report: report,
+			runtimeHealth: runtimeHealth
+		)
 	}
 
 	private static func makeEvents(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], now: Date) -> [RuntimeEventRecord] {
 		var events = [
-			RuntimeEventRecord(runID: run.id, timestamp: now.addingTimeInterval(-700), level: .info, category: .orchestration, message: "Run started with concurrency 3."),
-			RuntimeEventRecord(runID: run.id, timestamp: now.addingTimeInterval(-680), level: .info, category: .provider, message: "Loaded 6 enabled queue items from GitHub Issues.")
+			RuntimeEventRecord(
+				runID: run.id,
+				timestamp: now.addingTimeInterval(-700),
+				level: .info,
+				category: .orchestration,
+				message: "Run started with concurrency 3."
+			),
+			RuntimeEventRecord(
+				runID: run.id,
+				timestamp: now.addingTimeInterval(-680),
+				level: .info,
+				category: .provider,
+				message: "Loaded 6 enabled queue items from GitHub Issues."
+			),
 		]
 		for (index, ticketRun) in ticketRuns.enumerated() {
 			let ticket = tickets[index]
-			events.append(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: now.addingTimeInterval(Double(-640 + index * 50)), level: .info, category: .runtime, message: "Created workspace for \(ticket.externalID)."))
-			events.append(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: now.addingTimeInterval(Double(-620 + index * 50)), level: .info, category: .agent, message: "Agent planned implementation for \(ticket.externalID)."))
-			events.append(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, timestamp: now.addingTimeInterval(Double(-590 + index * 50)), level: ticketRun.status == .failed ? .error : .success, category: ticketRun.status == .failed ? .tests : .pullRequest, message: ticketRun.status == .failed ? "Validation failed for \(ticket.externalID)." : "Pull request ready for \(ticket.externalID)."))
+			events.append(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					timestamp: now.addingTimeInterval(Double(-640 + index * 50)),
+					level: .info,
+					category: .runtime,
+					message: "Created workspace for \(ticket.externalID)."
+				)
+			)
+			events.append(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					timestamp: now.addingTimeInterval(Double(-620 + index * 50)),
+					level: .info,
+					category: .agent,
+					message: "Agent planned implementation for \(ticket.externalID)."
+				)
+			)
+			events.append(
+				RuntimeEventRecord(
+					runID: run.id,
+					ticketRunID: ticketRun.id,
+					timestamp: now.addingTimeInterval(Double(-590 + index * 50)),
+					level: ticketRun.status == .failed ? .error : .success,
+					category: ticketRun.status == .failed ? .tests : .pullRequest,
+					message: ticketRun.status == .failed
+						? "Validation failed for \(ticket.externalID)." : "Pull request ready for \(ticket.externalID)."
+				)
+			)
 		}
-		events.append(RuntimeEventRecord(runID: run.id, timestamp: now.addingTimeInterval(-60), level: .success, category: .report, message: "Generated markdown run report."))
+		events.append(
+			RuntimeEventRecord(
+				runID: run.id,
+				timestamp: now.addingTimeInterval(-60),
+				level: .success,
+				category: .report,
+				message: "Generated markdown run report."
+			)
+		)
 		return events
 	}
 
-	private static func makeReportMarkdown(project: Project, run: RunRecord, tickets: [TicketRecord], ticketRuns: [TicketRunRecord], pullRequests: [PullRequestRecord]) -> String {
+	private static func makeReportMarkdown(
+		project: Project,
+		run: RunRecord,
+		tickets: [TicketRecord],
+		ticketRuns: [TicketRunRecord],
+		pullRequests: [PullRequestRecord]
+	) -> String {
 		"""
 		# Auditorium Run Report
 		Project: \(project.name)

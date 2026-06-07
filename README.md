@@ -86,7 +86,7 @@ Working today:
 - SwiftData models exist for projects, repositories, issue trackers, tickets, queues, runs, ticket runs, pull requests, events, reports, and provider accounts.
 - Demo mode can seed a Burton Demo project with realistic tickets.
 - Mock orchestration can create ticket runs, stream events, generate fake PR URLs, and produce markdown reports.
-- Runtime detection checks Apple silicon, macOS version, Apple `container`, Docker, Git, Codex CLI, and GitHub CLI.
+- Runtime detection checks Apple silicon, macOS version, Apple `container`, Git, Codex CLI, and GitHub CLI.
 - Provider protocols exist for source-code and issue-tracker adapters.
 - GitHub provider adapter shape exists.
 - `symphony` CLI can initialize workflows, run doctor checks, run mock issues, and perform the first real GitHub/Codex-oriented path.
@@ -97,7 +97,7 @@ Still in progress:
 - Real GitHub issue import in the Mac app.
 - Real GitHub repository clone, branch, push, and pull request creation from the app.
 - Production Codex process integration inside the Mac app.
-- Apple Container/Docker execution providers.
+- Apple Container execution provider.
 - Full app-to-CLI handoff.
 - CI validation for every platform/runtime combination.
 
@@ -125,7 +125,7 @@ Future adapters should plug into the same provider boundaries:
 - Azure Boards
 - Generic Git remotes
 - Generic shell-command agents
-- Docker and local workspace runtimes
+- Local workspace runtime
 
 ## Architecture
 
@@ -222,9 +222,8 @@ For `symphony`:
 Optional runtime tooling:
 
 - Apple `container` CLI on supported Apple silicon systems
-- Docker
 
-Demo mode does not require network access, GitHub credentials, Codex, Docker, or Apple Container.
+Demo mode does not require network access, GitHub credentials, Codex, or Apple Container.
 
 ## Quick Start: macOS App
 
@@ -561,7 +560,7 @@ The next useful implementation slices are:
 3. Add a provider registry/factory so the orchestrator never depends on concrete provider types.
 4. Wire a real GitHub repository provider path: clone, branch, commit, push, pull request.
 5. Implement `CodexCLIProcessAgentProvider` for the Mac app.
-6. Add Apple Container and Docker execution providers.
+6. Add Apple Container execution provider.
 7. Connect the Mac app to the `symphony` CLI for headless runs.
 8. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
 

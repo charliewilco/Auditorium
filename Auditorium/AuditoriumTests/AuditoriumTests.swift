@@ -3188,7 +3188,6 @@ struct AuditoriumTests {
 		let ids = Set(checks.map(\.id))
 
 		#expect(ids.contains("apple-container"))
-		#expect(ids.contains("docker"))
 		#expect(ids.contains("git"))
 		#expect(ids.contains("codex"))
 		#expect(ids.contains("gh"))
@@ -3231,27 +3230,16 @@ struct AuditoriumTests {
 				detail: "container system service is running.",
 				version: "0.12.3"
 			),
-			RuntimeHealthCheck(
-				id: "docker",
-				name: "Docker",
-				state: .available,
-				detail: "/usr/local/bin/docker",
-				version: "Docker version 27.0.0"
-			),
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
 		])
 
 		let appleContainer = statuses.first { $0.kind == .appleContainer }
-		let docker = statuses.first { $0.kind == .docker }
 		let localWorkspace = statuses.first { $0.kind == .localWorkspace }
 		let mockRuntime = statuses.first { $0.kind == .mockRuntime }
 
 		#expect(appleContainer?.detection.state == .available)
 		#expect(appleContainer?.implementationState == .unavailable)
 		#expect(appleContainer?.isRunnable == false)
-		#expect(docker?.detection.state == .available)
-		#expect(docker?.implementationState == .unavailable)
-		#expect(docker?.isRunnable == false)
 		#expect(localWorkspace?.implementationState == .implemented)
 		#expect(localWorkspace?.isRunnable == true)
 		#expect(mockRuntime?.implementationState == .implemented)

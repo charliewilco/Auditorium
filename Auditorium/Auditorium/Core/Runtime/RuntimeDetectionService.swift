@@ -20,9 +20,6 @@ struct RuntimeDetectionService {
 		let containerVersion = containerVersionOutput.flatMap(Self.containerCLIVersion(from:))
 		let containerStatus =
 			containerPath == nil ? nil : await commandOutput(containerPath!, arguments: ["system", "status", "--format", "json"])
-		let dockerPath = await findExecutable(named: "docker")
-		let dockerVersion = dockerPath == nil ? nil : await commandOutput(dockerPath!, arguments: ["--version"])
-		let dockerInfo = dockerPath == nil ? nil : await commandOutput(dockerPath!, arguments: ["info", "--format", "{{.ServerVersion}}"])
 		let gitPath = await findExecutable(named: "git")
 		let codexPath = await findExecutable(named: "codex")
 		let ghPath = await findExecutable(named: "gh")
@@ -63,34 +60,6 @@ struct RuntimeDetectionService {
 				version: containerVersion
 			)
 		)
-
-		if dockerPath == nil {
-			checks.append(
-				RuntimeHealthCheck(
-					id: "docker",
-					name: "Docker",
-					state: .needsSetup,
-					detail: "docker CLI was not found.",
-					version: nil
-				)
-			)
-		}
-		else if dockerInfo?.isEmpty == false {
-			checks.append(
-				RuntimeHealthCheck(id: "docker", name: "Docker", state: .available, detail: dockerPath!, version: dockerVersion)
-			)
-		}
-		else {
-			checks.append(
-				RuntimeHealthCheck(
-					id: "docker",
-					name: "Docker",
-					state: .unavailable,
-					detail: "docker CLI exists but the daemon did not respond.",
-					version: dockerVersion
-				)
-			)
-		}
 
 		checks.append(check(for: "git", displayName: "Git", path: gitPath))
 		checks.append(check(for: "codex", displayName: "Codex CLI", path: codexPath))
@@ -279,7 +248,7 @@ struct RuntimeDetectionService {
 		switch kind {
 		case .localWorkspace, .mockRuntime:
 			.implemented
-		case .appleContainer, .docker:
+		case .appleContainer:
 			.unavailable
 		}
 	}
@@ -288,8 +257,6 @@ struct RuntimeDetectionService {
 		switch kind {
 		case .appleContainer:
 			"Apple Container execution is not implemented in v0."
-		case .docker:
-			"Docker execution is not implemented in v0."
 		case .localWorkspace:
 			"Implemented with local clone, branch, process, and file workspace execution."
 		case .mockRuntime:
