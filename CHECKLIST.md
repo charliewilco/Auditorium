@@ -221,7 +221,7 @@ Acceptance gate:
 - [~] Enforce bounded concurrency.
 - [~] Implement retry policy from workflow.
 - [~] Implement cancellation state transitions.
-- [ ] Implement per-ticket failure recovery.
+- [x] Implement per-ticket failure recovery.
 - [x] Snapshot queue and workflow policy per run.
 - [ ] Reconcile run state on app relaunch.
 - [ ] Move real long-running work out of SwiftUI views and into isolated services/actors.
@@ -438,6 +438,7 @@ Acceptance gate:
 - [x] Swift tests for retry behavior.
 - [x] Swift tests for cancellation.
 - [x] Swift tests for bounded concurrency.
+- [x] Swift tests for per-ticket failure recovery and continued queue execution.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.

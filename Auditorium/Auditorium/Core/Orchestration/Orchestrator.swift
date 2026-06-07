@@ -115,7 +115,7 @@ final class Orchestrator {
 					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 					continue
 				}
-				try await processTicket(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: mockAgentProvider, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
+				try await processTicketWithRecovery(project: project, repository: repository, ticket: ticket, ticketRun: ticketRun, run: run, runtime: runtime, agent: mockAgentProvider, sourceProvider: mockSourceProvider, context: context, workflowPolicyMarkdown: plan.workflowPolicyMarkdown)
 			}
 		}
 
@@ -175,7 +175,7 @@ final class Orchestrator {
 					  let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 					continue
 				}
-				try await processTicket(
+				try await processTicketWithRecovery(
 					project: project,
 					repository: repository,
 					ticket: ticket,
@@ -499,6 +499,55 @@ final class Orchestrator {
 		ticket.updatedAt = .now
 		ticketRun.endedAt = .now
 		try ModelIntegrityValidator.save(context: context)
+	}
+
+	private func processTicketWithRecovery(
+		project: Project,
+		repository: RepositoryDescriptor,
+		ticket: TicketRecord,
+		ticketRun: TicketRunRecord,
+		run: RunRecord,
+		runtime: any RuntimeProvider,
+		agent: any AgentProvider,
+		sourceProvider: any SourceCodeProvider,
+		context: ModelContext,
+		workflowPolicyMarkdown: String,
+		commitAndPush: Bool = false
+	) async throws {
+		do {
+			try await processTicket(
+				project: project,
+				repository: repository,
+				ticket: ticket,
+				ticketRun: ticketRun,
+				run: run,
+				runtime: runtime,
+				agent: agent,
+				sourceProvider: sourceProvider,
+				context: context,
+				workflowPolicyMarkdown: workflowPolicyMarkdown,
+				commitAndPush: commitAndPush
+			)
+		} catch is CancellationError {
+			throw CancellationError()
+		} catch ProcessCommandError.canceled(let executable, let arguments) {
+			throw ProcessCommandError.canceled(executable: executable, arguments: arguments)
+		} catch {
+			markTicketRunFailed(ticket: ticket, ticketRun: ticketRun, run: run, error: error, context: context)
+			try ModelIntegrityValidator.save(context: context)
+		}
+	}
+
+	private func markTicketRunFailed(ticket: TicketRecord, ticketRun: TicketRunRecord, run: RunRecord, error: Error, context: ModelContext) {
+		let message = error.localizedDescription
+		ticket.status = .failed
+		ticket.updatedAt = .now
+		ticketRun.status = .failed
+		ticketRun.failureReason = message
+		ticketRun.retryCount += 1
+		ticketRun.endedAt = .now
+		ticketRun.confidence = 0
+		context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .error, category: .orchestration, message: "Ticket \(ticket.externalID) failed: \(message)"))
 	}
 
 	private func insertRunFailure(projectID: UUID, message: String, context: ModelContext) throws {

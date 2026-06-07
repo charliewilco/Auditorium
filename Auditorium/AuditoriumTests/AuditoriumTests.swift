@@ -1871,6 +1871,97 @@ struct AuditoriumTests {
 		#expect(events.contains { $0.message == "Agent completed without file changes; no pull request was opened." })
 	}
 
+	@Test func localWorkspaceCodexRecoversTicketFailureAndContinuesQueue() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let sourceProvider = StaticSourceCodeProvider(kind: .github, failingPullRequestTitles: ["301: First ticket fails"])
+		let agentProvider = StaticAgentProvider(events: [
+			AgentEvent(level: .success, category: .agent, message: "codex_completed", summary: "Implemented change.", outcome: .completed)
+		])
+		let project = Project(
+			name: "Failure Recovery",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let firstTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "301",
+			title: "First ticket fails",
+			body: "PR creation fails.",
+			status: .ready,
+			labels: ["recovery"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/301",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: project.id
+		)
+		let secondTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "302",
+			title: "Second ticket continues",
+			body: "This ticket should still run.",
+			status: .ready,
+			labels: ["recovery"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/302",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(firstTicket)
+		context.insert(secondTicket)
+		context.insert(QueueItemRecord(ticketID: firstTicket.id, projectID: project.id, position: 0, priority: .high))
+		context.insert(QueueItemRecord(ticketID: secondTicket.id, projectID: project.id, position: 1, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil)
+		])
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			localWorkspaceSourceProvider: sourceProvider,
+			codexAgentProvider: agentProvider
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
+		let firstRun = try #require(ticketRuns.first { $0.ticketID == firstTicket.id })
+		let secondRun = try #require(ticketRuns.first { $0.ticketID == secondTicket.id })
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+
+		#expect(run.status == .completedWithFailures)
+		#expect(run.completedTickets == 1)
+		#expect(run.failedTickets == 1)
+		#expect(firstTicket.status == .failed)
+		#expect(firstRun.status == .failed)
+		#expect(firstRun.failureReason?.contains("Pull request failed for 301: First ticket fails") == true)
+		#expect(firstRun.retryCount == 1)
+		#expect(secondTicket.status == .needsReview)
+		#expect(secondRun.status == .needsReview)
+		#expect(secondRun.pullRequestURL == "https://example.com/charliewilco/Auditorium/pull/source-provider")
+		#expect(sourceProvider.createdPullRequestTitles == ["302: Second ticket continues"])
+		#expect(reports.count == 1)
+		#expect(events.contains { $0.message.contains("Ticket 301 failed: Pull request failed for 301: First ticket fails") })
+	}
+
 	@Test func mockOrchestratorWritesWorkspaceManifestPerTicketRun() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -2462,15 +2553,17 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 	let kind: RepositoryProviderKind
 	let authentication = ProviderAuthenticationDescriptor(method: .none, displayName: "Static Source", oauth: nil)
 	let commitsChanges: Bool
+	let failingPullRequestTitles: Set<String>
 	private(set) var createdPullRequestTitles: [String] = []
 	private(set) var clonePaths: [URL] = []
 	private(set) var createdBranches: [(name: String, repositoryPath: URL)] = []
 	private(set) var commitPaths: [URL] = []
 	private(set) var pushedBranches: [String] = []
 
-	init(kind: RepositoryProviderKind, commitsChanges: Bool = true) {
+	init(kind: RepositoryProviderKind, commitsChanges: Bool = true, failingPullRequestTitles: Set<String> = []) {
 		self.kind = kind
 		self.commitsChanges = commitsChanges
+		self.failingPullRequestTitles = failingPullRequestTitles
 	}
 
 	func listRepositories() async throws -> [RepositoryDescriptor] {
@@ -2496,6 +2589,9 @@ private final class StaticSourceCodeProvider: SourceCodeProvider {
 	}
 
 	func createPullRequest(_ request: PullRequestRequest) async throws -> PullRequestDescriptor {
+		if failingPullRequestTitles.contains(request.title) {
+			throw ProviderError.unavailable("Pull request failed for \(request.title)")
+		}
 		createdPullRequestTitles.append(request.title)
 		return PullRequestDescriptor(
 			title: request.title,
