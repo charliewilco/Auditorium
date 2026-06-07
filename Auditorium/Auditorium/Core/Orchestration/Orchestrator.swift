@@ -186,7 +186,7 @@ final class Orchestrator {
 		run.blockedTickets = blocked
 		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
 		run.endedAt = .now
-		run.status = failed == 0 && blocked == 0 ? .completed : .completedWithFailures
+		run.status = aggregateRunStatus(completed: completed, failed: failed, blocked: blocked)
 		run.summary = "Completed \(completed), failed \(failed), blocked \(blocked)."
 		context.insert(RuntimeEventRecord(runID: run.id, level: .success, category: .report, message: "Generating markdown report."))
 
@@ -312,7 +312,7 @@ final class Orchestrator {
 		run.blockedTickets = blocked
 		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
 		run.endedAt = .now
-		run.status = failed == 0 && blocked == 0 ? .completed : .completedWithFailures
+		run.status = aggregateRunStatus(completed: completed, failed: failed, blocked: blocked)
 		run.summary = "Completed \(completed), failed \(failed), blocked \(blocked)."
 		context.insert(RuntimeEventRecord(runID: run.id, level: .success, category: .report, message: "Generating markdown report."))
 
@@ -509,7 +509,7 @@ final class Orchestrator {
 		run.blockedTickets = ticketRuns.filter { $0.status == .blocked }.count
 		run.pullRequestsCreated = ticketRuns.filter { $0.pullRequestURL != nil }.count
 		run.endedAt = .now
-		run.status = run.failedTickets == 0 ? .completed : .completedWithFailures
+		run.status = aggregateRunStatus(completed: run.completedTickets, failed: run.failedTickets, blocked: run.blockedTickets)
 		run.summary = "symphony completed \(run.completedTickets) tickets and failed \(run.failedTickets)."
 		let finalTickets = try context.fetch(FetchDescriptor<TicketRecord>()).filter { $0.sourceProjectID == project.id }
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>()).filter { $0.runID == run.id }
@@ -1054,6 +1054,16 @@ final class Orchestrator {
 				message: "Ticket \(ticket.externalID) failed: \(message)"
 			)
 		)
+	}
+
+	private func aggregateRunStatus(completed: Int, failed: Int, blocked: Int) -> RunStatus {
+		if failed == 0 && blocked == 0 {
+			return .completed
+		}
+		if completed == 0 {
+			return .failed
+		}
+		return .completedWithFailures
 	}
 
 	private func nonRetryableSync<T>(_ operation: () throws -> T) throws -> T {

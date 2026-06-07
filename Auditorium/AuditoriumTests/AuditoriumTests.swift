@@ -3167,6 +3167,8 @@ struct AuditoriumTests {
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
 
 		#expect(run.status == .failed)
+		#expect(run.completedTickets == 0)
+		#expect(run.failedTickets == 1)
 		#expect(ticket.status == .failed)
 		#expect(ticketRun.status == .failed)
 		#expect(ticketRun.retryCount == 1)
