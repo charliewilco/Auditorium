@@ -454,7 +454,7 @@ Acceptance gate:
 - [x] Rust tests for daemon dispatch execution and project-state reconciliation.
 - [x] Rust tests for daemon stale-running reconciliation.
 - [x] Rust tests for quoted Codex command parsing and argv handoff.
-- [ ] UI smoke tests that are not template-only.
+- [x] UI smoke tests that are not template-only.
 - [ ] Manual acceptance checklist with screenshots.
 
 Acceptance gate:

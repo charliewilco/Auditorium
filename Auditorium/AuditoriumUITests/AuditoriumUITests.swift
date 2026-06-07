@@ -1,43 +1,41 @@
-//
-//  AuditoriumUITests.swift
-//  AuditoriumUITests
-//
-//  Created by Charlie on 6/6/26.
-//
-
 import XCTest
 
 final class AuditoriumUITests: XCTestCase {
+	private var app: XCUIApplication!
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+	override func setUpWithError() throws {
+		continueAfterFailure = false
+		app = XCUIApplication()
+		app.launchEnvironment["CI"] = "true"
+	}
 
-        // In UI tests it is usually best to stop immediately when a failure occurs.
-        continueAfterFailure = false
+	override func tearDownWithError() throws {
+		app = nil
+	}
 
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
+	@MainActor
+	func testFirstLaunchShowsWelcomeActions() throws {
+		app.launch()
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
+		XCTAssertTrue(app.staticTexts["Auditorium"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.buttons["Create Project"].exists)
+		XCTAssertTrue(app.buttons["Open Demo Project"].exists)
+		XCTAssertTrue(app.staticTexts["Queue the work. Hit play. Review the pull requests."].exists)
+	}
 
-    @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
-        app.launch()
+	@MainActor
+	func testOpenDemoProjectShowsDashboardSmokeState() throws {
+		app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
-    }
+		let openDemo = app.buttons["Open Demo Project"]
+		XCTAssertTrue(openDemo.waitForExistence(timeout: 5))
+		openDemo.click()
 
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
-    }
+		XCTAssertTrue(app.staticTexts["Burton Demo"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Open Tickets"].exists)
+		XCTAssertTrue(app.staticTexts["Queued Tickets"].exists)
+		XCTAssertTrue(app.staticTexts["Local Paths"].exists)
+		XCTAssertTrue(app.staticTexts["Runtime Health"].exists)
+		XCTAssertTrue(app.staticTexts["Offline"].exists)
+	}
 }
