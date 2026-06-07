@@ -8,6 +8,10 @@ struct AppServices {
 	let projectCreation = ProjectCreationService()
 	let symphony = SymphonyCLIProcessRunner()
 
+	@MainActor var projectEnvironmentSecrets: ProjectEnvironmentSecretService {
+		ProjectEnvironmentSecretService(keychain: keychain)
+	}
+
 	@MainActor var providerRegistry: ProviderRegistry {
 		ProviderRegistry(keychainService: keychain)
 	}

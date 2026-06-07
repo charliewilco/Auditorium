@@ -42,6 +42,7 @@ enum ModelIntegrityValidator {
 		try validateRuntimeEvents(context: context, issues: &issues)
 		try validateReports(context: context, issues: &issues)
 		try validateProviderAccounts(context: context, issues: &issues)
+		try validateProjectEnvironmentSecrets(context: context, issues: &issues)
 		return issues
 	}
 
@@ -434,6 +435,39 @@ extension ModelIntegrityValidator {
 					("refreshTokenKeychainAccount", record.refreshTokenKeychainAccount ?? ""),
 				],
 				model: "ProviderAccountRecord",
+				id: id,
+				issues: &issues
+			)
+		}
+	}
+
+	fileprivate static func validateProjectEnvironmentSecrets(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
+		for record in try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>()) {
+			let id = record.id.uuidString
+			requireNonEmpty(record.name, model: "ProjectEnvironmentSecretRecord", id: id, field: "name", issues: &issues)
+			requireNonEmpty(
+				record.keychainAccount,
+				model: "ProjectEnvironmentSecretRecord",
+				id: id,
+				field: "keychainAccount",
+				issues: &issues
+			)
+			if ProjectEnvironmentSecretService.isValidName(record.name) == false {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "ProjectEnvironmentSecretRecord",
+						id: id,
+						field: "name",
+						reason: "environment variable name must match [A-Z_][A-Z0-9_]*"
+					)
+				)
+			}
+			scanSecrets(
+				[
+					("name", record.name),
+					("keychainAccount", record.keychainAccount),
+				],
+				model: "ProjectEnvironmentSecretRecord",
 				id: id,
 				issues: &issues
 			)

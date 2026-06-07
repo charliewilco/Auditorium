@@ -576,6 +576,35 @@ final class ProviderAccountRecord {
 	}
 }
 
+@Model
+final class ProjectEnvironmentSecretRecord {
+	var id: UUID
+	var projectID: UUID
+	var name: String
+	var keychainAccount: String
+	var isEnabled: Bool
+	var createdAt: Date
+	var updatedAt: Date
+
+	init(
+		id: UUID = UUID(),
+		projectID: UUID,
+		name: String,
+		keychainAccount: String,
+		isEnabled: Bool = true,
+		createdAt: Date = .now,
+		updatedAt: Date = .now
+	) {
+		self.id = id
+		self.projectID = projectID
+		self.name = name
+		self.keychainAccount = keychainAccount
+		self.isEnabled = isEnabled
+		self.createdAt = createdAt
+		self.updatedAt = updatedAt
+	}
+}
+
 struct WorkflowPolicy {
 	static let defaultMarkdown = """
 		---

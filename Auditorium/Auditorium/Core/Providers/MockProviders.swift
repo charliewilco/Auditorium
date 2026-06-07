@@ -62,7 +62,13 @@ struct MockRuntimeProvider: RuntimeProvider {
 	}
 
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle {
-		RuntimeExecutionHandle(id: request.workspace.runtimeID, workspacePath: request.workspace.path)
+		if request.environment.isEmpty == false {
+			let metadataDirectory = request.workspace.path.appending(path: ".auditorium")
+			try FileManager.default.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
+			let payload = #"{"injectedVariableCount":\#(request.environment.count)}"#
+			try payload.write(to: metadataDirectory.appending(path: "runtime-environment.json"), atomically: true, encoding: .utf8)
+		}
+		return RuntimeExecutionHandle(id: request.workspace.runtimeID, workspacePath: request.workspace.path)
 	}
 
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {}

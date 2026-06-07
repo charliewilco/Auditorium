@@ -643,9 +643,10 @@ struct AuditoriumTests {
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
 		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
 		let accounts = try context.fetch(FetchDescriptor<ProviderAccountRecord>())
+		let environmentSecrets = try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 5)
-		#expect(AppSchema.MigrationPlan.stages.count == 4)
+		#expect(AppSchema.MigrationPlan.schemas.count == 6)
+		#expect(AppSchema.MigrationPlan.stages.count == 5)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
@@ -660,6 +661,7 @@ struct AuditoriumTests {
 		#expect(events.first?.runID == ids.runID)
 		#expect(reports.first?.runID == ids.runID)
 		#expect(accounts.first?.displayName == "GitHub")
+		#expect(environmentSecrets.isEmpty)
 		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
 	}
 
@@ -3706,6 +3708,159 @@ struct AuditoriumTests {
 		#expect(manifest.ticketExternalID == "MAN-101")
 		#expect(manifest.repository == "charliewilco/Auditorium")
 		#expect(manifest.branchName == ticketRun.branchName)
+	}
+
+	@Test func mockOrchestratorInjectsEnabledRuntimeEnvironmentSecretsWithoutLeakingValues() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let environmentSecrets = ProjectEnvironmentSecretService(keychain: keychain)
+		let project = Project(
+			name: "Runtime Environment",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "ENV-101",
+			title: "Inject runtime environment",
+			body: "Runtime receives enabled environment secrets.",
+			status: .ready,
+			labels: ["environment"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/101",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let enabled = try environmentSecrets.upsertSecret(
+			projectID: project.id,
+			name: "RUNTIME_TOKEN",
+			value: "runtime-secret-value",
+			context: context
+		)
+		let disabled = try environmentSecrets.upsertSecret(
+			projectID: project.id,
+			name: "DISABLED_TOKEN",
+			value: "disabled-secret-value",
+			isEnabled: false,
+			context: context
+		)
+		defer {
+			try? keychain.deleteSecret(account: enabled.keychainAccount)
+			try? keychain.deleteSecret(account: disabled.keychainAccount)
+		}
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			environmentSecretService: environmentSecrets,
+			mockAgentProvider: StaticAgentProvider(events: [
+				AgentEvent(level: .success, category: .agent, message: "agent_completed", summary: "Completed.", outcome: .completed)
+			])
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let environmentMetadataURL = URL(fileURLWithPath: ticketRun.workspacePath).appending(path: ".auditorium/runtime-environment.json")
+		let environmentMetadata = try String(contentsOf: environmentMetadataURL, encoding: .utf8)
+		let manifest = try String(
+			contentsOf: workspace.workspaceManifestPath(workspace: URL(fileURLWithPath: ticketRun.workspacePath)),
+			encoding: .utf8
+		)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+		let persistedRuns = try context.fetch(FetchDescriptor<RunRecord>())
+		let persistedText =
+			([manifest] + events.map { "\($0.message)\n\($0.metadataJSON)" } + reports.map(\.markdown)
+			+ persistedRuns.map(\.reportMarkdown))
+			.joined(separator: "\n")
+
+		#expect(environmentMetadata == #"{"injectedVariableCount":1}"#)
+		#expect(persistedText.contains("runtime-secret-value") == false)
+		#expect(persistedText.contains("disabled-secret-value") == false)
+		#expect(environmentMetadata.contains("RUNTIME_TOKEN") == false)
+		#expect(environmentMetadata.contains("DISABLED_TOKEN") == false)
+	}
+
+	@Test func missingRuntimeEnvironmentSecretBlocksRuntimeStartWithClearError() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let environmentSecrets = ProjectEnvironmentSecretService(keychain: keychain)
+		let project = Project(
+			name: "Missing Runtime Environment",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "ENV-404",
+			title: "Missing runtime secret",
+			body: "Dispatch should stop before runtime starts.",
+			status: .ready,
+			labels: ["environment"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/404",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		context.insert(
+			ProjectEnvironmentSecretRecord(
+				projectID: project.id,
+				name: "MISSING_TOKEN",
+				keychainAccount: ProjectEnvironmentSecretService.keychainAccount(projectID: project.id, name: "MISSING_TOKEN")
+			)
+		)
+		try context.save()
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			environmentSecretService: environmentSecrets,
+			mockAgentProvider: StaticAgentProvider(events: [
+				AgentEvent(level: .success, category: .agent, message: "agent_completed", summary: "Completed.", outcome: .completed)
+			])
+		)
+
+		try await orchestrator.execute(projectID: project.id, concurrency: 1, context: context)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let environmentMetadataURL = URL(fileURLWithPath: ticketRun.workspacePath).appending(path: ".auditorium/runtime-environment.json")
+
+		#expect(ticketRun.status == .failed)
+		#expect(
+			ticketRun.failureReason
+				== "Runtime environment secret MISSING_TOKEN is missing from Keychain. Replace or delete it before running this project."
+		)
+		#expect(FileManager.default.fileExists(atPath: environmentMetadataURL.path()) == false)
 	}
 
 	@Test func mockOrchestratorUsesInjectedSourceProviderForPullRequests() async throws {

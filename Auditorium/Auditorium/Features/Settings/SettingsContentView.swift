@@ -24,6 +24,7 @@ struct SettingsContentView: View {
 	@Environment(\.modelContext) private var modelContext
 	@Environment(\.appServices) private var services
 	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
+	@Query(sort: \ProjectEnvironmentSecretRecord.name) private var environmentSecrets: [ProjectEnvironmentSecretRecord]
 	@AppStorage("githubOAuthClientID") private var githubOAuthClientID = ""
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
@@ -31,6 +32,8 @@ struct SettingsContentView: View {
 	@AppStorage("allowFilesystemWrite") private var allowFilesystemWrite = true
 	@AppStorage(ApplicationSettingsKeys.logsDirectoryPath) private var logsDirectoryPath = ""
 	@AppStorage(ApplicationSettingsKeys.reportsDirectoryPath) private var reportsDirectoryPath = ""
+	@State private var environmentSecretName = ""
+	@State private var environmentSecretValue = ""
 
 	init(project: Project? = nil, runtimeHealth: [RuntimeHealthCheck], symphonyDoctorStatus: SymphonyDoctorStatus?) {
 		self.project = project
@@ -103,6 +106,9 @@ struct SettingsContentView: View {
 					Toggle("Allow network access", isOn: $allowNetworkAccess)
 					Toggle("Allow filesystem write", isOn: $allowFilesystemWrite)
 				}
+				settingsSection("Runtime Environment") {
+					runtimeEnvironmentSection
+				}
 				settingsSection("Concurrency") {
 					Text("Per-project queue concurrency is controlled from the Queue screen.")
 						.foregroundStyle(.secondary)
@@ -135,6 +141,11 @@ struct SettingsContentView: View {
 		RuntimeDetectionService.runtimeProviderStatuses(from: runtimeHealth)
 	}
 
+	private var projectEnvironmentSecrets: [ProjectEnvironmentSecretRecord] {
+		guard let project else { return [] }
+		return environmentSecrets.filter { $0.projectID == project.id }.sorted { $0.name < $1.name }
+	}
+
 	private var githubAuthenticationState: GitHubAuthenticationState {
 		GitHubAuthenticationState(providerAccounts: providerAccounts) { account in
 			try services.keychain.readSecret(account: account)
@@ -153,6 +164,66 @@ struct SettingsContentView: View {
 			}
 			Spacer()
 			StatusBadge(title: githubStatusTitle(state.status), tint: githubStatusTint(state.status))
+		}
+	}
+
+	@ViewBuilder
+	private var runtimeEnvironmentSection: some View {
+		if let project {
+			Text("Values are stored in Keychain and injected only into runtime containers immediately before execution.")
+				.foregroundStyle(.secondary)
+			HStack {
+				TextField("ENV_NAME", text: $environmentSecretName)
+					.textFieldStyle(.roundedBorder)
+				SecureField("Value", text: $environmentSecretValue)
+					.textFieldStyle(.roundedBorder)
+				Button {
+					saveEnvironmentSecret(projectID: project.id)
+				} label: {
+					Label("Add or Replace", systemImage: "key.fill")
+				}
+				.disabled(
+					environmentSecretName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+						|| environmentSecretValue.isEmpty
+				)
+			}
+			if projectEnvironmentSecrets.isEmpty {
+				Text("No runtime environment secrets saved for this project.")
+					.foregroundStyle(.secondary)
+			}
+			else {
+				ForEach(projectEnvironmentSecrets) { secret in
+					HStack(alignment: .firstTextBaseline, spacing: 12) {
+						VStack(alignment: .leading, spacing: 4) {
+							Text(secret.name)
+								.font(.callout.weight(.medium))
+							Text(
+								"Created \(secret.createdAt, format: .dateTime.month().day().hour().minute()) - Updated \(secret.updatedAt, format: .dateTime.month().day().hour().minute())"
+							)
+							.font(.caption)
+							.foregroundStyle(.secondary)
+						}
+						Spacer()
+						Toggle(
+							secret.isEnabled ? "Enabled" : "Disabled",
+							isOn: Binding(
+								get: { secret.isEnabled },
+								set: { setEnvironmentSecret(secret, enabled: $0) }
+							)
+						)
+						.toggleStyle(.switch)
+						Button(role: .destructive) {
+							deleteEnvironmentSecret(secret)
+						} label: {
+							Label("Delete", systemImage: "trash")
+						}
+					}
+				}
+			}
+		}
+		else {
+			Text("Select a project to manage runtime environment secrets.")
+				.foregroundStyle(.secondary)
 		}
 	}
 
@@ -247,6 +318,40 @@ struct SettingsContentView: View {
 	private func clearGitHubCredentials() {
 		do {
 			try services.providerRegistry.clearGitHubCredentials(context: modelContext)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func saveEnvironmentSecret(projectID: UUID) {
+		do {
+			try services.projectEnvironmentSecrets.upsertSecret(
+				projectID: projectID,
+				name: environmentSecretName,
+				value: environmentSecretValue,
+				context: modelContext
+			)
+			environmentSecretName = ""
+			environmentSecretValue = ""
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func setEnvironmentSecret(_ secret: ProjectEnvironmentSecretRecord, enabled: Bool) {
+		do {
+			try services.projectEnvironmentSecrets.setEnabled(enabled, record: secret, context: modelContext)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func deleteEnvironmentSecret(_ secret: ProjectEnvironmentSecretRecord) {
+		do {
+			try services.projectEnvironmentSecrets.deleteSecret(secret, context: modelContext)
 		}
 		catch {
 			NSAlert(error: error).runModal()

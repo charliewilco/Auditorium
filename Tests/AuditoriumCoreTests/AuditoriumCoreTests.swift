@@ -786,6 +786,71 @@ struct AuditoriumCoreTests {
 		#expect(selections.first?.displayName == "GitHub Connected")
 	}
 
+	@Test func projectEnvironmentSecretMetadataPersistsWhileValuesStayInKeychain() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let service = ProjectEnvironmentSecretService(keychain: keychain)
+		let projectID = UUID()
+		let secretValue = "github_pat_1234567890abcdefghijklmnopqrst"
+
+		let record = try service.upsertSecret(projectID: projectID, name: "API_TOKEN", value: secretValue, context: context)
+		defer { try? keychain.deleteSecret(account: record.keychainAccount) }
+
+		let records = try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>())
+		#expect(records.count == 1)
+		#expect(records.first?.projectID == projectID)
+		#expect(records.first?.name == "API_TOKEN")
+		#expect(records.first?.isEnabled == true)
+		#expect(records.first?.keychainAccount.contains(secretValue) == false)
+		#expect(try keychain.readSecret(account: record.keychainAccount) == secretValue)
+		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
+	}
+
+	@Test func projectEnvironmentSecretServiceRejectsInvalidNames() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let service = ProjectEnvironmentSecretService(
+			keychain: KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		)
+
+		for name in ["api_token", "1TOKEN", "TOKEN-DASH", "TOKEN VALUE"] {
+			#expect(throws: ProjectEnvironmentSecretError.invalidName(name)) {
+				try service.upsertSecret(projectID: UUID(), name: name, value: "secret", context: context)
+			}
+		}
+	}
+
+	@Test func projectEnvironmentSecretDeleteRemovesKeychainValue() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.coretests.\(UUID().uuidString)")
+		let service = ProjectEnvironmentSecretService(keychain: keychain)
+
+		let record = try service.upsertSecret(projectID: UUID(), name: "SERVICE_TOKEN", value: "secret-value", context: context)
+		try service.deleteSecret(record, context: context)
+
+		#expect(try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>()).isEmpty)
+		#expect(try keychain.readSecret(account: record.keychainAccount) == nil)
+	}
+
+	@Test func projectEnvironmentSecretIntegrityRejectsSecretLikeMetadata() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let record = ProjectEnvironmentSecretRecord(
+			projectID: UUID(),
+			name: "SERVICE_TOKEN",
+			keychainAccount: "gho_1234567890abcdefghijklmnopqrst"
+		)
+		context.insert(record)
+		try context.save()
+
+		let issues = try ModelIntegrityValidator.validate(context: context)
+		let secretFields = Set(issues.filter { $0.reason.contains("secret") }.map { "\($0.model).\($0.field)" })
+
+		#expect(secretFields == ["ProjectEnvironmentSecretRecord.keychainAccount"])
+	}
+
 	@Test func projectCreationReusesSelectedGitHubAccount() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

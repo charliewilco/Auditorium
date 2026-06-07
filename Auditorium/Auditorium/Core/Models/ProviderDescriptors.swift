@@ -72,6 +72,19 @@ struct RuntimeExecutionRequest: Sendable {
 	let ticket: TicketDescriptor
 	let workspace: WorkspaceDescriptor
 	let policyMarkdown: String
+	let environment: [String: String]
+
+	init(
+		ticket: TicketDescriptor,
+		workspace: WorkspaceDescriptor,
+		policyMarkdown: String,
+		environment: [String: String] = [:]
+	) {
+		self.ticket = ticket
+		self.workspace = workspace
+		self.policyMarkdown = policyMarkdown
+		self.environment = environment
+	}
 }
 
 struct RuntimeExecutionHandle: Sendable {

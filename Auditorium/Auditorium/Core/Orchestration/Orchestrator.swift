@@ -7,6 +7,7 @@ final class Orchestrator {
 	private let runtimeDetection: RuntimeDetectionService
 	private let reportGenerator: ReportGenerator
 	private let symphonyRunner: SymphonyCLIProcessRunner
+	private let environmentSecretService: ProjectEnvironmentSecretService
 	private let providerRegistry: ProviderRegistry?
 	private let mockSourceProvider: any SourceCodeProvider
 	private let mockAgentProvider: any AgentProvider
@@ -27,6 +28,7 @@ final class Orchestrator {
 		runtimeDetection: RuntimeDetectionService,
 		reportGenerator: ReportGenerator,
 		symphonyRunner: SymphonyCLIProcessRunner = SymphonyCLIProcessRunner(),
+		environmentSecretService: ProjectEnvironmentSecretService? = nil,
 		providerRegistry: ProviderRegistry? = nil,
 		mockSourceProvider: (any SourceCodeProvider)? = nil,
 		mockAgentProvider: (any AgentProvider)? = nil,
@@ -38,6 +40,7 @@ final class Orchestrator {
 		self.runtimeDetection = runtimeDetection
 		self.reportGenerator = reportGenerator
 		self.symphonyRunner = symphonyRunner
+		self.environmentSecretService = environmentSecretService ?? ProjectEnvironmentSecretService()
 		self.providerRegistry = providerRegistry
 		self.mockSourceProvider = mockSourceProvider ?? MockGitHubRepositoryProvider()
 		self.mockAgentProvider = mockAgentProvider ?? MockCodexAgentProvider()
@@ -589,8 +592,16 @@ final class Orchestrator {
 			)
 		)
 		ticketRun.status = .running
+		let runtimeEnvironment = try nonRetryableSync {
+			try environmentSecretService.resolveEnabledEnvironment(projectID: project.id, context: context)
+		}
 		let handle = try await runtime.startExecution(
-			RuntimeExecutionRequest(ticket: descriptor, workspace: workspace, policyMarkdown: workflowPolicyMarkdown)
+			RuntimeExecutionRequest(
+				ticket: descriptor,
+				workspace: workspace,
+				policyMarkdown: workflowPolicyMarkdown,
+				environment: runtimeEnvironment
+			)
 		)
 		context.insert(
 			RuntimeEventRecord(
