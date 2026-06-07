@@ -133,7 +133,10 @@ final class Orchestrator {
 		try context.save()
 
 		for ticketRun in ticketRuns {
-			try Task.checkCancellation()
+			if Task.isCancelled {
+				try cancelSymphonyRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+				return
+			}
 			guard let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) else {
 				continue
 			}
@@ -192,6 +195,15 @@ final class Orchestrator {
 					ticketRun.status = .failed
 					ticketRun.failureReason = "symphony did not emit a run summary."
 				}
+			} catch ProcessCommandError.canceled {
+				ticket.status = .canceled
+				ticketRun.status = .canceled
+				ticketRun.failureReason = "Canceled by user."
+				ticket.updatedAt = .now
+				ticketRun.endedAt = .now
+				context.insert(RuntimeEventRecord(runID: run.id, ticketRunID: ticketRun.id, level: .warning, category: .orchestration, message: "symphony run canceled."))
+				try cancelSymphonyRun(run: run, ticketRuns: ticketRuns, tickets: tickets, context: context)
+				return
 			} catch {
 				ticket.status = .failed
 				ticketRun.status = .failed
@@ -217,6 +229,23 @@ final class Orchestrator {
 		let reportURL = try reportGenerator.save(markdown: markdown, projectID: project.id, runID: run.id, workspace: workspaceService)
 		run.reportMarkdown = markdown
 		context.insert(ReportRecord(projectID: project.id, runID: run.id, title: "Run \(run.id.uuidString.prefix(8))", markdown: markdown, filePath: reportURL.path()))
+		try context.save()
+	}
+
+	private func cancelSymphonyRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {
+		for ticketRun in ticketRuns where ticketRun.status == .pending || ticketRun.status == .preparing || ticketRun.status == .running {
+			ticketRun.status = .canceled
+			ticketRun.endedAt = .now
+			ticketRun.failureReason = "Canceled by user."
+			if let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) {
+				ticket.status = .canceled
+				ticket.updatedAt = .now
+			}
+		}
+		run.status = .canceled
+		run.endedAt = .now
+		run.summary = "Run canceled by user."
+		context.insert(RuntimeEventRecord(runID: run.id, level: .warning, category: .orchestration, message: "Run canceled by user."))
 		try context.save()
 	}
 

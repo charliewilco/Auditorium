@@ -361,6 +361,23 @@ struct AuditoriumTests {
 		#expect(result.summary?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/1")
 	}
 
+	@Test func processCommandCancelsRunningProcess() async {
+		let task = Task {
+			try await ProcessCommand.run(executable: "/bin/sh", arguments: ["-lc", "sleep 5"])
+		}
+		try? await Task.sleep(nanoseconds: 200_000_000)
+		task.cancel()
+		var didCancel = false
+
+		do {
+			_ = try await task.value
+		} catch ProcessCommandError.canceled {
+			didCancel = true
+		} catch {}
+
+		#expect(didCancel)
+	}
+
 	@Test func runtimeDetectionReturnsExpectedChecks() async {
 		let checks = await RuntimeDetectionService().detect()
 		let ids = Set(checks.map(\.id))

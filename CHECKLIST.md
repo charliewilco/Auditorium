@@ -220,7 +220,7 @@ Acceptance gate:
 - [~] Accept concurrency value.
 - [ ] Enforce bounded concurrency.
 - [ ] Implement retry policy from workflow.
-- [ ] Implement cancellation state transitions.
+- [~] Implement cancellation state transitions.
 - [ ] Implement per-ticket failure recovery.
 - [ ] Snapshot queue and workflow policy per run.
 - [ ] Reconcile run state on app relaunch.
@@ -401,7 +401,7 @@ Acceptance gate:
 - [x] Decide app-to-CLI invocation boundary.
 - [x] Pass project/run context to CLI.
 - [x] Stream CLI NDJSON events into SwiftData runtime events.
-- [ ] Handle CLI cancellation.
+- [x] Handle CLI cancellation.
 - [x] Handle CLI failure exit codes.
 - [x] Persist CLI-generated reports.
 - [ ] Surface CLI doctor output in Settings/Dashboard.
@@ -425,7 +425,7 @@ Acceptance gate:
 - [ ] Swift tests for run creation count.
 - [ ] Swift tests for ticket status transitions.
 - [ ] Swift tests for retry behavior.
-- [ ] Swift tests for cancellation.
+- [x] Swift tests for cancellation.
 - [ ] Swift tests for bounded concurrency.
 - [x] Rust unit tests.
 - [ ] Rust integration tests.
