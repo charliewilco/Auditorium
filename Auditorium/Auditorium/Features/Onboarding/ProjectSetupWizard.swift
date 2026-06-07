@@ -10,8 +10,12 @@ struct ProjectSetupWizard: View {
 	@State private var step = 0
 	@State private var draft = ProjectDraft()
 	@State private var availableRepositories: [RepositoryDescriptor] = []
+	@State private var availableIssueFilterOptions: [GitHubIssueFilterOption] = []
+	@State private var availableIssuePreview: [TicketDescriptor] = []
 	@State private var repositoryLoadMessage = ""
+	@State private var issueFilterLoadMessage = ""
 	@State private var isLoadingRepositories = false
+	@State private var isLoadingIssueFilters = false
 	@State private var isCreating = false
 	@State private var oauthMessage = ""
 	@State private var isAuthorizingGitHub = false
@@ -139,6 +143,43 @@ struct ProjectSetupWizard: View {
 			VStack(alignment: .leading, spacing: 14) {
 				Text("Issue Source")
 					.font(.headline)
+				HStack {
+					Button("Load Issue Filters") {
+						Task { await loadIssueFilters() }
+					}
+					.disabled(loadIssueFiltersDisabled)
+					if isLoadingIssueFilters {
+						ProgressView()
+							.controlSize(.small)
+					}
+					if !issueFilterLoadMessage.isEmpty {
+						Text(issueFilterLoadMessage)
+							.foregroundStyle(.secondary)
+					}
+				}
+				if !availableIssueFilterOptions.isEmpty {
+					Picker(
+						"GitHub Issue Query",
+						selection: Binding(get: { draft.issueFilterName }, set: { draft.issueFilterName = $0 })
+					) {
+						ForEach(availableIssueFilterOptions) { option in
+							Text("\(option.title) · \(option.subtitle)")
+								.tag(option.rawValue)
+						}
+					}
+					.pickerStyle(.menu)
+				}
+				if !availableIssuePreview.isEmpty {
+					List(availableIssuePreview) { ticket in
+						VStack(alignment: .leading, spacing: 3) {
+							Text("#\(ticket.externalID) \(ticket.title)")
+								.font(.subheadline.weight(.medium))
+							Text(ticket.labels.joined(separator: ", "))
+								.foregroundStyle(.secondary)
+						}
+					}
+					.frame(minHeight: 140)
+				}
 				TextField("Team / Project", text: Binding(get: { draft.issueSourceName }, set: { draft.issueSourceName = $0 }))
 				TextField(
 					"Source Identifier",
@@ -213,6 +254,10 @@ struct ProjectSetupWizard: View {
 
 	private var currentValidationMessage: String? {
 		currentStep.validationMessage(for: draft)
+	}
+
+	private var loadIssueFiltersDisabled: Bool {
+		isLoadingIssueFilters || draft.hasGitHubCredential == false || draft.trimmedIssueSourceIdentifier.isEmpty
 	}
 
 	private func providerGrid<T: Identifiable & Hashable>(_ values: [T], selected: T, choose: @escaping (T) -> Void) -> some View {
@@ -326,6 +371,37 @@ struct ProjectSetupWizard: View {
 		}
 	}
 
+	private func loadIssueFilters() async {
+		let token = draft.trimmedIssueCredential.isEmpty ? draft.trimmedRepositoryCredential : draft.trimmedIssueCredential
+		let sourceIdentifier = draft.trimmedIssueSourceIdentifier
+		guard token.isEmpty == false, sourceIdentifier.isEmpty == false else {
+			return
+		}
+		isLoadingIssueFilters = true
+		issueFilterLoadMessage = ""
+		defer { isLoadingIssueFilters = false }
+
+		do {
+			let provider = GitHubIssueTrackerProvider(
+				repositoryFullName: sourceIdentifier,
+				issueFilter: GitHubIssueFilter(state: "all"),
+				token: token
+			)
+			let tickets = try await provider.listTickets(projectID: sourceIdentifier)
+			availableIssueFilterOptions = GitHubIssueFilterOption.options(from: tickets)
+			availableIssuePreview = Array(tickets.prefix(6))
+			if draft.issueFilterName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+				draft.issueFilterName = availableIssueFilterOptions.first?.rawValue ?? "state:open"
+			}
+			issueFilterLoadMessage = "\(tickets.count) GitHub issues inspected"
+		}
+		catch {
+			availableIssueFilterOptions = []
+			availableIssuePreview = []
+			issueFilterLoadMessage = error.localizedDescription
+		}
+	}
+
 	private func selectRepository(_ repository: RepositoryDescriptor) {
 		draft.name = repository.name
 		draft.repositoryName = repository.fullName
@@ -339,6 +415,9 @@ struct ProjectSetupWizard: View {
 		}
 		draft.importDemoTickets = false
 		draft.importGitHubIssues = true
+		availableIssueFilterOptions = []
+		availableIssuePreview = []
+		issueFilterLoadMessage = ""
 	}
 
 	private func createProject() async {

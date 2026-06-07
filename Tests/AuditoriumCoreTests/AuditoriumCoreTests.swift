@@ -160,6 +160,20 @@ struct AuditoriumCoreTests {
 		#expect(branch == "auditorium/issue-42-fix-oauth-callback")
 	}
 
+	@Test func githubIssueFilterOptionsDeriveQueriesFromRealIssueMetadata() {
+		let options = GitHubIssueFilterOption.options(from: [
+			ticket(number: 1, labels: ["Ready for agent", "Bug"], assignee: "charlie"),
+			ticket(number: 2, labels: ["ready for agent"], assignee: "charlie"),
+			ticket(number: 3, labels: ["Enhancement"], assignee: "octo"),
+		])
+
+		#expect(options.map(\.rawValue).prefix(2) == ["state:open", "state:all"])
+		#expect(options.contains { $0.title == "Ready for agent" && $0.rawValue == #"state:open label:"Ready for agent""# })
+		#expect(options.contains { $0.title == "@charlie" && $0.rawValue == "state:open assignee:charlie" })
+		#expect(options.first { $0.title == "Ready for agent" }?.subtitle == "2 issues with this label")
+		#expect(options.first { $0.title == "@octo" }?.subtitle == "1 assigned issue")
+	}
+
 	@Test func modelIntegrityValidatorRejectsPersistedSecretMaterial() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -252,5 +266,23 @@ struct AuditoriumCoreTests {
 		draft.maxRetries = 0
 		draft.branchPrefix = " "
 		#expect(ProjectSetupStep.runDefaults.validationMessage(for: draft) == "Branch prefix is required.")
+	}
+
+	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
+		TicketDescriptor(
+			provider: .githubIssues,
+			externalID: "\(number)",
+			title: "Issue \(number)",
+			body: "Body",
+			status: .ready,
+			labels: labels,
+			assignee: assignee,
+			priority: .medium,
+			webURL: URL(string: "https://github.com/charliewilco/Auditorium/issues/\(number)"),
+			createdAt: Date(timeIntervalSince1970: 0),
+			updatedAt: Date(timeIntervalSince1970: 0),
+			estimatedComplexity: 1,
+			blockedBy: []
+		)
 	}
 }

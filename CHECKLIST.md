@@ -126,7 +126,7 @@ Acceptance gate:
 - [x] Show OAuth-shaped credential step.
 - [ ] Select GitHub account.
 - [x] Select repository from real GitHub data.
-- [ ] Select issue filter/query from real GitHub Issues data.
+- [x] Select issue filter/query from real GitHub Issues data.
 - [x] Validate required fields before advancing each step.
 - [ ] Add clearer error handling for failed creation.
 
