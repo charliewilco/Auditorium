@@ -223,7 +223,7 @@ Acceptance gate:
 - [~] Implement cancellation state transitions.
 - [x] Implement per-ticket failure recovery.
 - [x] Snapshot queue and workflow policy per run.
-- [ ] Reconcile run state on app relaunch.
+- [x] Reconcile run state on app relaunch.
 - [ ] Move real long-running work out of SwiftUI views and into isolated services/actors.
 
 Acceptance gate:
@@ -441,6 +441,7 @@ Acceptance gate:
 - [x] Swift tests for per-ticket failure recovery and continued queue execution.
 - [x] Swift tests for ticket inspector action availability and markdown status timeline.
 - [x] Swift tests for run-detail pull request visibility.
+- [x] Swift tests for interrupted run reconciliation on app relaunch.
 - [x] Rust unit tests.
 - [x] Rust integration tests.
 - [x] Rust tests for dispatch eligibility, bounded concurrency, and retry backoff.

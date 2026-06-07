@@ -1427,6 +1427,111 @@ struct AuditoriumTests {
 		#expect(row.routeText == "auditorium/issue-201 -> main")
 	}
 
+	@Test func runReconciliationMarksInterruptedRunsFailedOnRelaunch() throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let now = Date(timeIntervalSince1970: 1_780_100_000)
+		let project = Project(
+			name: "Interrupted Run",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let runningTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "301",
+			title: "Running ticket",
+			body: "Body",
+			status: .running,
+			labels: ["reconcile"],
+			assignee: nil,
+			priority: .high,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/301",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 3,
+			sourceProjectID: project.id
+		)
+		let queuedTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "302",
+			title: "Queued ticket",
+			body: "Body",
+			status: .queued,
+			labels: ["reconcile"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/302",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		let reviewTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "303",
+			title: "Review ticket",
+			body: "Body",
+			status: .needsReview,
+			labels: ["reconcile"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/303",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		let run = RunRecord(projectID: project.id, status: .running, totalTickets: 3, summary: "Running 3 tickets.")
+		let runningTicketRun = TicketRunRecord(runID: run.id, ticketID: runningTicket.id, status: .running, startedAt: .now)
+		let pendingTicketRun = TicketRunRecord(runID: run.id, ticketID: queuedTicket.id, status: .pending)
+		let reviewTicketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: reviewTicket.id,
+			branchName: "auditorium/issue-303",
+			status: .needsReview,
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/303"
+		)
+		context.insert(project)
+		context.insert(runningTicket)
+		context.insert(queuedTicket)
+		context.insert(reviewTicket)
+		context.insert(run)
+		context.insert(runningTicketRun)
+		context.insert(pendingTicketRun)
+		context.insert(reviewTicketRun)
+		try context.save()
+
+		let result = try RunReconciliationService().reconcileInterruptedRuns(context: context, now: now)
+
+		#expect(result == RunReconciliationResult(reconciledRuns: 1, reconciledTicketRuns: 2))
+		#expect(run.status == .failed)
+		#expect(run.endedAt == now)
+		#expect(run.completedTickets == 1)
+		#expect(run.failedTickets == 2)
+		#expect(run.blockedTickets == 0)
+		#expect(run.pullRequestsCreated == 1)
+		#expect(run.summary == "Run was interrupted during a previous app session. Reconciled 2 unfinished ticket runs.")
+		#expect(runningTicket.status == .failed)
+		#expect(queuedTicket.status == .queued)
+		#expect(reviewTicket.status == .needsReview)
+		#expect(runningTicketRun.status == .failed)
+		#expect(pendingTicketRun.status == .failed)
+		#expect(reviewTicketRun.status == .needsReview)
+		#expect(runningTicketRun.endedAt == now)
+		#expect(pendingTicketRun.endedAt == now)
+		#expect(runningTicketRun.failureReason == "Run was interrupted during a previous app session.")
+		#expect(pendingTicketRun.failureReason == "Run was interrupted during a previous app session.")
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		#expect(events.count == 3)
+		#expect(events.contains { $0.runID == run.id && $0.ticketRunID == nil && $0.message == "Run reconciled as failed after app relaunch." })
+		#expect(events.filter { $0.ticketRunID != nil && $0.message == "Ticket run reconciled as failed after app relaunch." }.count == 2)
+	}
+
 	@Test func workflowPolicyParserReadsFrontMatter() throws {
 		let policy = try WorkflowPolicyParser().parse(WorkflowPolicy.defaultMarkdown)
 

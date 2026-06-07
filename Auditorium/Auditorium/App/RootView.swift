@@ -17,6 +17,7 @@ struct RootView: View {
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
 	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
 	@State private var orchestrator: Orchestrator?
+	@State private var didReconcileInterruptedRuns = false
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
@@ -84,6 +85,7 @@ struct RootView: View {
 			if orchestrator == nil {
 				orchestrator = Orchestrator(workspaceService: services.workspace, runtimeDetection: services.runtimeDetection, reportGenerator: services.reportGenerator, providerRegistry: services.providerRegistry)
 			}
+			reconcileInterruptedRunsIfNeeded()
 			let activeProject = selectedProject ?? projects.first
 			runtimeHealth = await services.runtimeDetection.detect()
 			await refreshSymphonyDoctorStatus(for: activeProject)
@@ -93,6 +95,16 @@ struct RootView: View {
 		}
 		.onReceive(NotificationCenter.default.publisher(for: .runQueueCommand)) { _ in
 			runQueue()
+		}
+	}
+
+	private func reconcileInterruptedRunsIfNeeded() {
+		guard didReconcileInterruptedRuns == false else { return }
+		didReconcileInterruptedRuns = true
+		do {
+			_ = try RunReconciliationService().reconcileInterruptedRuns(context: modelContext)
+		} catch {
+			NSAlert(error: error).runModal()
 		}
 	}
 
