@@ -2,3 +2,5 @@
 xcuserdata/
 DerivedData/
 .DS_Store
+target/
+.auditorium/
