@@ -91,7 +91,7 @@ struct GenericCLIAgentConfiguration: Equatable, Sendable {
 	}
 }
 
-struct GenericShellAgentProvider: AgentProvider {
+struct GenericShellAgentProvider: AgentProvider, Sendable {
 	let configuration: GenericCLIAgentConfiguration
 
 	init(configuration: GenericCLIAgentConfiguration) {
@@ -104,7 +104,8 @@ struct GenericShellAgentProvider: AgentProvider {
 
 	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
 		AsyncThrowingStream { continuation in
-			let task = Task {
+			let cancellationToken = ProcessCancellationToken()
+			let task = Task.detached {
 				do {
 					continuation.yield(
 						AgentEvent(level: .info, category: .agent, message: "generic_cli_started", summary: nil, outcome: nil)
@@ -113,6 +114,7 @@ struct GenericShellAgentProvider: AgentProvider {
 						executable: configuration.executablePath,
 						arguments: configuration.arguments(prompt: prompt(for: request)),
 						workingDirectory: request.workspace.path,
+						cancellationToken: cancellationToken,
 						onStandardOutputLine: { line in
 							continuation.yield(
 								AgentEvent(
@@ -146,12 +148,13 @@ struct GenericShellAgentProvider: AgentProvider {
 				}
 			}
 			continuation.onTermination = { _ in
+				cancellationToken.cancel()
 				task.cancel()
 			}
 		}
 	}
 
-	private func prompt(for request: AgentRunRequest) -> String {
+	nonisolated private func prompt(for request: AgentRunRequest) -> String {
 		"""
 		You are working in \(request.repository.fullName) on issue \(request.ticket.externalID): \(request.ticket.title).
 
@@ -163,7 +166,7 @@ struct GenericShellAgentProvider: AgentProvider {
 		"""
 	}
 
-	private func writeLog(_ result: ProcessResult, workspacePath: URL) throws -> URL {
+	nonisolated private func writeLog(_ result: ProcessResult, workspacePath: URL) throws -> URL {
 		let logDirectory = workspacePath.appending(path: ".auditorium")
 		try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
 		let logURL = logDirectory.appending(path: "generic-cli.log")
@@ -183,7 +186,7 @@ struct GenericShellAgentProvider: AgentProvider {
 		return logURL
 	}
 
-	private static func finalEvent(result: ProcessResult, logURL: URL) -> AgentEvent {
+	nonisolated private static func finalEvent(result: ProcessResult, logURL: URL) -> AgentEvent {
 		if result.exitCode == 0 {
 			return AgentEvent(
 				level: .success,

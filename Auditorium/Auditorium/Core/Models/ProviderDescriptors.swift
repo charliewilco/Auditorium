@@ -108,7 +108,7 @@ struct AgentEvent: Sendable {
 	let metadataJSON: String?
 	let logPath: String?
 
-	init(
+	nonisolated init(
 		level: EventLevel,
 		category: EventCategory,
 		message: String,
