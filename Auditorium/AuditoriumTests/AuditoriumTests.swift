@@ -2859,6 +2859,188 @@ struct AuditoriumTests {
 		#expect(arguments.contains("--issues\n8\n"))
 	}
 
+	@Test func liveAppRunCoordinatorUsesRealSymphonyQueueWhenConfigured() async throws {
+		let environment = ProcessInfo.processInfo.environment
+		struct LiveSymphonySmokeConfig: Decodable {
+			let repository: String
+			let issue: Int
+			let token: String
+			let symphonyBinary: String
+		}
+		let config: LiveSymphonySmokeConfig?
+		if environment["AUDITORIUM_LIVE_APP_SYMPHONY"] == "1",
+			let repository = environment["AUDITORIUM_LIVE_SYMPHONY_REPO"],
+			let issueText = environment["AUDITORIUM_LIVE_SYMPHONY_ISSUE"],
+			let issue = Int(issueText),
+			let token = environment["AUDITORIUM_LIVE_GITHUB_TOKEN"],
+			let symphonyBinary = environment["AUDITORIUM_LIVE_SYMPHONY_BIN"]
+		{
+			config = LiveSymphonySmokeConfig(repository: repository, issue: issue, token: token, symphonyBinary: symphonyBinary)
+		}
+		else if FileManager.default.fileExists(atPath: "/tmp/auditorium-live-app-symphony.json") {
+			let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/auditorium-live-app-symphony.json"))
+			config = try JSONDecoder().decode(LiveSymphonySmokeConfig.self, from: data)
+		}
+		else {
+			return
+		}
+		let liveConfig = try #require(config)
+		let repositoryName = liveConfig.repository
+		let issueNumber = liveConfig.issue
+		let token = liveConfig.token
+		let symphonyBinary = liveConfig.symphonyBinary
+		let repositoryParts = repositoryName.split(separator: "/", maxSplits: 1).map(String.init)
+		let owner = try #require(repositoryParts.first)
+		let name = try #require(repositoryParts.last)
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumLiveAppSymphony-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let agent = root.appending(path: "live-agent.sh")
+		let symphonyWrapper = root.appending(path: "symphony-wrapper.sh")
+		try """
+		#!/bin/sh
+		set -eu
+		mkdir -p auditorium-live-app
+		printf 'live app symphony completed\\n' > auditorium-live-app/result.txt
+		printf '%s\\n' "$@" > auditorium-live-app/prompt.txt
+		printf 'live app agent wrote auditorium-live-app/result.txt\\n'
+		""".write(to: agent, atomically: true, encoding: .utf8)
+		try """
+		#!/bin/sh
+		set -eu
+		export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+		if [ "$1" = "symphony" ]; then
+			shift
+		fi
+		exec '\(symphonyBinary)' "$@"
+		""".write(to: symphonyWrapper, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: agent.path())
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: symphonyWrapper.path())
+		let workflow = """
+		---
+		workspace:
+		  root: "\(root.appending(path: "unused-workspace-root").path())"
+		validation:
+		  command: "test -f auditorium-live-app/result.txt"
+		codex:
+		  command: "\(agent.path())"
+		branch_prefix: "auditorium-app-smoke"
+		run_tests: true
+		open_pull_request: true
+		---
+		Implement {{ issue.identifier }} in {{ issue.repo }}.
+		{{ issue.title }}
+		{{ issue.description }}
+		"""
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.live-tests.\(UUID().uuidString)")
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Live Smoke",
+			keychainAccount: "live-app-symphony-\(UUID().uuidString)",
+			grantedScopesRaw: "repo"
+		)
+		try keychain.storeSecret(token, account: account.keychainAccount)
+		defer { try? keychain.deleteSecret(account: account.keychainAccount) }
+		let project = Project(
+			name: "Live App Symphony",
+			repositoryProviderKind: .github,
+			repositoryName: repositoryName,
+			repositoryURL: "https://github.com/\(repositoryName)",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: workflow
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: String(issueNumber),
+			title: "Live app symphony smoke",
+			body: "Verify the app coordinator can invoke the real symphony binary against GitHub.",
+			status: .ready,
+			labels: ["app", "symphony"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/\(repositoryName)/issues/\(issueNumber)",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(account)
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: owner,
+				name: name,
+				fullName: repositoryName,
+				cloneURL: "https://github.com/\(repositoryName).git",
+				webURL: "https://github.com/\(repositoryName)",
+				defaultBranch: "main",
+				providerAccountID: account.id,
+				projectID: project.id
+			)
+		)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: symphonyBinary, version: nil),
+		])
+		let coordinator = AppRunCoordinator(
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root.appending(path: "app")),
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			symphonyRunner: SymphonyCLIProcessRunner(executablePath: symphonyWrapper.path()),
+			providerRegistry: ProviderRegistry(keychainService: keychain)
+		)
+
+		coordinator.startQueue(project: project, concurrency: 1, context: context)
+		let deadline = Date().addingTimeInterval(90)
+		var run: RunRecord?
+		while Date() < deadline {
+			run = try context.fetch(FetchDescriptor<RunRecord>()).first
+			if let status = run?.status, status != .running && status != .pending {
+				break
+			}
+			await Task.yield()
+			try await Task.sleep(nanoseconds: 100_000_000)
+		}
+		let finalRun = try #require(run)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		let reports = try context.fetch(FetchDescriptor<ReportRecord>())
+		let pullRequests = try context.fetch(FetchDescriptor<PullRequestRecord>())
+		if pullRequests.isEmpty {
+			Issue.record(
+				"""
+				Live symphony smoke produced no pull request.
+				Run status: \(finalRun.status.rawValue)
+				Run summary: \(finalRun.summary)
+				Ticket run status: \(ticketRun.status.rawValue)
+				Ticket run failure: \(ticketRun.failureReason ?? "")
+				Events: \(events.map { "\($0.category.rawValue):\($0.message)" }.joined(separator: " | "))
+				"""
+			)
+		}
+		let pullRequest = try #require(pullRequests.first)
+
+		#expect(finalRun.status == .completed)
+		#expect(finalRun.pullRequestsCreated == 1)
+		#expect(ticket.status == .needsReview)
+		#expect(ticketRun.status == .needsReview)
+		#expect(ticketRun.pullRequestURL?.contains("https://github.com/\(repositoryName)/pull/") == true)
+		#expect(pullRequest.url == ticketRun.pullRequestURL)
+		#expect(events.contains { $0.message == "queue_started" })
+		#expect(events.contains { $0.message == "pull_request_opened" })
+		#expect(events.contains { $0.message == "queue_completed" })
+		#expect(reports.contains { $0.markdown.contains("Pull Request: \(ticketRun.pullRequestURL ?? "")") })
+	}
+
 	@Test func localWorkspaceCodexOrchestratorCommitsPushesAndStoresPullRequest() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

@@ -402,8 +402,8 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
-	- App coordinator now invokes one queue-level `symphony run-queue` for Local Workspace + Codex, passes stored GitHub credentials through the process environment, decodes streamed queue/coordination NDJSON, mirrors coordination notes into SwiftData, and stores real PR URLs from CLI summaries. A full manual UI run against GitHub is still tracked in final acceptance.
+- [x] The macOS app can use `symphony` for a real GitHub issue run and update live UI state.
+	- Verified 2026-06-09 with opt-in Xcode test `liveAppRunCoordinatorUsesRealSymphonyQueueWhenConfigured`, backed by real `symphony run-queue` against private GitHub repo `charliewilco/auditorium-symphony-smoke-20260609112717`; issue #5 produced PR https://github.com/charliewilco/auditorium-symphony-smoke-20260609112717/pull/6 while the app coordinator persisted queue events, PR state, and report state into SwiftData.
 
 ## 22. Testing
 
