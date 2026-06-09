@@ -481,6 +481,7 @@ Acceptance gate:
 - [ ] Release build can be signed and launched on a clean Mac.
 	- Prepared 2026-06-09 with `script/package_release.sh`, `config/ExportOptions-developer-id.plist`, and manual GitHub Actions workflow `release-package.yml`.
 	- Local unsigned artifacts can be produced with `./script/package_release.sh --unsigned`; Developer ID notarized artifacts use `./script/package_release.sh --developer-id --notarize`.
+	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27219396811>: the workflow produced `Auditorium.zip`, `gh run download` retrieved the artifact, and the unpacked `Auditorium.app` launched locally.
 	- Final verification still requires Apple Developer ID/notary credentials and launch of the signed, notarized `Auditorium.app` on a separate clean Mac.
 
 ## 24. v0 Final Acceptance
