@@ -2425,6 +2425,76 @@ struct AuditoriumTests {
 		#expect(arguments == "doctor\n--json\n")
 	}
 
+	@Test func symphonyRunnerPrefersConfiguredBinaryDirectoryOverBundledDirectory() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let preferredBin = root.appending(path: "preferred-bin")
+		let bundledBin = root.appending(path: "bundled-bin")
+		try FileManager.default.createDirectory(at: preferredBin, withIntermediateDirectories: true)
+		try FileManager.default.createDirectory(at: bundledBin, withIntermediateDirectories: true)
+		try """
+		#!/bin/sh
+		printf '%s\\n' '{"ok":true,"workflow":{"ok":true,"workspaceRoot":"/tmp/preferred","trackerKind":"github","maxConcurrentAgents":3,"code":null,"message":null},"checks":[]}'
+		""".write(to: preferredBin.appending(path: "symphony"), atomically: true, encoding: .utf8)
+		try """
+		#!/bin/sh
+		printf '%s\\n' '{"ok":false,"workflow":{"ok":false,"workspaceRoot":null,"trackerKind":null,"maxConcurrentAgents":null,"code":"wrong_binary","message":"bundled binary ran"},"checks":[]}'
+		exit 22
+		""".write(to: bundledBin.appending(path: "symphony"), atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes(
+			[.posixPermissions: 0o755],
+			ofItemAtPath: preferredBin.appending(path: "symphony").path
+		)
+		try FileManager.default.setAttributes(
+			[.posixPermissions: 0o755],
+			ofItemAtPath: bundledBin.appending(path: "symphony").path
+		)
+		let runner = SymphonyCLIProcessRunner(
+			preferredBinDirectory: preferredBin.path,
+			bundledBinDirectory: bundledBin.path
+		)
+
+		let status = await runner.doctor()
+
+		#expect(status.state == .available)
+		#expect(status.workflowDetail.contains("/tmp/preferred"))
+	}
+
+	@Test func symphonyRunnerPassesUnescapedFilesystemPaths() async throws {
+		let root = FileManager.default.temporaryDirectory
+			.appending(path: "Auditorium Tests \(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let fakeSymphony = root.appending(path: "fake-symphony")
+		let argumentsPath = root.appending(path: "arguments.txt")
+		let reportPath = root.appending(path: "report.md")
+		let workflowPath = root.appending(path: "Application Support").appending(path: "WORKFLOW.md")
+		let workspaceRoot = root.appending(path: "Workspace Root")
+		try FileManager.default.createDirectory(at: workflowPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try FileManager.default.createDirectory(at: workspaceRoot, withIntermediateDirectories: true)
+		try "report\n".write(to: reportPath, atomically: true, encoding: .utf8)
+		try """
+		#!/bin/sh
+		printf '%s\\n' "$@" > '\(argumentsPath.path)'
+		printf '%s\\n' '{"run_id":"queue-1","repo":"charliewilco/Auditorium","issue":{"number":11},"workspace_path":"\(workspaceRoot.path)","branch_name":"auditorium/issue-11","status":"completed","pull_request_url":"https://github.com/charliewilco/Auditorium/pull/11","report_path":"\(reportPath.path)"}'
+		""".write(to: fakeSymphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path)
+		let runner = SymphonyCLIProcessRunner(executablePath: fakeSymphony.path)
+
+		let result = try await runner.runQueue(
+			repository: "charliewilco/Auditorium",
+			issueNumbers: [11],
+			workflowPath: workflowPath,
+			workspaceRoot: workspaceRoot
+		)
+		let arguments = try String(contentsOf: argumentsPath, encoding: .utf8)
+
+		#expect(result.summaries.first?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/11")
+		#expect(arguments.contains(workflowPath.path))
+		#expect(arguments.contains(workspaceRoot.path))
+		#expect(arguments.contains("%20") == false)
+	}
+
 	@Test func processCommandCanReturnNonZeroResultForStructuredOutput() async throws {
 		let result = try await ProcessCommand.runStreaming(
 			executable: "/bin/sh",
@@ -2878,7 +2948,7 @@ struct AuditoriumTests {
 		#expect(coordinationMessages.first?.summary == "Shared app orchestration path observed.")
 		#expect(finalRun.reportMarkdown.contains("## Cross-ticket Findings"))
 		#expect(finalRun.reportMarkdown.contains("Orchestrator.swift"))
-		#expect(arguments.contains("symphony\nrun-queue\n"))
+		#expect(arguments.hasPrefix("run-queue\n"))
 		#expect(arguments.contains("--issues\n8\n"))
 	}
 

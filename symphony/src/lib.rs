@@ -935,14 +935,20 @@ async fn run_issue_internal(
             json!({ "branch": branch_name }),
         )?;
         if config.open_pull_request {
-            pr_url = Some(
-                create_pull_request(&options.repo, &issue, &branch_name, &default_branch).await?,
-            );
+            pr_url = existing_pull_request_url(&options.repo, &branch_name).await?;
+            let mut pull_request_event = "pull_request_reconciled";
+            if pr_url.is_none() {
+                pr_url = Some(
+                    create_pull_request(&options.repo, &issue, &branch_name, &default_branch)
+                        .await?,
+                );
+                pull_request_event = "pull_request_opened";
+            }
             emit(
                 options.json,
                 "success",
                 "pullRequest",
-                "pull_request_opened",
+                pull_request_event,
                 json!({ "url": pr_url }),
             )?;
         }

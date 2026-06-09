@@ -176,13 +176,16 @@ private struct SymphonyDoctorCheckPayload: Decodable {
 
 struct SymphonyCLIProcessRunner {
 	let executablePath: String
+	let preferredBinDirectory: String?
 	let bundledBinDirectory: String?
 
 	nonisolated init(
 		executablePath: String = "/usr/bin/env",
+		preferredBinDirectory: String? = ProcessInfo.processInfo.environment["AUDITORIUM_SYMPHONY_BIN_DIRECTORY"],
 		bundledBinDirectory: String? = Bundle.main.resourceURL?.appending(path: "bin").path()
 	) {
 		self.executablePath = executablePath
+		self.preferredBinDirectory = preferredBinDirectory
 		self.bundledBinDirectory = bundledBinDirectory
 	}
 
@@ -195,24 +198,23 @@ struct SymphonyCLIProcessRunner {
 		environment: [String: String] = [:],
 		onEvent: (@MainActor (SymphonyCLIEvent) async -> Void)? = nil
 	) async throws -> SymphonyRunResult {
-		var arguments = [
-			"symphony",
+		var arguments = invocationArguments(for: [
 			"run",
 			"--repo",
 			repository,
 			"--issue",
 			String(issueNumber),
 			"--workflow",
-			workflowPath.path(),
+			workflowPath.path,
 			"--workspace-root",
-			workspaceRoot.path(),
+			workspaceRoot.path,
 			"--json",
-		]
+		])
 		if mock {
 			arguments.append("--mock")
 		}
 		let result = try await ProcessCommand.runStreaming(
-			executable: executablePath,
+			executable: resolvedExecutablePath,
 			arguments: arguments,
 			environment: processEnvironment(overrides: environment),
 			onStandardOutputLine: { line in
@@ -234,24 +236,23 @@ struct SymphonyCLIProcessRunner {
 		onEvent: (@MainActor (SymphonyCLIEvent) async -> Void)? = nil,
 		onCoordinationMessage: (@MainActor (SymphonyCoordinationMessage) async -> Void)? = nil
 	) async throws -> SymphonyQueueRunResult {
-		var arguments = [
-			"symphony",
+		var arguments = invocationArguments(for: [
 			"run-queue",
 			"--repo",
 			repository,
 			"--issues",
 			issueNumbers.map(String.init).joined(separator: ","),
 			"--workflow",
-			workflowPath.path(),
+			workflowPath.path,
 			"--workspace-root",
-			workspaceRoot.path(),
+			workspaceRoot.path,
 			"--json",
-		]
+		])
 		if mock {
 			arguments.append("--mock")
 		}
 		let result = try await ProcessCommand.runStreaming(
-			executable: executablePath,
+			executable: resolvedExecutablePath,
 			arguments: arguments,
 			environment: processEnvironment(overrides: environment),
 			onStandardOutputLine: { line in
@@ -267,18 +268,17 @@ struct SymphonyCLIProcessRunner {
 	}
 
 	func doctor(workflowPath: URL? = nil) async -> SymphonyDoctorStatus {
-		var arguments = [
-			"symphony",
+		var arguments = invocationArguments(for: [
 			"doctor",
 			"--json",
-		]
+		])
 		if let workflowPath {
-			arguments.append(contentsOf: ["--workflow", workflowPath.path()])
+			arguments.append(contentsOf: ["--workflow", workflowPath.path])
 		}
 
 		do {
 			let result = try await ProcessCommand.runStreaming(
-				executable: executablePath,
+				executable: resolvedExecutablePath,
 				arguments: arguments,
 				environment: processEnvironment(),
 				allowsNonZeroExit: true
@@ -398,11 +398,31 @@ struct SymphonyCLIProcessRunner {
 		return "\(code)\(workflow.message ?? "Workflow validation failed.")"
 	}
 
+	private var resolvedExecutablePath: String {
+		UserDefaults.standard.string(forKey: "symphonyExecutablePath")
+			?? ProcessInfo.processInfo.environment["AUDITORIUM_SYMPHONY_EXECUTABLE"]
+			?? executablePath
+	}
+
+	private func invocationArguments(for commandArguments: [String]) -> [String] {
+		if resolvedExecutablePath == "/usr/bin/env" {
+			return ["symphony"] + commandArguments
+		}
+		return commandArguments
+	}
+
 	private func processEnvironment(overrides: [String: String] = [:]) -> [String: String]? {
 		var environment = overrides
-		if let bundledBinDirectory, FileManager.default.isExecutableFile(atPath: "\(bundledBinDirectory)/symphony") {
+		let configuredBinDirectory =
+			UserDefaults.standard.string(forKey: "symphonyBinDirectory")
+			?? ProcessInfo.processInfo.environment["AUDITORIUM_SYMPHONY_BIN_DIRECTORY"]
+			?? preferredBinDirectory
+		let executableBinDirectory = [configuredBinDirectory, bundledBinDirectory]
+			.compactMap(\.self)
+			.first { FileManager.default.isExecutableFile(atPath: "\($0)/symphony") }
+		if let executableBinDirectory {
 			let inheritedPath = overrides["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-			environment["PATH"] = "\(bundledBinDirectory):\(inheritedPath)"
+			environment["PATH"] = "\(executableBinDirectory):\(inheritedPath)"
 		}
 		return environment.isEmpty ? nil : environment
 	}

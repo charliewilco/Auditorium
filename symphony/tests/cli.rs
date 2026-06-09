@@ -642,6 +642,116 @@ Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
 }
 
 #[test]
+fn run_non_mock_flow_reconciles_existing_pull_request_after_push() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    let bin_dir = tempdir.path().join("bin");
+    let remote = prepare_bare_remote(&tempdir);
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("gh"),
+        r#"#!/bin/sh
+set -eu
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  cat <<'JSON'
+{
+  "id":"I_real_24",
+  "number":24,
+  "title":"Real GitHub flow",
+  "body":"Exercise existing PR reconciliation.",
+  "url":"https://github.com/acme/app/issues/24",
+  "labels":[],
+  "assignees":[],
+  "state":"OPEN",
+  "createdAt":"2026-06-01T00:00:00Z",
+  "updatedAt":"2026-06-02T00:00:00Z"
+}
+JSON
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
+  printf '{"defaultBranchRef":{"name":"main"}}\n'
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  git clone "$SYMPHONY_TEST_REMOTE_REPO" "$4" >/dev/null 2>&1
+  git -C "$4" config user.name "Auditorium Bot"
+  git -C "$4" config user.email "auditorium@example.invalid"
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[{"url":"https://github.com/acme/app/pull/99"}]\n'
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  printf 'pr create should not be called when a matching PR already exists\n' >&2
+  exit 99
+fi
+echo "unexpected gh invocation: $@" >&2
+exit 1
+"#,
+    );
+    write_executable(
+        &bin_dir.join("codex"),
+        r#"#!/bin/sh
+set -eu
+printf 'implemented by fake codex\n' > codex-output.txt
+printf 'codex wrote codex-output.txt\n'
+exit 0
+"#,
+    );
+
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+validation:
+  command: "test -f codex-output.txt"
+codex:
+  command: "{} --json"
+branch_prefix: "auditorium"
+run_tests: true
+open_pull_request: true
+---
+Fix {{{{ issue.identifier }}}}.
+"#,
+            workspace_root.display(),
+            bin_dir.join("codex").display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args(["run", "--repo", "acme/app", "--issue", "24", "--workflow"])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .env("SYMPHONY_TEST_REMOTE_REPO", &remote)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+    let final_report = values
+        .last()
+        .expect("final report payload should be printed");
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "pull_request_reconciled"
+            && value["metadata"]["url"] == "https://github.com/acme/app/pull/99"));
+    assert_eq!(final_report["status"], "completed");
+    assert_eq!(
+        final_report["pull_request_url"],
+        "https://github.com/acme/app/pull/99"
+    );
+}
+
+#[test]
 fn report_prints_saved_markdown_by_path_and_run_id() {
     let tempdir = tempfile::tempdir().unwrap();
     let workflow = workflow_path(&tempdir);
