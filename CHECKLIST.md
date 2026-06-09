@@ -95,7 +95,8 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] A queued issue can produce a GitHub PR URL from a real repository.
+- [x] A queued issue can produce a GitHub PR URL from a real repository.
+	- Verified 2026-06-09 with `symphony run-queue` against temporary private GitHub repo `charliewilco/auditorium-symphony-smoke-20260609112717`; issue #3 produced PR https://github.com/charliewilco/auditorium-symphony-smoke-20260609112717/pull/4 and emitted `branch_pushed`, `pull_request_opened`, final `pull_request_url`, and `queue_completed`.
 - [x] Provider never force-pushes or rewrites history without explicit policy.
 
 ## 5. GitHub Issues Provider
