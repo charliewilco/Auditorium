@@ -297,7 +297,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] User can complete the v0 real GitHub flow without leaving the app except OAuth/browser approval.
+- [x] User can complete the v0 real GitHub flow without leaving the app except OAuth/browser approval. Verified 2026-06-09 with `xcodebuild test -workspace Auditorium.xcworkspace -scheme AuditoriumUITests -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO -only-testing:AuditoriumUITests/AuditoriumUITests/testLiveGitHubIssueToPullRequestFlowWhenConfigured`, using issue #22 and PR https://github.com/charliewilco/auditorium-symphony-smoke-20260609112717/pull/23.
 
 ## 16. Ticket Inspector
 

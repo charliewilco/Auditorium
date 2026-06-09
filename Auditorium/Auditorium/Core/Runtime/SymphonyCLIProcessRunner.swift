@@ -231,6 +231,14 @@ struct SymphonyCLIProcessRunner {
 	let executablePath: String
 	let preferredBinDirectory: String?
 	let bundledBinDirectory: String?
+	private static let defaultSearchPaths = [
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	]
 
 	nonisolated init(
 		executablePath: String = "/usr/bin/env",
@@ -465,7 +473,8 @@ struct SymphonyCLIProcessRunner {
 	}
 
 	private func processEnvironment(overrides: [String: String] = [:]) -> [String: String]? {
-		var environment = overrides
+		var environment = ProcessInfo.processInfo.environment
+		environment.merge(overrides) { _, override in override }
 		let configuredBinDirectory =
 			UserDefaults.standard.string(forKey: "symphonyBinDirectory")
 			?? ProcessInfo.processInfo.environment["AUDITORIUM_SYMPHONY_BIN_DIRECTORY"]
@@ -473,10 +482,21 @@ struct SymphonyCLIProcessRunner {
 		let executableBinDirectory = [configuredBinDirectory, bundledBinDirectory]
 			.compactMap(\.self)
 			.first { FileManager.default.isExecutableFile(atPath: "\($0)/symphony") }
+		let inheritedPath = Self.searchPath(environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
 		if let executableBinDirectory {
-			let inheritedPath = overrides["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
 			environment["PATH"] = "\(executableBinDirectory):\(inheritedPath)"
 		}
-		return environment.isEmpty ? nil : environment
+		else {
+			environment["PATH"] = inheritedPath
+		}
+		return environment
+	}
+
+	private static func searchPath(_ inheritedPath: String) -> String {
+		var paths = inheritedPath.split(separator: ":").map(String.init)
+		for path in defaultSearchPaths where paths.contains(path) == false {
+			paths.append(path)
+		}
+		return paths.joined(separator: ":")
 	}
 }

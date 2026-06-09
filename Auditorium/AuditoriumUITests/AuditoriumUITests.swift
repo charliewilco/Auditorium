@@ -61,31 +61,38 @@ final class AuditoriumUITests: XCTestCase {
 		let repository = config.repository
 		let issueTitle = config.issueTitle
 		let symphonyDirectory = config.symphonyDirectory
+		let testStartedAt = Date()
 		let repoParts = repository.split(separator: "/", maxSplits: 1).map(String.init)
 		XCTAssertEqual(repoParts.count, 2, "AUDITORIUM_LIVE_UI_REPO must use owner/name form.")
 		let repositoryName = repoParts.last ?? repository
 		let keychainService = "co.charliewil.Auditorium.ui-live.\(UUID().uuidString)"
 		keychainServiceName = keychainService
-		let tempDirectory = FileManager.default.temporaryDirectory.appending(path: "AuditoriumUILive-\(UUID().uuidString)")
-		let binDirectory = tempDirectory.appending(path: "bin")
+		let tempDirectory = FileManager.default
+			.homeDirectoryForCurrentUser
+			.appendingPathComponent("Library")
+			.appendingPathComponent("Application Support")
+			.appendingPathComponent("Auditorium")
+			.appendingPathComponent("UITestTools")
+			.appendingPathComponent(UUID().uuidString)
+		let binDirectory = tempDirectory.appendingPathComponent("bin")
 		try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
 		defer { try? FileManager.default.removeItem(at: tempDirectory) }
-		try writeFakeCodex(to: binDirectory.appending(path: "codex"))
+		try writeFakeCodex(to: binDirectory.appendingPathComponent("codex"))
 		try writeSymphonyWrapper(
-			to: binDirectory.appending(path: "symphony"),
+			to: binDirectory.appendingPathComponent("symphony"),
 			fakeBinDirectory: binDirectory,
 			symphonyDirectory: URL(fileURLWithPath: symphonyDirectory)
 		)
 
 		app.launchEnvironment["AUDITORIUM_KEYCHAIN_SERVICE"] = keychainService
 		app.launchEnvironment["AUDITORIUM_SYMPHONY_BIN_DIRECTORY"] = binDirectory.path
-		app.launchEnvironment["PATH"] = "\(binDirectory.path()):\(symphonyDirectory):\(environment["PATH"] ?? "")"
+		app.launchEnvironment["PATH"] = "\(binDirectory.path):\(symphonyDirectory):\(environment["PATH"] ?? "")"
 		app.launchArguments = [
 			"-allowNetworkAccess", "YES",
 			"-requireRunConfirmation", "NO",
 			"-requirePROpenConfirmation", "NO",
 			"-symphonyBinDirectory", binDirectory.path,
-			"-symphonyExecutablePath", binDirectory.appending(path: "symphony").path,
+			"-symphonyExecutablePath", binDirectory.appendingPathComponent("symphony").path,
 		]
 		app.launch()
 
@@ -126,11 +133,15 @@ final class AuditoriumUITests: XCTestCase {
 		clickSidebarItem("Tickets")
 		searchTickets(issueTitle)
 		waitForStaticText(containing: issueTitle, timeout: 20)
-		clickButton("Add to Queue")
+		clickScrollButton("Add to Queue")
 		clickSidebarItem("Queue")
 		waitForStaticText(containing: issueTitle, timeout: 10)
 		clickButton("Run Queue")
-		XCTAssertTrue(app.links["Open PR"].waitForExistence(timeout: 120))
+		let openPR = app.links["Open PR"]
+		if openPR.waitForExistence(timeout: 120) == false {
+			XCTFail(liveGitHubFlowDiagnostics(issueTitle: issueTitle, since: testStartedAt))
+			return
+		}
 		XCTAssertTrue(app.staticTexts["Needs Review"].waitForExistence(timeout: 10))
 	}
 
@@ -149,7 +160,7 @@ final class AuditoriumUITests: XCTestCase {
 			)
 		}
 		let configURL = URL(fileURLWithPath: "/tmp/auditorium-live-ui-github-flow.json")
-		if FileManager.default.fileExists(atPath: configURL.path()) {
+		if FileManager.default.fileExists(atPath: configURL.path) {
 			let data = try Data(contentsOf: configURL)
 			return try JSONDecoder().decode(LiveGitHubFlowConfig.self, from: data)
 		}
@@ -159,6 +170,12 @@ final class AuditoriumUITests: XCTestCase {
 	private func clickButton(_ label: String, timeout: TimeInterval = 10) {
 		let button = app.buttons[label]
 		XCTAssertTrue(button.waitForExistence(timeout: timeout), "Missing button \(label).")
+		button.click()
+	}
+
+	private func clickScrollButton(_ label: String, timeout: TimeInterval = 10) {
+		let button = app.scrollViews.buttons[label].firstMatch
+		XCTAssertTrue(button.waitForExistence(timeout: timeout), "Missing scroll button \(label).")
 		button.click()
 	}
 
@@ -208,6 +225,57 @@ final class AuditoriumUITests: XCTestCase {
 		field.typeText(text)
 	}
 
+	private func liveGitHubFlowDiagnostics(issueTitle: String, since startDate: Date) -> String {
+		let reports = recentReportMarkdown(since: startDate)
+		let reportText =
+			reports.isEmpty ? "No report markdown files were created after the test started." : reports.joined(separator: "\n\n---\n\n")
+		return """
+			Open PR did not appear for \(issueTitle).
+
+			Recent app report markdown:
+			\(reportText)
+			"""
+	}
+
+	private func recentReportMarkdown(since startDate: Date) -> [String] {
+		let projectsRoot = FileManager.default
+			.homeDirectoryForCurrentUser
+			.appendingPathComponent("Library")
+			.appendingPathComponent("Application Support")
+			.appendingPathComponent("Auditorium")
+			.appendingPathComponent("Projects")
+		guard
+			let enumerator = FileManager.default.enumerator(
+				at: projectsRoot,
+				includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+				options: [.skipsHiddenFiles]
+			)
+		else {
+			return []
+		}
+		var reportURLs: [(url: URL, modifiedAt: Date)] = []
+		for case let url as URL in enumerator where url.pathExtension == "md" {
+			guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+				values.isRegularFile == true,
+				let modifiedAt = values.contentModificationDate,
+				modifiedAt >= startDate
+			else {
+				continue
+			}
+			reportURLs.append((url, modifiedAt))
+		}
+		return
+			reportURLs
+			.sorted { $0.modifiedAt > $1.modifiedAt }
+			.prefix(3)
+			.compactMap { item in
+				guard let markdown = try? String(contentsOf: item.url, encoding: .utf8) else {
+					return nil
+				}
+				return "\(item.url.path)\n\(markdown)"
+			}
+	}
+
 	private func writeFakeCodex(to url: URL) throws {
 		try """
 		#!/bin/sh
@@ -221,7 +289,7 @@ final class AuditoriumUITests: XCTestCase {
 		printf '%s\\n' "$@" > auditorium-ui-smoke/prompt.txt
 		printf 'fake codex wrote auditorium-ui-smoke/result.txt\\n'
 		""".write(to: url, atomically: true, encoding: .utf8)
-		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path())
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 	}
 
 	private func writeSymphonyWrapper(to url: URL, fakeBinDirectory: URL, symphonyDirectory: URL) throws {
@@ -229,7 +297,7 @@ final class AuditoriumUITests: XCTestCase {
 		#!/bin/sh
 		set -eu
 		export PATH="\(fakeBinDirectory.path):$PATH"
-		exec "\(symphonyDirectory.appending(path: "symphony").path)" "$@"
+		exec "\(symphonyDirectory.appendingPathComponent("symphony").path)" "$@"
 		""".write(to: url, atomically: true, encoding: .utf8)
 		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 	}

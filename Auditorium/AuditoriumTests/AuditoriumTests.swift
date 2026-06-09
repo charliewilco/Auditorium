@@ -2474,6 +2474,43 @@ struct AuditoriumTests {
 		#expect(status.workflowDetail.contains("/tmp/preferred"))
 	}
 
+	@Test func symphonyRunnerMergesOverridesWithInheritedEnvironment() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let bin = root.appending(path: "bin")
+		try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+		let symphony = bin.appending(path: "symphony")
+		let environmentPath = root.appending(path: "environment.txt")
+		let reportPath = root.appending(path: "report.md")
+		try """
+		#!/bin/sh
+		{
+		  printf 'HOME=%s\\n' "${HOME:-}"
+		  printf 'GH_TOKEN=%s\\n' "${GH_TOKEN:-}"
+		  printf 'PATH=%s\\n' "$PATH"
+		} > '\(environmentPath.path)'
+		printf '%s\\n' '{"run_id":"queue-1","repo":"charliewilco/Auditorium","issue":{"number":11},"workspace_path":"\(root.path)","branch_name":"auditorium/issue-11","status":"completed","pull_request_url":null,"report_path":"\(reportPath.path)"}'
+		""".write(to: symphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: symphony.path)
+		let runner = SymphonyCLIProcessRunner(
+			preferredBinDirectory: bin.path,
+			bundledBinDirectory: nil
+		)
+
+		_ = try await runner.runQueue(
+			repository: "charliewilco/Auditorium",
+			issueNumbers: [11],
+			workflowPath: root.appending(path: "WORKFLOW.md"),
+			workspaceRoot: root.appending(path: "workspaces"),
+			environment: ["GH_TOKEN": "gho_test_token"]
+		)
+		let environment = try String(contentsOf: environmentPath, encoding: .utf8)
+
+		#expect(environment.contains("HOME=\(FileManager.default.homeDirectoryForCurrentUser.path)"))
+		#expect(environment.contains("GH_TOKEN=gho_test_token"))
+		#expect(environment.contains("PATH=\(bin.path):"))
+	}
+
 	@Test func symphonyRunnerPassesUnescapedFilesystemPaths() async throws {
 		let root = FileManager.default.temporaryDirectory
 			.appending(path: "Auditorium Tests \(UUID().uuidString)")
@@ -2964,6 +3001,113 @@ struct AuditoriumTests {
 		#expect(finalRun.reportMarkdown.contains("Orchestrator.swift"))
 		#expect(arguments.hasPrefix("run-queue\n"))
 		#expect(arguments.contains("--issues\n8\n"))
+	}
+
+	@Test func appRunCoordinatorIncludesSymphonyFailureMetadataInReport() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let fakeSymphony = root.appending(path: "fake-symphony")
+		try """
+		#!/bin/sh
+		if [ "$GH_TOKEN" != "gho_from_keychain" ]; then
+			echo "missing GH_TOKEN" >&2
+			exit 43
+		fi
+		printf '%s\\n' '{"level":"info","category":"orchestration","message":"queue_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issues":[18],"runID":"queue-18"}}'
+		printf '%s\\n' '{"level":"error","category":"orchestration","message":"queue_ticket_failed","timestamp":"2026-06-06T12:00:01Z","metadata":{"issue":18,"code":"command_failed","error":"codex missing from app PATH","failedIssues":[[18,"codex missing from app PATH"]]}}'
+		printf '%s\\n' '{"level":"warning","category":"orchestration","message":"queue_completed","timestamp":"2026-06-06T12:00:02Z","metadata":{"issues":[18],"failedIssues":[[18,"codex missing from app PATH"]],"runID":"queue-18"}}'
+		printf 'invalid_config: workflow config is invalid: run-queue failed 1 issue(s)\\n' >&2
+		exit 22
+		""".write(to: fakeSymphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSymphony.path)
+		let keychain = KeychainService(service: "co.charliewil.Auditorium.tests.\(UUID().uuidString)")
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub",
+			keychainAccount: "app-symphony-failure-\(UUID().uuidString)",
+			grantedScopesRaw: "repo read:user"
+		)
+		try keychain.storeSecret("gho_from_keychain", account: account.keychainAccount)
+		defer { try? keychain.deleteSecret(account: account.keychainAccount) }
+		let project = Project(
+			name: "App Symphony Failure",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "18",
+			title: "Preserve symphony failure metadata",
+			body: "Verify app reports include structured symphony failure metadata.",
+			status: .ready,
+			labels: ["app"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/18",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 2,
+			sourceProjectID: project.id
+		)
+		context.insert(project)
+		context.insert(account)
+		context.insert(
+			RepositoryRecord(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: "https://github.com/charliewilco/Auditorium.git",
+				webURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				providerAccountID: account.id,
+				projectID: project.id
+			)
+		)
+		context.insert(ticket)
+		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		try context.save()
+		let detection = RuntimeDetectionService(staticChecks: [
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "codex", name: "Codex CLI", state: .available, detail: "/usr/local/bin/codex", version: nil),
+		])
+		let coordinator = AppRunCoordinator(
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root.appending(path: "app")),
+			runtimeDetection: detection,
+			reportGenerator: ReportGenerator(),
+			symphonyRunner: SymphonyCLIProcessRunner(executablePath: fakeSymphony.path),
+			providerRegistry: ProviderRegistry(keychainService: keychain)
+		)
+
+		coordinator.startQueue(project: project, concurrency: 1, context: context)
+		let deadline = Date().addingTimeInterval(15)
+		var run: RunRecord?
+		while Date() < deadline {
+			run = try context.fetch(FetchDescriptor<RunRecord>()).first
+			if run?.status == .failed {
+				break
+			}
+			await Task.yield()
+			try await Task.sleep(nanoseconds: 25_000_000)
+		}
+		let finalRun = try #require(run)
+		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
+		let report = try #require(context.fetch(FetchDescriptor<ReportRecord>()).first)
+
+		#expect(finalRun.status == .failed)
+		#expect(ticketRun.status == .failed)
+		#expect(ticketRun.failureReason?.contains("Latest symphony failure metadata") == true)
+		#expect(ticketRun.failureReason?.contains("codex missing from app PATH") == true)
+		#expect(report.markdown.contains("Latest symphony failure metadata"))
+		#expect(report.markdown.contains("codex missing from app PATH"))
 	}
 
 	@Test func liveAppRunCoordinatorUsesRealSymphonyQueueWhenConfigured() async throws {

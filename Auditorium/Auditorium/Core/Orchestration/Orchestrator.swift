@@ -316,9 +316,10 @@ final class Orchestrator {
 			return
 		}
 		catch {
+			let failureReason = symphonyFailureReason(error: error, runID: run.id, context: context)
 			for ticketRun in ticketRuns where ticketRun.status == .running || ticketRun.status == .pending {
 				ticketRun.status = .failed
-				ticketRun.failureReason = error.localizedDescription
+				ticketRun.failureReason = failureReason
 				ticketRun.endedAt = .now
 				tickets.first { $0.id == ticketRun.ticketID }?.status = .failed
 			}
@@ -327,7 +328,7 @@ final class Orchestrator {
 					runID: run.id,
 					level: .error,
 					category: .orchestration,
-					message: error.localizedDescription
+					message: failureReason
 				)
 			)
 			try ModelIntegrityValidator.save(context: context)
@@ -341,6 +342,18 @@ final class Orchestrator {
 			insertReportEvent: false,
 			summary: { "symphony completed \($0.completedTickets) tickets and failed \($0.failedTickets)." }
 		)
+	}
+
+	private func symphonyFailureReason(error: Error, runID: UUID, context: ModelContext) -> String {
+		let base = error.localizedDescription
+		let events = (try? context.fetch(FetchDescriptor<RuntimeEventRecord>())) ?? []
+		let failureEvents = events.filter {
+			$0.runID == runID && $0.message == "queue_ticket_failed" && $0.metadataJSON != "{}"
+		}
+		guard let metadata = failureEvents.last?.metadataJSON else {
+			return base
+		}
+		return "\(base)\nLatest symphony failure metadata: \(metadata)"
 	}
 
 	private func executeProviderBatches(
