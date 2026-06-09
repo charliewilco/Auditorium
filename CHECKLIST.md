@@ -483,6 +483,7 @@ Acceptance gate:
 	- Local unsigned artifacts can be produced with `./script/package_release.sh --unsigned`; Developer ID notarized artifacts use `./script/package_release.sh --developer-id --notarize`.
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27219609874>: the workflow produced `Auditorium.zip`, `gh run download` retrieved the artifact, and the unpacked `Auditorium.app` launched locally.
 	- Verified 2026-06-09 locally after packaging hardening: `./script/package_release.sh --unsigned` builds a Release app zip, bundles `symphony` at `Auditorium.app/Contents/Resources/bin/symphony`, ad-hoc signs the unsigned artifact, passes `codesign --verify --deep --strict`, and launches `dist/Auditorium.app`.
+	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27220850927> from commit `cdbaa51`: the uploaded `Auditorium.zip` contains both `Auditorium.app/Contents/MacOS/Auditorium` and `Auditorium.app/Contents/Resources/bin/symphony`.
 	- Final verification still requires Apple Developer ID/notary credentials and launch of the signed, notarized `Auditorium.app` on a separate clean Mac.
 
 ## 24. v0 Final Acceptance
