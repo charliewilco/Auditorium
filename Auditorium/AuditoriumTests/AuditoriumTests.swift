@@ -646,8 +646,8 @@ struct AuditoriumTests {
 		let environmentSecrets = try context.fetch(FetchDescriptor<ProjectEnvironmentSecretRecord>())
 		let coordinationMessages = try context.fetch(FetchDescriptor<CoordinationMessageRecord>())
 
-		#expect(AppSchema.MigrationPlan.schemas.count == 7)
-		#expect(AppSchema.MigrationPlan.stages.count == 6)
+		#expect(AppSchema.MigrationPlan.schemas.count == 1)
+		#expect(AppSchema.MigrationPlan.stages.isEmpty)
 		#expect(projects.map(\.id) == [ids.projectID])
 		#expect(projects.first?.name == "Migrated Project")
 		#expect(repositories.first?.projectID == ids.projectID)
@@ -2400,6 +2400,29 @@ struct AuditoriumTests {
 		#expect(status.detail == "symphony doctor found 1 failing checks.")
 		#expect(status.workflowDetail.contains("missing_workflow_file"))
 		#expect(status.checks.last?.code == "command_failed")
+	}
+
+	@Test func symphonyRunnerPrefersBundledBinaryDirectory() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let bin = root.appending(path: "bin")
+		try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+		let symphony = bin.appending(path: "symphony")
+		let argumentsPath = root.appending(path: "arguments.txt")
+		try """
+		#!/bin/sh
+		printf '%s\\n' "$@" > '\(argumentsPath.path())'
+		printf '%s\\n' '{"ok":true,"workflow":{"ok":true,"workspaceRoot":"/tmp/auditorium","trackerKind":"github","maxConcurrentAgents":3,"code":null,"message":null},"checks":[{"name":"GitHub CLI","ok":true,"detail":"gh 2.0","code":null},{"name":"Codex CLI","ok":true,"detail":"codex 1.0","code":null}]}'
+		""".write(to: symphony, atomically: true, encoding: .utf8)
+		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: symphony.path())
+		let runner = SymphonyCLIProcessRunner(bundledBinDirectory: bin.path())
+
+		let status = await runner.doctor()
+		let arguments = try String(contentsOf: argumentsPath, encoding: .utf8)
+
+		#expect(status.state == .available)
+		#expect(status.detail == "symphony doctor passed 2 checks.")
+		#expect(arguments == "doctor\n--json\n")
 	}
 
 	@Test func processCommandCanReturnNonZeroResultForStructuredOutput() async throws {

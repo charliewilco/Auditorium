@@ -176,9 +176,14 @@ private struct SymphonyDoctorCheckPayload: Decodable {
 
 struct SymphonyCLIProcessRunner {
 	let executablePath: String
+	let bundledBinDirectory: String?
 
-	nonisolated init(executablePath: String = "/usr/bin/env") {
+	nonisolated init(
+		executablePath: String = "/usr/bin/env",
+		bundledBinDirectory: String? = Bundle.main.resourceURL?.appending(path: "bin").path()
+	) {
 		self.executablePath = executablePath
+		self.bundledBinDirectory = bundledBinDirectory
 	}
 
 	func run(
@@ -209,7 +214,7 @@ struct SymphonyCLIProcessRunner {
 		let result = try await ProcessCommand.runStreaming(
 			executable: executablePath,
 			arguments: arguments,
-			environment: environment.isEmpty ? nil : environment,
+			environment: processEnvironment(overrides: environment),
 			onStandardOutputLine: { line in
 				if let event = try? decodeEvent(line: line) {
 					await onEvent?(event)
@@ -248,7 +253,7 @@ struct SymphonyCLIProcessRunner {
 		let result = try await ProcessCommand.runStreaming(
 			executable: executablePath,
 			arguments: arguments,
-			environment: environment.isEmpty ? nil : environment,
+			environment: processEnvironment(overrides: environment),
 			onStandardOutputLine: { line in
 				if let event = try? decodeEvent(line: line) {
 					await onEvent?(event)
@@ -275,6 +280,7 @@ struct SymphonyCLIProcessRunner {
 			let result = try await ProcessCommand.runStreaming(
 				executable: executablePath,
 				arguments: arguments,
+				environment: processEnvironment(),
 				allowsNonZeroExit: true
 			)
 			return decodeDoctor(output: result.standardOutput, exitCode: result.exitCode, stderr: result.standardError)
@@ -390,5 +396,14 @@ struct SymphonyCLIProcessRunner {
 		}
 		let code = workflow.code.map { "\($0): " } ?? ""
 		return "\(code)\(workflow.message ?? "Workflow validation failed.")"
+	}
+
+	private func processEnvironment(overrides: [String: String] = [:]) -> [String: String]? {
+		var environment = overrides
+		if let bundledBinDirectory, FileManager.default.isExecutableFile(atPath: "\(bundledBinDirectory)/symphony") {
+			let inheritedPath = overrides["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+			environment["PATH"] = "\(bundledBinDirectory):\(inheritedPath)"
+		}
+		return environment.isEmpty ? nil : environment
 	}
 }

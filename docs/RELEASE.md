@@ -35,6 +35,13 @@ gh workflow run release-package.yml
 
 Unsigned artifacts are for smoke testing and internal development only. They are not the clean-Mac distribution path because Gatekeeper may block a downloaded unsigned app.
 
+The package includes:
+
+- `Auditorium.app`
+- Bundled `symphony` CLI at `Auditorium.app/Contents/Resources/bin/symphony`
+
+At runtime the app prepends that bundled `bin` directory to `PATH` when it exists, then falls back to a separately installed `symphony` during development.
+
 You can create the same artifact locally:
 
 ```sh

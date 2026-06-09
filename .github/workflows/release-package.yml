@@ -12,6 +12,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
       - name: Package app
         run: ./script/package_release.sh --unsigned
       - name: Upload app zip

@@ -267,6 +267,8 @@ Package a downloadable app zip:
 ./script/package_release.sh --unsigned
 ```
 
+The zip contains `Auditorium.app` and a bundled `symphony` CLI at `Auditorium.app/Contents/Resources/bin/symphony`, so the app does not require a separately installed `symphony` binary on another Mac. Real GitHub/Codex runs still require Git, GitHub CLI, Codex CLI, and GitHub credentials on that machine.
+
 The unsigned zip is useful for CI smoke artifacts. For a clean Mac distribution build, use Developer ID signing and notarization:
 
 ```sh

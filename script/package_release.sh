@@ -9,6 +9,18 @@ EXPORT_OPTIONS_PLIST="${EXPORT_OPTIONS_PLIST:-"$ROOT/config/ExportOptions-develo
 MODE="development"
 NOTARIZE=0
 
+build_symphony() {
+	cargo build --release -p symphony
+}
+
+copy_symphony_into_app() {
+	local app="$1"
+	local bin_dir="$app/Contents/Resources/bin"
+	mkdir -p "$bin_dir"
+	ditto "$ROOT/target/release/symphony" "$bin_dir/symphony"
+	chmod 755 "$bin_dir/symphony"
+}
+
 usage() {
 	cat <<'USAGE'
 Usage: script/package_release.sh [--unsigned | --developer-id] [--notarize]
@@ -58,12 +70,16 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 if [[ "$MODE" == "developer-id" ]]; then
+	build_symphony
+
 	xcodebuild archive \
 		-workspace "$ROOT/Auditorium.xcworkspace" \
 		-scheme Auditorium \
 		-configuration Release \
 		-destination 'generic/platform=macOS' \
 		-archivePath "$ARCHIVE_PATH"
+
+	copy_symphony_into_app "$ARCHIVE_PATH/Products/Applications/Auditorium.app"
 
 	xcodebuild -exportArchive \
 		-archivePath "$ARCHIVE_PATH" \
@@ -87,6 +103,11 @@ else
 
 	APP="$OUTPUT_DIR/Auditorium.app"
 	ditto "$DERIVED_DATA/Build/Products/Release/Auditorium.app" "$APP"
+	build_symphony
+	copy_symphony_into_app "$APP"
+	if [[ "$MODE" == "development" || "$MODE" == "unsigned" ]]; then
+		codesign --force --deep --sign - "$APP"
+	fi
 fi
 
 if [[ "$MODE" != "unsigned" ]]; then
