@@ -3832,8 +3832,7 @@ struct AuditoriumTests {
 
 		await cancellationProbe.waitUntilStarted()
 		task.cancel()
-		await cancellationProbe.release()
-		try await task.value
+		try await waitForTask(task, timeoutNanoseconds: 1_000_000_000)
 		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
 		let ticketRun = try #require(context.fetch(FetchDescriptor<TicketRunRecord>()).first)
 		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
@@ -4927,6 +4926,23 @@ private actor AgentConcurrencyProbe {
 
 	func observedMaxActiveCount() -> Int {
 		maxActiveCount
+	}
+}
+
+private func waitForTask(_ task: Task<Void, Error>, timeoutNanoseconds: UInt64) async throws {
+	try await withThrowingTaskGroup(of: Void.self) { group in
+		group.addTask {
+			try await task.value
+		}
+		group.addTask {
+			try await Task.sleep(nanoseconds: timeoutNanoseconds)
+			task.cancel()
+			throw ProviderError.unavailable("Timed out waiting for cancellation.")
+		}
+		defer {
+			group.cancelAll()
+		}
+		try await group.next()
 	}
 }
 

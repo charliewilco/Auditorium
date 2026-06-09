@@ -996,41 +996,39 @@ final class Orchestrator {
 		retryPolicy: RetryPolicy,
 		commitAndPush: Bool = false
 	) async throws {
-		let tasks = batch.compactMap { item -> Task<Void, Error>? in
-			guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
-				let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
-			else {
-				return nil
+		try await withThrowingTaskGroup(of: Void.self) { group in
+			for item in batch {
+				guard let ticketRun = ticketRuns.first(where: { $0.ticketID == item.ticketID }),
+					let ticket = tickets.first(where: { $0.id == ticketRun.ticketID })
+				else {
+					continue
+				}
+				group.addTask { @MainActor in
+					try Task.checkCancellation()
+					try await self.processTicketWithRecovery(
+						project: project,
+						repository: repository,
+						ticket: ticket,
+						ticketRun: ticketRun,
+						run: run,
+						runtime: runtime,
+						agent: agent,
+						sourceProvider: sourceProvider,
+						context: context,
+						workflowPolicyMarkdown: workflowPolicyMarkdown,
+						retryPolicy: retryPolicy,
+						commitAndPush: commitAndPush
+					)
+				}
 			}
-			return Task { @MainActor in
-				try Task.checkCancellation()
-				try await processTicketWithRecovery(
-					project: project,
-					repository: repository,
-					ticket: ticket,
-					ticketRun: ticketRun,
-					run: run,
-					runtime: runtime,
-					agent: agent,
-					sourceProvider: sourceProvider,
-					context: context,
-					workflowPolicyMarkdown: workflowPolicyMarkdown,
-					retryPolicy: retryPolicy,
-					commitAndPush: commitAndPush
-				)
-			}
-		}
 
-		do {
-			for task in tasks {
-				try await task.value
+			do {
+				try await group.waitForAll()
 			}
-		}
-		catch {
-			for task in tasks {
-				task.cancel()
+			catch {
+				group.cancelAll()
+				throw error
 			}
-			throw error
 		}
 	}
 
