@@ -2866,6 +2866,11 @@ struct AuditoriumTests {
 			let issue: Int
 			let token: String
 			let symphonyBinary: String
+			let agentCommand: String?
+			let validationCommand: String?
+			let expectedOutputPath: String?
+			let prompt: String?
+			let timeoutSeconds: TimeInterval?
 		}
 		let config: LiveSymphonySmokeConfig?
 		if environment["AUDITORIUM_LIVE_APP_SYMPHONY"] == "1",
@@ -2875,7 +2880,17 @@ struct AuditoriumTests {
 			let token = environment["AUDITORIUM_LIVE_GITHUB_TOKEN"],
 			let symphonyBinary = environment["AUDITORIUM_LIVE_SYMPHONY_BIN"]
 		{
-			config = LiveSymphonySmokeConfig(repository: repository, issue: issue, token: token, symphonyBinary: symphonyBinary)
+			config = LiveSymphonySmokeConfig(
+				repository: repository,
+				issue: issue,
+				token: token,
+				symphonyBinary: symphonyBinary,
+				agentCommand: environment["AUDITORIUM_LIVE_AGENT_COMMAND"],
+				validationCommand: environment["AUDITORIUM_LIVE_VALIDATION_COMMAND"],
+				expectedOutputPath: environment["AUDITORIUM_LIVE_EXPECTED_OUTPUT_PATH"],
+				prompt: environment["AUDITORIUM_LIVE_PROMPT"],
+				timeoutSeconds: environment["AUDITORIUM_LIVE_TIMEOUT_SECONDS"].flatMap(TimeInterval.init)
+			)
 		}
 		else if FileManager.default.fileExists(atPath: "/tmp/auditorium-live-app-symphony.json") {
 			let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/auditorium-live-app-symphony.json"))
@@ -2889,6 +2904,13 @@ struct AuditoriumTests {
 		let issueNumber = liveConfig.issue
 		let token = liveConfig.token
 		let symphonyBinary = liveConfig.symphonyBinary
+		let expectedOutputPath = liveConfig.expectedOutputPath ?? "auditorium-live-app/result.txt"
+		let validationCommand = liveConfig.validationCommand ?? "test -f \(expectedOutputPath)"
+		func yamlBlock(_ value: String) -> String {
+			value.split(separator: "\n", omittingEmptySubsequences: false)
+				.map { "    \($0)" }
+				.joined(separator: "\n")
+		}
 		let repositoryParts = repositoryName.split(separator: "/", maxSplits: 1).map(String.init)
 		let owner = try #require(repositoryParts.first)
 		let name = try #require(repositoryParts.last)
@@ -2899,14 +2921,22 @@ struct AuditoriumTests {
 		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 		let agent = root.appending(path: "live-agent.sh")
 		let symphonyWrapper = root.appending(path: "symphony-wrapper.sh")
-		try """
-		#!/bin/sh
-		set -eu
-		mkdir -p auditorium-live-app
-		printf 'live app symphony completed\\n' > auditorium-live-app/result.txt
-		printf '%s\\n' "$@" > auditorium-live-app/prompt.txt
-		printf 'live app agent wrote auditorium-live-app/result.txt\\n'
-		""".write(to: agent, atomically: true, encoding: .utf8)
+		let agentCommand: String
+		if let configuredAgentCommand = liveConfig.agentCommand {
+			agentCommand = configuredAgentCommand
+		}
+		else {
+			try """
+			#!/bin/sh
+			set -eu
+			mkdir -p auditorium-live-app
+			printf 'live app symphony completed\\n' > auditorium-live-app/result.txt
+			printf '%s\\n' "$@" > auditorium-live-app/prompt.txt
+			printf 'live app agent wrote auditorium-live-app/result.txt\\n'
+			""".write(to: agent, atomically: true, encoding: .utf8)
+			try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: agent.path())
+			agentCommand = agent.path()
+		}
 		try """
 		#!/bin/sh
 		set -eu
@@ -2916,24 +2946,29 @@ struct AuditoriumTests {
 		fi
 		exec '\(symphonyBinary)' "$@"
 		""".write(to: symphonyWrapper, atomically: true, encoding: .utf8)
-		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: agent.path())
 		try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: symphonyWrapper.path())
+		let prompt =
+			liveConfig.prompt ?? """
+				Implement {{ issue.identifier }} in {{ issue.repo }}.
+				{{ issue.title }}
+				{{ issue.description }}
+				"""
 		let workflow = """
-		---
-		workspace:
-		  root: "\(root.appending(path: "unused-workspace-root").path())"
-		validation:
-		  command: "test -f auditorium-live-app/result.txt"
-		codex:
-		  command: "\(agent.path())"
-		branch_prefix: "auditorium-app-smoke"
-		run_tests: true
-		open_pull_request: true
-		---
-		Implement {{ issue.identifier }} in {{ issue.repo }}.
-		{{ issue.title }}
-		{{ issue.description }}
-		"""
+			---
+			workspace:
+			  root: "\(root.appending(path: "unused-workspace-root").path())"
+			validation:
+			  command: >-
+			\(yamlBlock(validationCommand))
+			codex:
+			  command: >-
+			\(yamlBlock(agentCommand))
+			branch_prefix: "auditorium-app-smoke"
+			run_tests: true
+			open_pull_request: true
+			---
+			\(prompt)
+			"""
 		let keychain = KeychainService(service: "co.charliewil.Auditorium.live-tests.\(UUID().uuidString)")
 		let account = ProviderAccountRecord(
 			providerKindRaw: RepositoryProviderKind.github.rawValue,
@@ -3000,7 +3035,7 @@ struct AuditoriumTests {
 		)
 
 		coordinator.startQueue(project: project, concurrency: 1, context: context)
-		let deadline = Date().addingTimeInterval(90)
+		let deadline = Date().addingTimeInterval(liveConfig.timeoutSeconds ?? 90)
 		var run: RunRecord?
 		while Date() < deadline {
 			run = try context.fetch(FetchDescriptor<RunRecord>()).first
@@ -3036,6 +3071,10 @@ struct AuditoriumTests {
 		#expect(ticketRun.pullRequestURL?.contains("https://github.com/\(repositoryName)/pull/") == true)
 		#expect(pullRequest.url == ticketRun.pullRequestURL)
 		#expect(events.contains { $0.message == "queue_started" })
+		if liveConfig.agentCommand != nil {
+			#expect(events.contains { $0.message == "codex_started" })
+			#expect(events.contains { $0.message == "codex_completed" })
+		}
 		#expect(events.contains { $0.message == "pull_request_opened" })
 		#expect(events.contains { $0.message == "queue_completed" })
 		#expect(reports.contains { $0.markdown.contains("Pull Request: \(ticketRun.pullRequestURL ?? "")") })

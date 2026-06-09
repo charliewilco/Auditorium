@@ -200,7 +200,8 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [ ] A real Codex CLI run can process one GitHub issue in a workspace and stream events into the app.
+- [x] A real Codex CLI run can process one GitHub issue in a workspace and stream events into the app.
+	- Verified 2026-06-09 with opt-in Xcode test `liveAppRunCoordinatorUsesRealSymphonyQueueWhenConfigured` configured to use real `codex exec --json --sandbox workspace-write`; private GitHub issue #7 in `charliewilco/auditorium-symphony-smoke-20260609112717` produced PR https://github.com/charliewilco/auditorium-symphony-smoke-20260609112717/pull/8, and the app persisted `codex_started`, `codex_completed`, `pull_request_opened`, and queue completion state.
 
 ## 11. Orchestration Engine
 
