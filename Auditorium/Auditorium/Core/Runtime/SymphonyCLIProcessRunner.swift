@@ -29,19 +29,72 @@ struct SymphonyCLIEvent: Decodable, Sendable, Equatable {
 		category = try container.decode(String.self, forKey: .category)
 		message = try container.decode(String.self, forKey: .message)
 		timestamp = try container.decode(Date.self, forKey: .timestamp)
-		if let metadata = try? container.decode([String: String].self, forKey: .metadata),
-			let data = try? JSONEncoder().encode(metadata),
-			let json = String(data: data, encoding: .utf8)
-		{
-			metadataJSON = json
-		}
-		else {
-			metadataJSON = "{}"
-		}
+		metadataJSON = Self.metadataJSONString(from: container, forKey: .metadata)
 		runID = try container.decodeIfPresent(String.self, forKey: .runID)
 		ticketRunID = try container.decodeIfPresent(String.self, forKey: .ticketRunID)
 		issue = try container.decodeIfPresent(Int.self, forKey: .issue)
 		coordinationMessageID = try container.decodeIfPresent(String.self, forKey: .coordinationMessageID)
+	}
+
+	private static func metadataJSONString(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> String {
+		guard let value = try? container.decode(JSONValue.self, forKey: key) else {
+			return "{}"
+		}
+		let object = value.object
+		guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+			let json = String(data: data, encoding: .utf8)
+		else {
+			return "{}"
+		}
+		return json
+	}
+}
+
+private enum JSONValue: Decodable {
+	case null
+	case bool(Bool)
+	case number(Double)
+	case string(String)
+	case array([JSONValue])
+	case object([String: JSONValue])
+
+	var object: Any {
+		switch self {
+		case .null:
+			NSNull()
+		case .bool(let value):
+			value
+		case .number(let value):
+			value
+		case .string(let value):
+			value
+		case .array(let values):
+			values.map(\.object)
+		case .object(let values):
+			values.mapValues(\.object)
+		}
+	}
+
+	init(from decoder: Decoder) throws {
+		let container = try decoder.singleValueContainer()
+		if container.decodeNil() {
+			self = .null
+		}
+		else if let value = try? container.decode(Bool.self) {
+			self = .bool(value)
+		}
+		else if let value = try? container.decode(Double.self) {
+			self = .number(value)
+		}
+		else if let value = try? container.decode(String.self) {
+			self = .string(value)
+		}
+		else if let value = try? container.decode([JSONValue].self) {
+			self = .array(value)
+		}
+		else {
+			self = .object(try container.decode([String: JSONValue].self))
+		}
 	}
 }
 

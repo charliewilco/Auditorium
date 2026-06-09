@@ -2333,6 +2333,20 @@ struct AuditoriumTests {
 		#expect(event.metadataJSON.contains("ticket"))
 	}
 
+	@Test func symphonyRunnerPreservesNonStringEventMetadata() throws {
+		let line = """
+			{"level":"error","category":"orchestration","message":"queue_ticket_failed","timestamp":"2026-06-06T12:00:01Z","metadata":{"issue":14,"failedIssues":[[14,"agent failed"]],"retryable":false}}
+			"""
+
+		let event = try SymphonyCLIProcessRunner().decodeEvent(line: line)
+		let data = try #require(event.metadataJSON.data(using: .utf8))
+		let metadata = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+		#expect(metadata["issue"] as? Double == 14)
+		#expect(metadata["retryable"] as? Bool == false)
+		#expect((metadata["failedIssues"] as? [[Any]])?.first?.first as? Double == 14)
+	}
+
 	@Test func symphonyRunnerDecodesQueueEventsCoordinationAndSummaries() throws {
 		let output = """
 			{"level":"info","category":"orchestration","message":"queue_started","timestamp":"2026-06-06T12:00:00Z","metadata":{"issue":"#1"}}
