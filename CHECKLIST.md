@@ -263,7 +263,8 @@ Acceptance gate:
 - [x] Save report file.
 - [x] Preview reports in app.
 - [x] Copy/export/reveal actions exist in prototype form.
-- [ ] Verify copy/export/reveal manually.
+- [x] Verify copy/export/reveal actions.
+	- Verified 2026-06-09 with `swift test --filter reportActionsCopyExportAndRevealUseDurableReportData`; `ReportsView` routes Copy, Export, and Reveal through `ReportActions` and the app-level reveal handler.
 - [x] Include accurate changed files.
 - [x] Include validation/test output.
 - [x] Include failure details and suggested actions.
