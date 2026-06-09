@@ -316,7 +316,9 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [~] Inspector is a reliable single-ticket operations panel during and after a real run.
+- [x] Inspector is a reliable single-ticket operations panel during and after a real run.
+	- Verified 2026-06-09 with opt-in Xcode test `liveAppRunCoordinatorUsesRealSymphonyQueueWhenConfigured` configured for real `codex exec` against private GitHub issue #9 / PR #10: <https://github.com/charliewilco/auditorium-symphony-smoke-20260609112717/pull/10>.
+	- The test asserts inspector state while the ticket run is active (`Running`, cancel enabled, issue link enabled, queue timeline visible) and after completion (`Needs Review`, workspace/branch/PR populated, reveal/open PR enabled, review next action, PR and queue completion timeline visible).
 
 ## 17. Settings And Security
 

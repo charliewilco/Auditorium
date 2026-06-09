@@ -3020,7 +3020,8 @@ struct AuditoriumTests {
 			)
 		)
 		context.insert(ticket)
-		context.insert(QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium))
+		let queueItem = QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium)
+		context.insert(queueItem)
 		try context.save()
 		let detection = RuntimeDetectionService(staticChecks: [
 			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
@@ -3037,8 +3038,19 @@ struct AuditoriumTests {
 		coordinator.startQueue(project: project, concurrency: 1, context: context)
 		let deadline = Date().addingTimeInterval(liveConfig.timeoutSeconds ?? 90)
 		var run: RunRecord?
+		var activeInspectorState: TicketInspectorState?
 		while Date() < deadline {
 			run = try context.fetch(FetchDescriptor<RunRecord>()).first
+			if let activeTicketRun = try context.fetch(FetchDescriptor<TicketRunRecord>()).first,
+				activeTicketRun.status == .running
+			{
+				activeInspectorState = TicketInspectorState(
+					ticket: ticket,
+					queueItem: queueItem,
+					latestRun: activeTicketRun,
+					events: try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+				)
+			}
 			if let status = run?.status, status != .running && status != .pending {
 				break
 			}
@@ -3072,12 +3084,30 @@ struct AuditoriumTests {
 		#expect(pullRequest.url == ticketRun.pullRequestURL)
 		#expect(events.contains { $0.message == "queue_started" })
 		if liveConfig.agentCommand != nil {
+			let activeState = try #require(activeInspectorState)
+			#expect(activeState.queueState == "Position 1")
+			#expect(activeState.latestRunState == "Running")
+			#expect(activeState.canCancelRun)
+			#expect(activeState.canRunTicket == false)
+			#expect(activeState.canOpenIssueTracker)
+			#expect(activeState.timelineMessages.contains("queue_started"))
 			#expect(events.contains { $0.message == "codex_started" })
 			#expect(events.contains { $0.message == "codex_completed" })
 		}
 		#expect(events.contains { $0.message == "pull_request_opened" })
 		#expect(events.contains { $0.message == "queue_completed" })
 		#expect(reports.contains { $0.markdown.contains("Pull Request: \(ticketRun.pullRequestURL ?? "")") })
+		let completedInspectorState = TicketInspectorState(ticket: ticket, queueItem: queueItem, latestRun: ticketRun, events: events)
+		#expect(completedInspectorState.latestRunState == "Needs Review")
+		#expect(completedInspectorState.workspace == ticketRun.workspacePath)
+		#expect(completedInspectorState.branch == ticketRun.branchName)
+		#expect(completedInspectorState.pullRequest == ticketRun.pullRequestURL)
+		#expect(completedInspectorState.nextAction == "Review the pull request and merge if acceptable.")
+		#expect(completedInspectorState.canCancelRun == false)
+		#expect(completedInspectorState.canOpenPullRequest)
+		#expect(completedInspectorState.canRevealWorkspace)
+		#expect(completedInspectorState.timelineMessages.contains("pull_request_opened"))
+		#expect(completedInspectorState.timelineMessages.contains("queue_completed"))
 	}
 
 	@Test func localWorkspaceCodexOrchestratorCommitsPushesAndStoresPullRequest() async throws {
