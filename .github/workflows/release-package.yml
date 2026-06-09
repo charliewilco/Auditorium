@@ -1,0 +1,21 @@
+name: Release Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package unsigned app artifact
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+      - name: Package app
+        run: ./script/package_release.sh --unsigned
+      - name: Upload app zip
+        uses: actions/upload-artifact@v5
+        with:
+          name: Auditorium
+          path: dist/Auditorium.zip

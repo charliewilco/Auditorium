@@ -6,6 +6,12 @@ Auditorium v0 ships as a native macOS app plus the `symphony` Rust CLI.
 
 The app has an Xcode `Release` configuration for the shared `Auditorium` scheme.
 
+Build and launch a fresh local checkout:
+
+```sh
+./script/build_and_run.sh --verify
+```
+
 Local unsigned release smoke build:
 
 ```sh
@@ -18,6 +24,22 @@ xcodebuild build \
 ```
 
 CI builds both Debug and Release app configurations without signing so build regressions are caught without requiring Apple credentials.
+
+## Downloadable GitHub Artifact
+
+The manual **Release Package** GitHub Actions workflow builds an unsigned `Auditorium.zip` artifact:
+
+```sh
+gh workflow run release-package.yml
+```
+
+Unsigned artifacts are for smoke testing and internal development only. They are not the clean-Mac distribution path because Gatekeeper may block a downloaded unsigned app.
+
+You can create the same artifact locally:
+
+```sh
+./script/package_release.sh --unsigned
+```
 
 ## Signing Review
 
@@ -57,7 +79,7 @@ v0 distribution target is Developer ID outside the Mac App Store.
 Release sequence:
 
 1. Archive the app with the `Auditorium` scheme in Release.
-2. Export a Developer ID signed `.app` or `.pkg`.
+2. Export a Developer ID signed `.app`.
 3. Verify signing and hardened runtime:
 
 	```sh
@@ -71,5 +93,18 @@ Release sequence:
 	```sh
 	spctl -a -vv path/to/Auditorium.app
 	```
+
+The project-local command for the Developer ID path is:
+
+```sh
+./script/package_release.sh --developer-id --notarize
+```
+
+It uses `config/ExportOptions-developer-id.plist`, verifies the exported signature, submits the zip to notarytool, staples the app, validates with `spctl`, and recreates `dist/Auditorium.zip`.
+
+Notarization credentials can be provided with either:
+
+- `NOTARYTOOL_PROFILE`
+- `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_SPECIFIC_PASSWORD`
 
 Final v0 acceptance still requires launching the signed, notarized build on a clean Mac.

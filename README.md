@@ -88,17 +88,14 @@ Working today:
 - Mock orchestration can create ticket runs, stream events, generate fake PR URLs, and produce markdown reports.
 - Runtime detection checks Git, Codex CLI, and GitHub CLI.
 - Provider protocols exist for source-code and issue-tracker adapters.
-- GitHub provider adapter shape exists.
-- `symphony` CLI can initialize workflows, run doctor checks, run mock issues, and perform the first real GitHub/Codex-oriented path.
+- GitHub OAuth device flow, repository listing, issue import, credential preflight, branch push, and pull request adapter coverage exist.
+- The app coordinator can hand a queued GitHub issue to `symphony`, stream runtime events, persist the ticket run, and store the resulting pull request URL.
+- `symphony` CLI can initialize workflows, run doctor checks, run mock issues, run queued issues, coordinate concurrent work, and perform the real GitHub/Codex issue-to-pull-request path.
 
 Still in progress:
 
-- GitHub OAuth device/callback flow in the Mac app.
-- Real GitHub issue import in the Mac app.
-- Real GitHub repository clone, branch, push, and pull request creation from the app.
-- Production Codex process integration inside the Mac app.
-- Full app-to-CLI handoff.
-- CI validation for every platform/runtime combination.
+- Final manual acceptance of the full app UI flow on a credentialed GitHub account.
+- Signed, notarized distribution validation on a clean Mac.
 
 See [SPEC.md](SPEC.md) for the full product specification and [CHECKLIST.md](CHECKLIST.md) for the implementation tracker.
 
@@ -222,6 +219,19 @@ Demo mode does not require network access, GitHub credentials, or Codex.
 
 ## Quick Start: macOS App
 
+Clone the repository:
+
+```sh
+git clone https://github.com/charliewilco/Auditorium.git
+cd Auditorium
+```
+
+Build and launch the app from the command line:
+
+```sh
+./script/build_and_run.sh --verify
+```
+
 Open the Xcode workspace:
 
 ```sh
@@ -251,6 +261,20 @@ xcodebuild build \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
+Package a downloadable app zip:
+
+```sh
+./script/package_release.sh --unsigned
+```
+
+The unsigned zip is useful for CI smoke artifacts. For a clean Mac distribution build, use Developer ID signing and notarization:
+
+```sh
+./script/package_release.sh --developer-id --notarize
+```
+
+Developer ID packaging requires Apple signing credentials locally or in CI. See [docs/RELEASE.md](docs/RELEASE.md).
+
 Run the Xcode app test bundle when you need app-integration coverage:
 
 ```sh
@@ -266,7 +290,7 @@ xcodebuild test \
 
 ### 1. Launch Auditorium
 
-Run the app from Xcode. On first launch, the app opens to the Welcome screen.
+Run the app with `./script/build_and_run.sh`, the Codex Run action, or Xcode. On first launch, the app opens to the Welcome screen.
 
 ### 2. Open Demo Project
 
@@ -279,6 +303,10 @@ Use **Open Demo Project** to seed the local Burton Demo project:
 
 The demo project is offline and deterministic.
 
+### 2b. Create A GitHub Project
+
+For the real v0 path, configure a GitHub OAuth client ID in Settings or the setup wizard, complete the GitHub browser approval, choose an accessible repository, and import open issues.
+
 ### 3. Browse Tickets
 
 Open **Tickets** to inspect the seeded issues. Tickets include status, priority, labels, complexity, and update metadata.
@@ -290,6 +318,8 @@ Select tickets and add them to the queue. Queue items are persisted locally and 
 ### 5. Run The Queue
 
 Open **Queue** and press **Run Queue**.
+
+In real GitHub mode, Auditorium uses the stored GitHub credential, prepares a local workspace, runs `symphony`, streams events, and records the resulting branch, pull request, report, and inspector timeline.
 
 In demo mode, Auditorium will:
 
@@ -549,6 +579,12 @@ xcodebuild build \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
+Package macOS app artifact:
+
+```sh
+./script/package_release.sh --unsigned
+```
+
 Run all local checks:
 
 ```sh
@@ -566,13 +602,10 @@ Release signing and notarization policy lives in [docs/RELEASE.md](docs/RELEASE.
 
 The next useful implementation slices are:
 
-1. Finish GitHub OAuth for the Mac app.
-2. Import real GitHub Issues into `TicketRecord`.
-3. Add a provider registry/factory so the orchestrator never depends on concrete provider types.
-4. Wire a real GitHub repository provider path: clone, branch, commit, push, pull request.
-5. Implement `CodexCLIProcessAgentProvider` for the Mac app.
-6. Connect the Mac app to the `symphony` CLI for headless runs.
-7. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
+1. Complete the final credentialed manual acceptance pass for the full app UI GitHub flow.
+2. Produce and verify a Developer ID signed, notarized app on a clean Mac.
+3. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
+4. Harden production release automation once Apple signing credentials are available.
 
 Keep the product small and observable. The best v0 is not a general agent platform; it is a trustworthy GitHub issue-to-pull-request loop with excellent local inspection.
 
