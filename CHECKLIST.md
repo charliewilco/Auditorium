@@ -460,8 +460,8 @@ Acceptance gate:
 
 - [x] Local macOS Debug build passes.
 - [x] Focused Swift unit target passes.
-- [ ] Full Xcode scheme tests are reliable.
-	- Current full run still fails `AuditoriumTests.codexAgentProviderCancelsRunningProcessWhenStreamConsumerCancels()` and `AuditoriumTests.orchestratorPersistsSymphonyEventsWhileProcessRuns()`. Focused queue coordination Xcode tests pass.
+- [x] Full Xcode scheme tests are reliable.
+	- Verified 2026-06-09 with `xcodebuild test -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO`.
 - [x] GitHub Actions macOS build workflow.
 - [x] GitHub Actions SwiftPM core build/test workflow.
 - [x] GitHub Actions Rust test workflow.
