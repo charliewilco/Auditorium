@@ -454,6 +454,7 @@ Acceptance gate:
 - [x] Rust tests for quoted Codex command parsing and argv handoff.
 - [x] Rust integration test for non-mock GitHub issue, workspace, Codex, validation, git push, PR, and report flow.
 - [x] Rust tests for `run-queue` coordination NDJSON, JSONL journal replay, deterministic prompt enrichment, and queue-level bounded concurrency.
+- [x] Rust integration test for `run-queue` partial failure preserving successful ticket reports and emitting failed-ticket queue summary.
 - [x] UI smoke tests that are not template-only.
 - [x] Manual acceptance checklist with screenshots.
 
@@ -484,6 +485,8 @@ Acceptance gate:
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27219609874>: the workflow produced `Auditorium.zip`, `gh run download` retrieved the artifact, and the unpacked `Auditorium.app` launched locally.
 	- Verified 2026-06-09 locally after packaging hardening: `./script/package_release.sh --unsigned` builds a Release app zip, bundles `symphony` at `Auditorium.app/Contents/Resources/bin/symphony`, ad-hoc signs the unsigned artifact, passes `codesign --verify --deep --strict`, and launches `dist/Auditorium.app`.
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27220850927> from commit `cdbaa51`: the uploaded `Auditorium.zip` contains both `Auditorium.app/Contents/MacOS/Auditorium` and `Auditorium.app/Contents/Resources/bin/symphony`.
+	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27224590161> from commit `9923b0e`: the uploaded `Auditorium.zip` contains both `Auditorium.app/Contents/MacOS/Auditorium` and `Auditorium.app/Contents/Resources/bin/symphony`.
+	- Still not checked: local codesigning identities include Apple Development but no Developer ID Application identity, so a signed clean-Mac launch remains unverified.
 	- Final verification still requires Apple Developer ID/notary credentials and launch of the signed, notarized `Auditorium.app` on a separate clean Mac.
 
 ## 24. v0 Final Acceptance

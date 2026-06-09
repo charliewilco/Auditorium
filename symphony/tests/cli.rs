@@ -196,6 +196,61 @@ exit 0
     );
 }
 
+fn write_fake_partial_failure_toolchain(bin_dir: &Path) {
+    fs::create_dir_all(bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("gh"),
+        r#"#!/bin/sh
+set -eu
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  issue="$3"
+  cat <<JSON
+{
+  "id":"I_queue_${issue}",
+  "number":${issue},
+  "title":"Queue issue ${issue}",
+  "body":"Exercise queue partial failure for #${issue}.",
+  "url":"https://github.com/acme/app/issues/${issue}",
+  "labels":[],
+  "assignees":[],
+  "state":"OPEN",
+  "createdAt":"2026-06-01T00:00:00Z",
+  "updatedAt":"2026-06-02T00:00:00Z"
+}
+JSON
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
+  printf '{"defaultBranchRef":{"name":"main"}}\n'
+  exit 0
+fi
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  git clone "$SYMPHONY_TEST_REMOTE_REPO" "$4" >/dev/null 2>&1
+  git -C "$4" config user.name "Auditorium Bot"
+  git -C "$4" config user.email "auditorium@example.invalid"
+  exit 0
+fi
+echo "unexpected gh invocation: $@" >&2
+exit 1
+"#,
+    );
+    write_executable(
+        &bin_dir.join("codex-partial"),
+        r##"#!/bin/sh
+set -eu
+case "$*" in
+  *"#2"*)
+    printf 'agent failed issue 2\n' >&2
+    exit 42
+    ;;
+esac
+printf 'partial success\n' > partial-output.txt
+printf 'codex completed issue\n'
+exit 0
+"##,
+    );
+}
+
 fn path_with_fake_tools(bin_dir: &Path) -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
     format!("{}:{existing}", bin_dir.display())
@@ -540,6 +595,93 @@ Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
         .join("_2")
         .join("repo")
         .join("queue-output.txt")
+        .exists());
+}
+
+#[test]
+fn run_queue_reports_partial_failure_without_losing_successful_reports() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    let bin_dir = tempdir.path().join("bin");
+    let remote = prepare_bare_remote(&tempdir);
+    write_fake_partial_failure_toolchain(&bin_dir);
+
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+agent:
+  max_concurrent_agents: 2
+validation:
+  command: ""
+codex:
+  command: "{}"
+branch_prefix: "auditorium"
+run_tests: false
+open_pull_request: false
+---
+Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
+"#,
+            workspace_root.display(),
+            bin_dir.join("codex-partial").display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args([
+            "run-queue",
+            "--repo",
+            "acme/app",
+            "--issues",
+            "1,2",
+            "--workflow",
+        ])
+        .arg(&workflow)
+        .arg("--json")
+        .env("PATH", path_with_fake_tools(&bin_dir))
+        .env("SYMPHONY_TEST_REMOTE_REPO", &remote)
+        .assert()
+        .failure()
+        .code(22)
+        .stderr(predicate::str::contains(
+            "invalid_config: workflow config is invalid: run-queue failed 1 issue(s)",
+        ))
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(values.iter().any(|value| value["run_id"]
+        .as_str()
+        .is_some_and(|run_id| run_id.contains("queue-1-2"))
+        && value["issue"]["number"] == 1
+        && value["status"] == "completed"));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "queue_ticket_failed"
+            && value["metadata"]["issue"] == 2
+            && value["metadata"]["code"] == "command_failed"
+            && value["metadata"]["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("agent failed issue 2"))));
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "queue_completed"
+            && value["level"] == "warning"
+            && value["metadata"]["failedIssues"][0][0] == 2));
+    assert!(workspace_root
+        .join("_1")
+        .join("repo")
+        .join("partial-output.txt")
+        .exists());
+    assert!(!workspace_root
+        .join("_2")
+        .join("repo")
+        .join("partial-output.txt")
         .exists());
 }
 
