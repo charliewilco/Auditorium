@@ -686,6 +686,63 @@ Fix {{{{ issue.identifier }}}} in {{{{ issue.repo }}}}.
 }
 
 #[test]
+fn run_queue_reports_missing_command_launch_context() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let workflow = workflow_path(&tempdir);
+    let workspace_root = tempdir.path().join("workspaces");
+    let empty_path = tempdir.path().join("empty-path");
+    fs::create_dir_all(&empty_path).unwrap();
+    fs::write(
+        &workflow,
+        format!(
+            r#"---
+workspace:
+  root: "{}"
+agent:
+  max_concurrent_agents: 1
+validation:
+  command: ""
+run_tests: false
+open_pull_request: false
+---
+Fix {{{{ issue.identifier }}}}.
+"#,
+            workspace_root.display()
+        ),
+    )
+    .unwrap();
+
+    let output = symphony()
+        .args([
+            "run-queue",
+            "--repo",
+            "acme/app",
+            "--issues",
+            "41",
+            "--workflow",
+        ])
+        .arg(&workflow)
+        .args(["--json"])
+        .env("PATH", &empty_path)
+        .assert()
+        .failure()
+        .code(22)
+        .get_output()
+        .stdout
+        .clone();
+    let values = read_ndjson(&output);
+
+    assert!(values
+        .iter()
+        .any(|value| value["message"] == "queue_ticket_failed"
+            && value["metadata"]["issue"] == 41
+            && value["metadata"]["code"] == "command_launch_failed"
+            && value["metadata"]["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("gh") && message.contains("issue"))));
+}
+
+#[test]
 fn run_non_mock_flow_clones_runs_codex_pushes_pr_and_writes_report() {
     let tempdir = tempfile::tempdir().unwrap();
     let workflow = workflow_path(&tempdir);

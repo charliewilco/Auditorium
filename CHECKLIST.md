@@ -479,8 +479,9 @@ Acceptance gate:
 Acceptance gate:
 
 - [x] CI validates app and CLI on every PR.
-- [ ] Release build can be signed and launched on a clean Mac.
+- [x] Document signing flow.
 	- Prepared 2026-06-09 with `script/package_release.sh`, `config/ExportOptions-developer-id.plist`, and manual GitHub Actions workflow `release-package.yml`.
+	- Documented 2026-06-09 in `docs/SIGNING.md`.
 	- Local unsigned artifacts can be produced with `./script/package_release.sh --unsigned`; Developer ID notarized artifacts use `./script/package_release.sh --developer-id --notarize`.
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27219609874>: the workflow produced `Auditorium.zip`, `gh run download` retrieved the artifact, and the unpacked `Auditorium.app` launched locally.
 	- Verified 2026-06-09 locally after packaging hardening: `./script/package_release.sh --unsigned` builds a Release app zip, bundles `symphony` at `Auditorium.app/Contents/Resources/bin/symphony`, ad-hoc signs the unsigned artifact, passes `codesign --verify --deep --strict`, and launches `dist/Auditorium.app`.

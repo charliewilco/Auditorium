@@ -61,6 +61,13 @@ pub enum SymphonyError {
         status: i32,
         stderr: String,
     },
+    #[error("command launch failed: {program} {args:?}: {source}")]
+    CommandLaunchFailed {
+        program: String,
+        args: Vec<String>,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("io failure: {0}")]
     Io(#[from] std::io::Error),
     #[error("json failure: {0}")]
@@ -75,6 +82,7 @@ impl SymphonyError {
             SymphonyError::WorkflowFrontMatterNotMap => "workflow_front_matter_not_a_map",
             SymphonyError::InvalidConfig(_) => "invalid_config",
             SymphonyError::CommandFailed { .. } => "command_failed",
+            SymphonyError::CommandLaunchFailed { .. } => "command_launch_failed",
             SymphonyError::Io(_) => "io_error",
             SymphonyError::Json(_) => "json_error",
         }
@@ -86,6 +94,7 @@ impl SymphonyError {
             SymphonyError::WorkflowParse(_) | SymphonyError::WorkflowFrontMatterNotMap => 21,
             SymphonyError::InvalidConfig(_) => 22,
             SymphonyError::CommandFailed { .. } => 30,
+            SymphonyError::CommandLaunchFailed { .. } => 31,
             SymphonyError::Io(_) => 40,
             SymphonyError::Json(_) => 41,
         }
@@ -2737,7 +2746,14 @@ async fn command_stdout(
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
-    let output = command.output().await?;
+    let output = command
+        .output()
+        .await
+        .map_err(|source| SymphonyError::CommandLaunchFailed {
+            program: program.to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
+            source,
+        })?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -3881,6 +3897,18 @@ Body
         assert_eq!(error.code(), "command_failed");
         assert_eq!(error.exit_code(), 30);
         assert!(error.to_string().contains("nope"));
+    }
+
+    #[tokio::test]
+    async fn command_stdout_reports_launch_failures_with_program_context() {
+        let error = command_stdout("__auditorium_missing_command__", &["--version"], None)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "command_launch_failed");
+        assert_eq!(error.exit_code(), 31);
+        assert!(error.to_string().contains("__auditorium_missing_command__"));
+        assert!(error.to_string().contains("--version"));
     }
 
     #[tokio::test]
