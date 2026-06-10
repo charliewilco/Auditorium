@@ -14,7 +14,7 @@ Connect GitHub -> choose a repo -> queue issues -> hit Play -> review pull reque
 
 The product is inspired by OpenAI Symphony's core idea: an issue tracker can become the operational control plane for coding agents. Each eligible ticket gets its own workspace, its own run state, its own logs, and a human-reviewable result.
 
-Auditorium brings that model to a polished Mac app, with a companion Rust CLI named `symphony` for headless runs.
+Auditorium brings that model to a focused v0 GitHub-to-Codex PR control loop, with a companion Rust CLI named `symphony` for headless runs.
 
 ## Why This Exists
 
@@ -92,10 +92,11 @@ Working today:
 - The app coordinator can hand a queued GitHub issue to `symphony`, stream runtime events, persist the ticket run, and store the resulting pull request URL.
 - `symphony` CLI can initialize workflows, run doctor checks, run mock issues, run queued issues, coordinate concurrent work, and perform the real GitHub/Codex issue-to-pull-request path.
 
-Still in progress:
+Current trust level:
 
-- Final manual acceptance of the full app UI flow on a credentialed GitHub account.
-- Signed, notarized distribution validation on a clean Mac.
+- Ready: demo flow, `symphony` CLI flow, app-to-CLI integration, and real GitHub smoke tests are implemented and test-backed.
+- Needs final proof: Developer ID signing, notarization, Gatekeeper validation, clean-Mac launch, and a fresh credentialed manual pass on the signed artifact.
+- Future: non-GitHub providers, hosted/team orchestration, and background automation beyond explicit user opt-in.
 
 See [SPEC.md](SPEC.md) for the full product specification and [CHECKLIST.md](CHECKLIST.md) for the implementation tracker.
 
@@ -604,10 +605,10 @@ Release signing and notarization policy lives in [docs/RELEASE.md](docs/RELEASE.
 
 The next useful implementation slices are:
 
-1. Complete the final credentialed manual acceptance pass for the full app UI GitHub flow.
-2. Produce and verify a Developer ID signed, notarized app on a clean Mac.
+1. Produce and verify a Developer ID signed, notarized app on a clean Mac.
+2. Complete a fresh credentialed manual acceptance pass on that signed artifact.
 3. Keep moving app logic into SwiftPM packages so core behavior stays fast to build and test.
-4. Harden production release automation once Apple signing credentials are available.
+4. Extend the control plane in order: daemon handoff, coordination UI, generic CLI agent UX, then the first non-GitHub issue adapter.
 
 Keep the product small and observable. The best v0 is not a general agent platform; it is a trustworthy GitHub issue-to-pull-request loop with excellent local inspection.
 

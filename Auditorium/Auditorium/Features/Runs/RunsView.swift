@@ -8,6 +8,7 @@ struct RunsView: View {
 	let events: [RuntimeEventRecord]
 	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
+	let reports: [ReportRecord]
 
 	var body: some View {
 		NavigationSplitView {
@@ -33,7 +34,8 @@ struct RunsView: View {
 					tickets: tickets,
 					events: events.filter { $0.runID == run.id },
 					coordinationMessages: coordinationMessages.filter { $0.runID == run.id },
-					pullRequests: pullRequests
+					pullRequests: pullRequests,
+					reports: reports.filter { $0.runID == run.id }
 				)
 			}
 			else {
@@ -69,6 +71,7 @@ struct RunDetailView: View {
 	let events: [RuntimeEventRecord]
 	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
+	let reports: [ReportRecord]
 
 	var progress: Double {
 		guard run.totalTickets > 0 else { return 0 }
@@ -78,6 +81,18 @@ struct RunDetailView: View {
 
 	var state: RunDetailState {
 		RunDetailState(ticketRuns: ticketRuns, tickets: tickets, pullRequests: pullRequests)
+	}
+
+	var reviewPacket: RunReviewPacket {
+		RunReviewPacket.make(
+			run: run,
+			ticketRuns: ticketRuns,
+			tickets: tickets,
+			events: events,
+			coordinationMessages: coordinationMessages,
+			pullRequests: pullRequests,
+			reports: reports
+		)
 	}
 
 	var body: some View {
@@ -94,6 +109,7 @@ struct RunDetailView: View {
 					StatusBadge(title: run.status.title, tint: run.status.tint)
 				}
 				ProgressView(value: progress)
+				reviewPacketSection
 				LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
 					StatCard(title: "Total Tickets", value: "\(run.totalTickets)", symbol: "ticket", tint: .blue)
 					StatCard(title: "Completed", value: "\(run.completedTickets)", symbol: "checkmark.circle.fill", tint: .green)
@@ -127,6 +143,54 @@ struct RunDetailView: View {
 			else {
 				ForEach(coordinationMessages.sorted { $0.createdAt < $1.createdAt }) { message in
 					CoordinationMessageRow(message: message, ticket: ticketForIssue(message.sourceIssueNumber))
+				}
+			}
+		}
+		.padding()
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+	}
+
+	private var reviewPacketSection: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			HStack {
+				Text("Review Packet")
+					.font(.headline)
+				Spacer()
+				StatusBadge(
+					title: reviewPacket.pullRequests.isEmpty ? "Report" : "\(reviewPacket.pullRequests.count) PRs",
+					tint: .indigo
+				)
+			}
+			Text(reviewPacket.nextAction)
+				.font(.callout.weight(.medium))
+			LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
+				ReviewPacketValue(title: "Validation", value: reviewPacket.validationSummary)
+				ReviewPacketValue(
+					title: "Changed Files",
+					value: reviewPacket.changedFiles.isEmpty
+						? "No changed files recorded." : reviewPacket.changedFiles.joined(separator: ", ")
+				)
+				ReviewPacketValue(title: "Failed Tickets", value: "\(reviewPacket.failedTickets.count)")
+				ReviewPacketValue(title: "Blocked Tickets", value: "\(reviewPacket.blockedTickets.count)")
+				ReviewPacketValue(title: "Report", value: reviewPacket.reportTitle ?? "No report saved yet.")
+			}
+			if reviewPacket.failedTickets.isEmpty == false || reviewPacket.blockedTickets.isEmpty == false {
+				VStack(alignment: .leading, spacing: 6) {
+					ForEach(reviewPacket.failedTickets + reviewPacket.blockedTickets) { ticket in
+						HStack(alignment: .top) {
+							StatusBadge(title: ticket.status.title, tint: ticket.status.tint)
+							VStack(alignment: .leading, spacing: 2) {
+								Text("\(ticket.externalID): \(ticket.title)")
+									.font(.caption.weight(.semibold))
+								if let failureReason = ticket.failureReason, failureReason.isEmpty == false {
+									Text(failureReason)
+										.font(.caption)
+										.foregroundStyle(.secondary)
+										.lineLimit(3)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -194,6 +258,9 @@ struct RunDetailView: View {
 							)
 							.font(.caption)
 							.foregroundStyle(.secondary)
+							Text(phaseText(for: ticketRun))
+								.font(.caption)
+								.foregroundStyle(.secondary)
 						}
 						Spacer()
 						if let url = ticketRun.pullRequestURL, let link = URL(string: url) {
@@ -267,6 +334,26 @@ struct RunDetailView: View {
 		tickets.first { githubIssueNumber(from: $0.externalID) == issueNumber }
 	}
 
+	private func phaseText(for ticketRun: TicketRunRecord) -> String {
+		let ticketEvents = events.filter { $0.ticketRunID == ticketRun.id }
+		if ticketRun.pullRequestURL != nil || ticketEvents.contains(where: { $0.category == .pullRequest }) {
+			return "Phase: pull request ready"
+		}
+		if ticketEvents.contains(where: { $0.category == .git && $0.message.localizedCaseInsensitiveContains("push") }) {
+			return "Phase: branch pushed"
+		}
+		if ticketEvents.contains(where: { $0.category == .tests || $0.message.localizedCaseInsensitiveContains("validation") }) {
+			return "Phase: validation"
+		}
+		if ticketEvents.contains(where: { $0.category == .agent }) {
+			return "Phase: agent running"
+		}
+		if ticketRun.workspacePath.isEmpty == false || ticketEvents.contains(where: { $0.category == .runtime }) {
+			return "Phase: workspace prepared"
+		}
+		return "Phase: pending"
+	}
+
 	private func githubIssueNumber(from externalID: String) -> Int? {
 		let trimmed = externalID.trimmingCharacters(in: .whitespacesAndNewlines)
 		if let number = Int(trimmed) {
@@ -276,6 +363,23 @@ struct RunDetailView: View {
 			return number
 		}
 		return nil
+	}
+}
+
+private struct ReviewPacketValue: View {
+	let title: String
+	let value: String
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 4) {
+			Text(title)
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(.secondary)
+			Text(value)
+				.font(.caption)
+				.lineLimit(3)
+		}
+		.frame(maxWidth: .infinity, alignment: .leading)
 	}
 }
 

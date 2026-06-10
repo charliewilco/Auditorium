@@ -17,6 +17,7 @@ struct RootView: View {
 	@Query(sort: \CoordinationMessageRecord.createdAt, order: .reverse) private var coordinationMessages: [CoordinationMessageRecord]
 	@Query(sort: \PullRequestRecord.createdAt, order: .reverse) private var pullRequests: [PullRequestRecord]
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
+	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
 	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
 	@State private var runCoordinator: AppRunCoordinator?
@@ -169,6 +170,7 @@ struct RootView: View {
 				project: selectedProject,
 				tickets: projectTickets,
 				queueItems: projectQueueItems,
+				preflightSummary: runPreflightSummary,
 				runQueue: runQueue,
 				dryRun: dryRun,
 				clearQueue: clearQueue,
@@ -185,7 +187,8 @@ struct RootView: View {
 				tickets: projectTickets,
 				events: events,
 				coordinationMessages: coordinationMessages,
-				pullRequests: pullRequests
+				pullRequests: pullRequests,
+				reports: reports
 			)
 		case .reports:
 			ReportsView(
@@ -218,6 +221,30 @@ struct RootView: View {
 	private var selectedTicketEvents: [RuntimeEventRecord] {
 		guard let ticketRunID = latestTicketRun?.id else { return [] }
 		return events.filter { $0.ticketRunID == ticketRunID }.sorted { $0.timestamp < $1.timestamp }
+	}
+
+	private var runSecurityPreferences: RunSecurityPreferences {
+		RunSecurityPreferences(
+			allowNetworkAccess: allowNetworkAccess,
+			allowFilesystemWrite: allowFilesystemWrite,
+			requireRunConfirmation: requireRunConfirmation,
+			requirePullRequestConfirmation: requirePROpenConfirmation
+		)
+	}
+
+	private var runPreflightSummary: RunPreflightSummary? {
+		guard let project = selectedProject else { return nil }
+		return RunPreflightSummary.make(
+			project: project,
+			queueItems: projectQueueItems,
+			tickets: projectTickets,
+			runtimeHealth: runtimeHealth,
+			providerAccounts: providerAccounts,
+			preferences: runSecurityPreferences,
+			workspaceRoot: services.workspace.workspacesDirectory(projectID: project.id).path()
+		) { account in
+			try services.keychain.readSecret(account: account)
+		}
 	}
 
 	private func openDemoProject() {
@@ -296,12 +323,11 @@ struct RootView: View {
 
 	private func runQueue() {
 		guard let project = selectedProject else { return }
-		let preferences = RunSecurityPreferences(
-			allowNetworkAccess: allowNetworkAccess,
-			allowFilesystemWrite: allowFilesystemWrite,
-			requireRunConfirmation: requireRunConfirmation,
-			requirePullRequestConfirmation: requirePROpenConfirmation
-		)
+		let preferences = runSecurityPreferences
+		if let runPreflightSummary, runPreflightSummary.canStartRun == false {
+			NSAlert(error: ProviderError.unavailable(runPreflightSummary.blockingChecks.map(\.detail).joined(separator: "\n"))).runModal()
+			return
+		}
 		let policy = RunSecurityPolicy()
 		do {
 			try policy.validate(project: project, preferences: preferences)

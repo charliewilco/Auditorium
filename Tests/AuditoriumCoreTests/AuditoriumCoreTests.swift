@@ -1243,6 +1243,297 @@ struct AuditoriumCoreTests {
 		#expect(ProjectSetupStep.runDefaults.validationMessage(for: draft) == "Branch prefix is required.")
 	}
 
+	@Test func runPreflightSummaryBlocksMissingCredentialsPermissionsToolsAndInvalidWorkflow() {
+		let project = Project(
+			name: "Preflight",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				branch_prefix: ""
+				---
+				Invalid workflow.
+				"""
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "42",
+			title: "Fix preflight",
+			body: "Body",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		let queueItem = QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium)
+		let summary = RunPreflightSummary.make(
+			project: project,
+			queueItems: [queueItem],
+			tickets: [ticket],
+			runtimeHealth: [
+				RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+				RuntimeHealthCheck(
+					id: "codex",
+					name: "Codex CLI",
+					state: .needsSetup,
+					detail: "Codex CLI was not found.",
+					version: nil
+				),
+			],
+			providerAccounts: [],
+			preferences: RunSecurityPreferences(
+				allowNetworkAccess: false,
+				allowFilesystemWrite: false,
+				requireRunConfirmation: true,
+				requirePullRequestConfirmation: true
+			),
+			workspaceRoot: "/tmp/workspaces",
+			secretReader: { _ in nil }
+		)
+
+		#expect(summary.canStartRun == false)
+		#expect(summary.blockingChecks.contains { $0.id == "workflow" })
+		#expect(summary.blockingChecks.contains { $0.id == "network" })
+		#expect(summary.blockingChecks.contains { $0.id == "filesystem" })
+		#expect(summary.blockingChecks.contains { $0.id == "tool-codex" })
+		#expect(summary.blockingChecks.contains { $0.id == "tool-gh" })
+		#expect(summary.blockingChecks.contains { $0.id == "github-account" })
+	}
+
+	@Test func runPreflightSummaryReportsReadyRunPlan() {
+		let project = Project(
+			name: "Ready",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				branch_prefix: "auditorium"
+				validation:
+				  command: "swift test"
+				open_pull_request: true
+				---
+				Implement safely.
+				"""
+		)
+		let account = ProviderAccountRecord(
+			providerKindRaw: RepositoryProviderKind.github.rawValue,
+			displayName: "GitHub Charlie",
+			keychainAccount: "github-token",
+			grantedScopesRaw: "repo,read:user"
+		)
+		let ticket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "7",
+			title: "Fix review packet",
+			body: "Body",
+			status: .ready,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: project.id
+		)
+		let summary = RunPreflightSummary.make(
+			project: project,
+			queueItems: [QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium)],
+			tickets: [ticket],
+			runtimeHealth: [
+				RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+				RuntimeHealthCheck(
+					id: "codex",
+					name: "Codex CLI",
+					state: .available,
+					detail: "/opt/homebrew/bin/codex",
+					version: nil
+				),
+				RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),
+			],
+			providerAccounts: [account],
+			preferences: RunSecurityPreferences(
+				allowNetworkAccess: true,
+				allowFilesystemWrite: true,
+				requireRunConfirmation: true,
+				requirePullRequestConfirmation: true
+			),
+			workspaceRoot: "/tmp/workspaces",
+			secretReader: { _ in "gho_token" }
+		)
+
+		#expect(summary.canStartRun)
+		#expect(summary.enabledIssueCount == 1)
+		#expect(summary.branchPrefix == "auditorium")
+		#expect(summary.validationCommand == "swift test")
+		#expect(summary.opensPullRequests)
+		#expect(summary.accountTitle == "GitHub Charlie")
+
+		let noPullRequestProject = Project(
+			name: "No PR",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex,
+			workflowPolicyMarkdown: """
+				---
+				open_pull_request: false
+				---
+				Implement safely.
+				"""
+		)
+		let noPullRequestSummary = RunPreflightSummary.make(
+			project: noPullRequestProject,
+			queueItems: [QueueItemRecord(ticketID: ticket.id, projectID: noPullRequestProject.id, position: 0, priority: .medium)],
+			tickets: [ticket],
+			runtimeHealth: [
+				RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+				RuntimeHealthCheck(
+					id: "codex",
+					name: "Codex CLI",
+					state: .available,
+					detail: "/opt/homebrew/bin/codex",
+					version: nil
+				),
+				RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),
+			],
+			providerAccounts: [account],
+			preferences: RunSecurityPreferences(
+				allowNetworkAccess: true,
+				allowFilesystemWrite: true,
+				requireRunConfirmation: true,
+				requirePullRequestConfirmation: false
+			),
+			workspaceRoot: "/tmp/workspaces",
+			secretReader: { _ in "gho_token" }
+		)
+
+		#expect(noPullRequestSummary.opensPullRequests == false)
+		#expect(noPullRequestSummary.checks.first { $0.id == "pull-request-confirmation" }?.state == .passed)
+	}
+
+	@Test func runReviewPacketDerivesReviewStateFromRecordsEventsAndReports() {
+		let projectID = UUID()
+		let run = RunRecord(
+			projectID: projectID,
+			status: .completedWithFailures,
+			totalTickets: 2,
+			completedTickets: 1,
+			failedTickets: 1,
+			reportMarkdown: """
+				# Report
+
+				## Changed Files
+				- Sources/App.swift
+
+				## Validation
+				Validation passed.
+				"""
+		)
+		let successfulTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "1",
+			title: "Success",
+			body: "Body",
+			status: .needsReview,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+		let failedTicket = TicketRecord(
+			provider: .githubIssues,
+			externalID: "2",
+			title: "Failure",
+			body: "Body",
+			status: .failed,
+			labels: [],
+			assignee: nil,
+			priority: .medium,
+			webURL: "",
+			createdAt: .now,
+			updatedAt: .now,
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+		let successfulRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: successfulTicket.id,
+			branchName: "auditorium/issue-1",
+			status: .needsReview
+		)
+		let failedRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: failedTicket.id,
+			status: .failed,
+			failureReason: "Validation failed."
+		)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: successfulRun.id,
+			title: "Issue 1",
+			url: "https://github.com/charliewilco/Auditorium/pull/1",
+			branchName: "auditorium/issue-1",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .pending
+		)
+		let event = RuntimeEventRecord(
+			runID: run.id,
+			ticketRunID: successfulRun.id,
+			level: .success,
+			category: .tests,
+			message: "Workflow validation passed.",
+			metadataJSON: #"{"changedFiles":["Sources/App.swift","Tests/AppTests.swift"]}"#
+		)
+		let report = ReportRecord(
+			projectID: projectID,
+			runID: run.id,
+			title: "Run Report",
+			markdown: run.reportMarkdown,
+			filePath: "/tmp/report.md"
+		)
+
+		let packet = RunReviewPacket.make(
+			run: run,
+			ticketRuns: [successfulRun, failedRun],
+			tickets: [successfulTicket, failedTicket],
+			events: [event],
+			coordinationMessages: [],
+			pullRequests: [pullRequest],
+			reports: [report]
+		)
+
+		#expect(packet.pullRequests.count == 1)
+		#expect(packet.reportTitle == "Run Report")
+		#expect(packet.changedFiles == ["Sources/App.swift", "Tests/AppTests.swift"])
+		#expect(packet.validationSummary == "Validation passed.")
+		#expect(packet.failedTickets.map(\.externalID) == ["2"])
+		#expect(packet.nextAction.localizedCaseInsensitiveContains("retry"))
+	}
+
 	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
 		TicketDescriptor(
 			provider: .githubIssues,

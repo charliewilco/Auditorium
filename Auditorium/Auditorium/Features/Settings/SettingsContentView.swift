@@ -105,6 +105,26 @@ struct SettingsContentView: View {
 					Toggle("Require confirmation before opening PRs", isOn: $requirePROpenConfirmation)
 					Toggle("Allow network access", isOn: $allowNetworkAccess)
 					Toggle("Allow filesystem write", isOn: $allowFilesystemWrite)
+					VStack(alignment: .leading, spacing: 6) {
+						SecurityPolicyRow(
+							title: "Network",
+							detail: "Disabled network access blocks real GitHub, gh, and Codex runs.",
+							isSatisfied: allowNetworkAccess
+						)
+						SecurityPolicyRow(
+							title: "Filesystem",
+							detail: "Disabled filesystem writes block all workspace, log, and report creation.",
+							isSatisfied: allowFilesystemWrite
+						)
+						SecurityPolicyRow(
+							title: "Pull Requests",
+							detail: "PR confirmation applies when the workflow policy can open pull requests.",
+							isSatisfied: requirePROpenConfirmation
+						)
+					}
+				}
+				settingsSection("Release Readiness") {
+					ReleaseReadinessView()
 				}
 				settingsSection("Runtime Environment") {
 					runtimeEnvironmentSection
@@ -355,6 +375,58 @@ struct SettingsContentView: View {
 		}
 		catch {
 			NSAlert(error: error).runModal()
+		}
+	}
+}
+
+private struct SecurityPolicyRow: View {
+	let title: String
+	let detail: String
+	let isSatisfied: Bool
+
+	var body: some View {
+		HStack(alignment: .top, spacing: 8) {
+			Image(systemName: isSatisfied ? "checkmark.circle.fill" : "xmark.octagon.fill")
+				.foregroundStyle(isSatisfied ? .green : .red)
+				.frame(width: 18)
+			VStack(alignment: .leading, spacing: 2) {
+				Text(title)
+					.font(.caption.weight(.semibold))
+				Text(detail)
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
+		}
+	}
+}
+
+private struct ReleaseReadinessView: View {
+	private let items = [
+		("Release build passed", true),
+		("symphony bundled in app", true),
+		("Code signature verified", true),
+		("Notarization succeeded", false),
+		("spctl accepted the app", false),
+		("Clean Mac launch passed", false),
+	]
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 8) {
+			ForEach(items, id: \.0) { item in
+				HStack {
+					Image(systemName: item.1 ? "checkmark.circle.fill" : "circle")
+						.foregroundStyle(item.1 ? .green : .secondary)
+						.frame(width: 18)
+					Text(item.0)
+					Spacer()
+					StatusBadge(title: item.1 ? "Verified" : "Needs Proof", tint: item.1 ? .green : .orange)
+				}
+			}
+			Text(
+				"v0 distribution is not complete until Developer ID notarization, Gatekeeper assessment, and clean-Mac launch are verified."
+			)
+			.font(.caption)
+			.foregroundStyle(.secondary)
 		}
 	}
 }

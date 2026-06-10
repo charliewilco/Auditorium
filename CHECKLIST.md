@@ -490,7 +490,16 @@ Acceptance gate:
 	- Still not checked: local codesigning identities include Apple Development but no Developer ID Application identity, so a signed clean-Mac launch remains unverified.
 	- Final verification still requires Apple Developer ID/notary credentials and launch of the signed, notarized `Auditorium.app` on a separate clean Mac.
 
-## 24. v0 Final Acceptance
+Release readiness checklist:
+
+- [x] Release build passed.
+- [x] `symphony` bundled in the app artifact.
+- [x] Code signature verified for unsigned/ad-hoc smoke artifacts.
+- [ ] Developer ID notarization succeeded.
+- [ ] `spctl` accepted the Developer ID app.
+- [ ] Clean Mac launch passed from the downloaded zip.
+
+## 24. Functional v0 Final Acceptance
 
 - [x] User authenticates GitHub.
 - [x] User selects GitHub repository.
@@ -514,4 +523,4 @@ Acceptance gate:
 - [x] Rust tests pass.
 - [x] macOS app builds cleanly.
 
-v0 is not complete until every item in this section is checked.
+The functional GitHub-to-Codex PR loop is accepted when every item in this section is checked. Distribution-complete v0 additionally requires the release readiness checklist above to pass.

@@ -114,4 +114,13 @@ Notarization credentials can be provided with either:
 - `NOTARYTOOL_PROFILE`
 - `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_SPECIFIC_PASSWORD`
 
+## Release Readiness Checklist
+
+- [x] Release build passed.
+- [x] `symphony` bundled in the app artifact.
+- [x] Code signature verified for unsigned/ad-hoc smoke artifacts.
+- [ ] Developer ID notarization succeeded.
+- [ ] `spctl` accepted the Developer ID app.
+- [ ] Clean Mac launch passed from the downloaded zip.
+
 Final v0 acceptance still requires launching the signed, notarized build on a clean Mac.

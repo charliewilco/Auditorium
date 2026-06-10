@@ -30,14 +30,16 @@ The desktop captures render at 1280x800 points, 2560x1600 pixels. The compact ca
 - The compact run-detail view pins content to the top of the viewport and does not clip the title.
 - Empty and blocked states include recovery copy for first-run, filtered, queued, and credential-blocked workflows.
 
-## Still Requires Credentialed Manual Acceptance
+## Functional Flow Evidence
 
-These items are not proven by deterministic screenshots and remain tracked in `CHECKLIST.md`:
+Later 2026-06-09 checks in `CHECKLIST.md` cover the real GitHub/Codex app flow with opt-in credentialed tests and smoke repositories. This file remains the visual acceptance evidence for deterministic screenshot surfaces.
 
-- A queued issue can produce a GitHub PR URL from a real repository.
-- A real Codex CLI run can process one GitHub issue in a workspace and stream events into the app.
-- A real issue run has a deterministic, inspectable workspace containing the repository at the expected branch.
-- Completed ticket runs show real GitHub PR URLs.
-- Copy, export, and reveal report actions need manual app verification.
-- The full v0 real GitHub flow needs one final manual pass without leaving the app except OAuth/browser approval.
-- Release build signing and launch on a clean Mac still need distribution credentials and a clean-machine check.
+## Still Requires Distribution Acceptance
+
+These items are not proven by deterministic screenshots or unsigned smoke artifacts:
+
+- Developer ID signed app export.
+- Apple notarization and stapling.
+- Gatekeeper `spctl` acceptance.
+- Clean-Mac launch from the downloaded zip.
+- Fresh credentialed manual pass on the signed, notarized artifact.
