@@ -23,10 +23,20 @@ enum ScreenshotExporter {
 
 			for layout in layouts {
 				try render(
-					WelcomeView(createProject: {}, openDemo: {})
-						.frame(width: layout.size.width, height: layout.size.height),
+					WelcomeView(
+						rows: WelcomeProjectSummary.previewRows,
+						version: "v1.0",
+						createProject: {},
+						checkPrerequisites: {},
+						seeAllProjects: {},
+						selectProject: { _ in },
+						close: {},
+						configureWindow: false
+					)
+					.frame(width: layout.size.width, height: layout.size.height),
 					name: "01-welcome-\(layout.name).png",
-					to: directory
+					to: directory,
+					background: .black
 				)
 				try render(
 					ScreenshotShell(state: state, data: data, layout: layout, destination: .dashboard) {
@@ -87,8 +97,13 @@ enum ScreenshotExporter {
 		}
 	}
 
-	private static func render<Content: View>(_ content: Content, name: String, to directory: URL) throws {
-		let renderer = ImageRenderer(content: content.background(Color(nsColor: .windowBackgroundColor)))
+	private static func render<Content: View>(
+		_ content: Content,
+		name: String,
+		to directory: URL,
+		background: Color = Color(nsColor: .windowBackgroundColor)
+	) throws {
+		let renderer = ImageRenderer(content: content.background(background))
 		renderer.scale = 2
 		guard let image = renderer.nsImage,
 			let tiff = image.tiffRepresentation,

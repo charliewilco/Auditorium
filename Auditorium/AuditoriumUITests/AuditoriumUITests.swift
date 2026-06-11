@@ -31,26 +31,42 @@ final class AuditoriumUITests: XCTestCase {
 	func testFirstLaunchShowsWelcomeActions() throws {
 		app.launch()
 
-		XCTAssertTrue(app.staticTexts["Auditorium"].waitForExistence(timeout: 5))
-		XCTAssertTrue(app.buttons["Create Project"].exists)
-		XCTAssertTrue(app.buttons["Open Demo Project"].exists)
-		XCTAssertTrue(app.staticTexts["Queue the work. Hit play. Review the pull requests."].exists)
+		XCTAssertTrue(app.staticTexts["AUDITORIUM"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["RECENTS"].exists)
+		XCTAssertTrue(app.buttons["Create New Project..."].exists)
+		XCTAssertTrue(app.buttons["Check Prerequisites..."].exists)
+		XCTAssertTrue(app.buttons["See All Projects..."].exists)
+		XCTAssertTrue(app.buttons["Close Welcome"].exists)
 	}
 
 	@MainActor
-	func testOpenDemoProjectShowsDashboardSmokeState() throws {
+	func testWelcomeCreateProjectOpensProjectWizard() throws {
 		app.launch()
 
-		let openDemo = app.buttons["Open Demo Project"]
-		XCTAssertTrue(openDemo.waitForExistence(timeout: 5))
-		openDemo.click()
+		clickButton("Create New Project...", timeout: 5)
 
-		XCTAssertTrue(app.staticTexts["Burton Demo"].waitForExistence(timeout: 5))
-		XCTAssertTrue(app.staticTexts["Open Tickets"].exists)
-		XCTAssertTrue(app.staticTexts["Queued Tickets"].exists)
-		XCTAssertTrue(app.staticTexts["Local Paths"].exists)
-		XCTAssertTrue(app.staticTexts["Runtime Health"].exists)
-		XCTAssertTrue(app.staticTexts["Offline"].exists)
+		XCTAssertTrue(app.staticTexts["Create Project"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.buttons["Next"].exists)
+	}
+
+	@MainActor
+	func testWelcomeCheckPrerequisitesOpensSettingsDoctor() throws {
+		app.launch()
+
+		clickButton("Check Prerequisites...", timeout: 5)
+
+		XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Runtime Providers"].exists)
+	}
+
+	@MainActor
+	func testWelcomeSeeAllProjectsOpensMainWindow() throws {
+		app.launch()
+
+		clickButton("See All Projects...", timeout: 5)
+
+		XCTAssertTrue(app.staticTexts["No Project"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Run Readiness"].exists)
 	}
 
 	@MainActor
@@ -96,7 +112,7 @@ final class AuditoriumUITests: XCTestCase {
 		]
 		app.launch()
 
-		clickButton("Create Project", timeout: 5)
+		clickButton("Create New Project...", timeout: 5)
 		clickButton("Next")
 		setSecureField("GitHub OAuth access token", to: token)
 		clickButton("Next")

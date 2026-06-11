@@ -16,7 +16,7 @@ struct TicketInspectorView: View {
 
 	var body: some View {
 		ScrollView {
-			VStack(alignment: .leading, spacing: 16) {
+			VStack(alignment: .leading, spacing: 14) {
 				if let ticket {
 					let inspectorState = TicketInspectorState(
 						ticket: ticket,
@@ -24,49 +24,61 @@ struct TicketInspectorView: View {
 						latestRun: latestRun,
 						events: events
 					)
-					header(ticket)
-					section("Ticket Metadata") {
+					header(ticket, inspectorState: inspectorState)
+					primaryAction(inspectorState)
+					section("Execution", symbol: "play.circle") {
+						LabeledContent("Queue", value: inspectorState.queueState)
+						LabeledContent("Latest Run", value: inspectorState.latestRunState)
+						if inspectorState.runtime != "None" {
+							LabeledContent("Runtime", value: inspectorState.runtime)
+						}
+						if inspectorState.branch != "None" {
+							LabeledContent("Branch", value: inspectorState.branch)
+						}
+						if inspectorState.confidence != "None" {
+							LabeledContent("Confidence", value: inspectorState.confidence)
+						}
+					}
+					if latestRun?.failureReason?.isEmpty == false || inspectorState.canRetryTicket {
+						section("Attention", symbol: "exclamationmark.triangle") {
+							Text(inspectorState.failureText)
+								.font(.callout)
+							Text(inspectorState.nextAction)
+								.font(.callout.weight(.medium))
+								.foregroundStyle(.secondary)
+						}
+					}
+					section("Links", symbol: "link") {
+						linkActions(ticket: ticket, inspectorState: inspectorState)
+					}
+					section("Metadata", symbol: "tag") {
 						LabeledContent("External ID", value: ticket.externalID)
 						LabeledContent("Provider", value: ticket.provider.title)
 						LabeledContent("Priority", value: ticket.priority.title)
 						LabeledContent("Complexity", value: "\(ticket.estimatedComplexity)")
 						LabeledContent("Assignee", value: ticket.assignee ?? "Unassigned")
 					}
-					section("Current Orchestration State") {
-						LabeledContent("Queue", value: inspectorState.queueState)
-						LabeledContent("Latest Run", value: inspectorState.latestRunState)
-						LabeledContent("Workspace", value: inspectorState.workspace)
-						LabeledContent("Runtime", value: inspectorState.runtime)
-						LabeledContent("Branch", value: inspectorState.branch)
-						LabeledContent("Pull Request", value: inspectorState.pullRequest)
-						LabeledContent("Confidence", value: inspectorState.confidence)
-					}
-					section("Failure and Next Action") {
-						Text(inspectorState.failureText)
-							.foregroundStyle(latestRun?.failureReason == nil ? .secondary : .primary)
-						Text(inspectorState.nextAction)
-							.font(.callout.weight(.medium))
-					}
-					section("Timeline Events") {
+					section("Timeline", symbol: "clock") {
 						if events.isEmpty {
 							Text("No events yet.")
 								.foregroundStyle(.secondary)
 						}
 						else {
-							ForEach(events.prefix(10)) { event in
+							ForEach(events.prefix(8)) { event in
 								TimelineRow(event: event)
 							}
 						}
 					}
-					actions(ticket: ticket, inspectorState: inspectorState)
+					section("Copy", symbol: "doc.on.doc") {
+						copyActions(ticket: ticket)
+					}
 				}
 				else {
 					EmptyStateView(
 						symbol: "sidebar.right",
 						title: "No Ticket Selected",
-						message: "Select a ticket to inspect orchestration state.",
-						recoverySuggestion:
-							"The inspector shows queue state, latest run status, workspace, branch, PR, actions, and timeline events.",
+						message: "Select a queued, running, or review-ready ticket.",
+						recoverySuggestion: "The inspector will show the next action, execution state, links, and timeline.",
 						actionTitle: "Open Tickets",
 						action: { appState.selectedDestination = .tickets }
 					)
@@ -78,8 +90,8 @@ struct TicketInspectorView: View {
 		.background(.bar)
 	}
 
-	private func header(_ ticket: TicketRecord) -> some View {
-		VStack(alignment: .leading, spacing: 8) {
+	private func header(_ ticket: TicketRecord, inspectorState: TicketInspectorState) -> some View {
+		VStack(alignment: .leading, spacing: 10) {
 			HStack {
 				Label(ticket.externalID, systemImage: "ticket")
 					.font(.headline)
@@ -88,67 +100,117 @@ struct TicketInspectorView: View {
 			}
 			Text(ticket.title)
 				.font(.title3.weight(.semibold))
-			Text(ticket.body)
-				.font(.callout)
+				.fixedSize(horizontal: false, vertical: true)
+			Text(inspectorState.nextAction)
+				.font(.callout.weight(.medium))
 				.foregroundStyle(.secondary)
+		}
+		.padding(12)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+	}
+
+	@ViewBuilder
+	private func primaryAction(_ inspectorState: TicketInspectorState) -> some View {
+		if inspectorState.canCancelRun {
+			Button(role: .destructive, action: cancelRun) {
+				Label("Cancel Run", systemImage: "xmark.circle")
+			}
+			.buttonStyle(.borderedProminent)
+		}
+		else if inspectorState.canRetryTicket {
+			Button(action: retryTicket) {
+				Label("Retry Ticket", systemImage: "arrow.clockwise")
+			}
+			.buttonStyle(.borderedProminent)
+		}
+		else if inspectorState.canRunTicket {
+			Button(action: runTicket) {
+				Label("Run Ticket", systemImage: "play.circle.fill")
+			}
+			.buttonStyle(.borderedProminent)
+		}
+		else if inspectorState.canAddToQueue {
+			Button(action: addToQueue) {
+				Label("Add to Queue", systemImage: "text.line.first.and.arrowtriangle.forward")
+			}
+			.buttonStyle(.borderedProminent)
 		}
 	}
 
-	private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-		VStack(alignment: .leading, spacing: 8) {
-			Text(title)
+	private func section<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+		VStack(alignment: .leading, spacing: 9) {
+			Label(title, systemImage: symbol)
 				.font(.headline)
 			content()
 		}
+		.padding(12)
 		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
 
-	private func actions(ticket: TicketRecord, inspectorState: TicketInspectorState) -> some View {
+	private func linkActions(ticket: TicketRecord, inspectorState: TicketInspectorState) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
-			Text("Actions")
-				.font(.headline)
-			LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-				Button("Add to Queue", action: addToQueue)
-					.disabled(inspectorState.canAddToQueue == false)
-				Button("Remove", action: removeFromQueue)
-					.disabled(inspectorState.canRemoveFromQueue == false)
-				Button("Run Ticket", action: runTicket)
-					.disabled(inspectorState.canRunTicket == false)
-				Button("Retry", action: retryTicket)
-					.disabled(inspectorState.canRetryTicket == false)
-				Button("Cancel", action: cancelRun)
-					.disabled(inspectorState.canCancelRun == false)
-				Button("Issue Tracker") {
+			if inspectorState.canOpenIssueTracker {
+				Button {
 					open(ticket.webURL)
+				} label: {
+					Label("Issue Tracker", systemImage: "safari")
 				}
-				.disabled(inspectorState.canOpenIssueTracker == false)
-				Button("Pull Request") {
+			}
+			if inspectorState.canOpenPullRequest {
+				Button {
 					open(latestRun?.pullRequestURL)
+				} label: {
+					Label("Pull Request", systemImage: "arrow.triangle.pull")
 				}
-				.disabled(inspectorState.canOpenPullRequest == false)
-				Button("Workspace") {
+			}
+			if inspectorState.canRevealWorkspace {
+				Button {
 					if let path = latestRun?.workspacePath, path.isEmpty == false {
 						NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
 					}
-				}
-				.disabled(inspectorState.canRevealWorkspace == false)
-				Button("Copy Debug Summary") {
-					copy("\(ticket.externalID) \(ticket.status.title) \(latestRun?.summary ?? "")")
-				}
-				Button("Copy Markdown Status") {
-					copy(
-						TicketStatusFormatter.markdownStatus(
-							ticket: ticket,
-							project: project,
-							queueItem: queueItem,
-							ticketRun: latestRun,
-							events: events
-						)
-					)
+				} label: {
+					Label("Workspace", systemImage: "folder")
 				}
 			}
-			.buttonStyle(.bordered)
+			if inspectorState.canRemoveFromQueue {
+				Button(role: .destructive, action: removeFromQueue) {
+					Label("Remove from Queue", systemImage: "minus.circle")
+				}
+			}
+			if inspectorState.canOpenIssueTracker == false && inspectorState.canOpenPullRequest == false
+				&& inspectorState.canRevealWorkspace == false && inspectorState.canRemoveFromQueue == false
+			{
+				Text("No links are available yet.")
+					.foregroundStyle(.secondary)
+			}
 		}
+		.buttonStyle(.bordered)
+	}
+
+	private func copyActions(ticket: TicketRecord) -> some View {
+		VStack(alignment: .leading, spacing: 8) {
+			Button {
+				copy("\(ticket.externalID) \(ticket.status.title) \(latestRun?.summary ?? "")")
+			} label: {
+				Label("Copy Debug Summary", systemImage: "doc.on.doc")
+			}
+			Button {
+				copy(
+					TicketStatusFormatter.markdownStatus(
+						ticket: ticket,
+						project: project,
+						queueItem: queueItem,
+						ticketRun: latestRun,
+						events: events
+					)
+				)
+			} label: {
+				Label("Copy Markdown Status", systemImage: "markdown")
+			}
+		}
+		.buttonStyle(.bordered)
 	}
 
 	private func open(_ value: String?) {
@@ -160,4 +222,21 @@ struct TicketInspectorView: View {
 		NSPasteboard.general.clearContents()
 		NSPasteboard.general.setString(value, forType: .string)
 	}
+}
+
+#Preview("Ticket Inspector") {
+	TicketInspectorView(
+		project: ProjectDashboardPreviewData.project,
+		ticket: ProjectDashboardPreviewData.tickets[0],
+		queueItem: ProjectDashboardPreviewData.queueItems[0],
+		latestRun: ProjectDashboardPreviewData.ticketRuns[0],
+		events: ProjectDashboardPreviewData.events,
+		addToQueue: {},
+		removeFromQueue: {},
+		runTicket: {},
+		retryTicket: {},
+		cancelRun: {}
+	)
+	.environment(AppState())
+	.frame(width: 340, height: 760)
 }

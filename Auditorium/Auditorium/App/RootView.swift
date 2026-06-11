@@ -67,36 +67,26 @@ struct RootView: View {
 	}
 
 	var body: some View {
-		Group {
-			if appState.isShowingWelcome || projects.isEmpty {
-				WelcomeView(
-					createProject: { appState.isShowingProjectWizard = true },
-					openDemo: openDemoProject
+		NavigationSplitView {
+			SidebarView(projects: projects)
+		} detail: {
+			HStack(spacing: 0) {
+				detailView
+					.frame(minWidth: 620)
+				Divider()
+				TicketInspectorView(
+					project: selectedProject,
+					ticket: selectedTicket,
+					queueItem: selectedQueueItem,
+					latestRun: latestTicketRun,
+					events: selectedTicketEvents,
+					addToQueue: addSelectedTicketToQueue,
+					removeFromQueue: removeSelectedTicketFromQueue,
+					runTicket: runSelectedTicket,
+					retryTicket: runSelectedTicket,
+					cancelRun: cancelActiveRun
 				)
-			}
-			else {
-				NavigationSplitView {
-					SidebarView(projects: projects)
-				} detail: {
-					HStack(spacing: 0) {
-						detailView
-							.frame(minWidth: 620)
-						Divider()
-						TicketInspectorView(
-							project: selectedProject,
-							ticket: selectedTicket,
-							queueItem: selectedQueueItem,
-							latestRun: latestTicketRun,
-							events: selectedTicketEvents,
-							addToQueue: addSelectedTicketToQueue,
-							removeFromQueue: removeSelectedTicketFromQueue,
-							runTicket: runSelectedTicket,
-							retryTicket: runSelectedTicket,
-							cancelRun: cancelActiveRun
-						)
-						.frame(width: 340)
-					}
-				}
+				.frame(width: 340)
 			}
 		}
 		.sheet(isPresented: Binding(get: { appState.isShowingProjectWizard }, set: { appState.isShowingProjectWizard = $0 })) {
@@ -151,10 +141,22 @@ struct RootView: View {
 				runs: projectRuns,
 				ticketRuns: ticketRuns,
 				pullRequests: pullRequests,
+				reports: reports.filter { $0.projectID == appState.selectedProjectID },
+				events: events,
 				runtimeHealth: runtimeHealth,
 				symphonyDoctorStatus: symphonyDoctorStatus,
+				preflightSummary: runPreflightSummary,
 				demoModeState: demoModeState,
 				workspaceLocations: workspaceLocations,
+				selectedTicketID: appState.selectedTicketID,
+				runQueue: runQueue,
+				dryRun: dryRun,
+				openTickets: { appState.selectedDestination = .tickets },
+				openQueue: { appState.selectedDestination = .queue },
+				openRuns: { appState.selectedDestination = .runs },
+				openReports: { appState.selectedDestination = .reports },
+				openSettings: { appState.selectedDestination = .settings },
+				inspectTicket: { appState.inspectTicket($0) },
 				revealLocation: revealLocation,
 				resetDemoProject: resetDemoProject
 			)

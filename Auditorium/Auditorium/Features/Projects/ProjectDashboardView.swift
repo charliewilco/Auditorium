@@ -7,90 +7,140 @@ struct ProjectDashboardView: View {
 	let runs: [RunRecord]
 	let ticketRuns: [TicketRunRecord]
 	let pullRequests: [PullRequestRecord]
+	let reports: [ReportRecord]
+	let events: [RuntimeEventRecord]
 	let runtimeHealth: [RuntimeHealthCheck]
 	let symphonyDoctorStatus: SymphonyDoctorStatus?
+	let preflightSummary: RunPreflightSummary?
 	let demoModeState: DemoModeState?
 	let workspaceLocations: WorkspaceLocationState?
+	let selectedTicketID: UUID?
+	let runQueue: () -> Void
+	let dryRun: () -> Void
+	let openTickets: () -> Void
+	let openQueue: () -> Void
+	let openRuns: () -> Void
+	let openReports: () -> Void
+	let openSettings: () -> Void
+	let inspectTicket: (UUID) -> Void
 	let revealLocation: (URL) -> Void
 	let resetDemoProject: () -> Void
 
+	private var dashboardState: ProjectDashboardState {
+		ProjectDashboardState(
+			project: project,
+			tickets: tickets,
+			queueItems: queueItems,
+			runs: runs,
+			ticketRuns: ticketRuns,
+			pullRequests: pullRequests,
+			reports: reports,
+			events: events,
+			preflightSummary: preflightSummary
+		)
+	}
+
 	var body: some View {
+		let state = dashboardState
 		ScrollView {
 			VStack(alignment: .leading, spacing: 18) {
-				header
+				header(state)
 				if let demoModeState, demoModeState.isDemoProject {
 					DemoModePanelView(state: demoModeState, resetDemoProject: resetDemoProject)
 				}
-				statsGrid
+				metricsStrip(state)
+				ProjectDashboardReadinessPanel(state: state, openQueue: openQueue, openSettings: openSettings)
+				ProjectDashboardActiveWorkPanel(
+					state: state,
+					selectedTicketID: selectedTicketID,
+					inspectTicket: inspectTicket,
+					openRuns: openRuns,
+					openTickets: openTickets
+				)
 				HStack(alignment: .top, spacing: 16) {
-					summaryPanel(
-						"Repository",
-						symbol: "shippingbox",
-						rows: [
-							("Name", project?.repositoryName ?? "No project"),
-							("Provider", project?.repositoryProviderKind.title ?? "Unknown"),
-							("Default Branch", project?.defaultBranch ?? "Unknown"),
-						]
-					)
-					summaryPanel(
-						"Issue Source",
-						symbol: "ticket",
-						rows: [
-							("Provider", project?.issueProviderKind.title ?? "Unknown"),
-							("Open Tickets", "\(tickets.filter { $0.status != .completed }.count)"),
-							("Queued", "\(queueItems.count)"),
-						]
-					)
+					ProjectDashboardReviewPanel(state: state, inspectTicket: inspectTicket, openRuns: openRuns)
+					ProjectDashboardOutputPanel(state: state, openReports: openReports)
 				}
-				workspaceLocationsPanel
-				HStack(alignment: .top, spacing: 16) {
-					runtimePanel
-					recentRunsPanel
-				}
-				recentPullRequests
+				utilitySection
 			}
 			.padding()
 		}
 		.navigationTitle("Dashboard")
 	}
 
-	private var header: some View {
-		HStack {
-			VStack(alignment: .leading, spacing: 5) {
-				Text(project?.name ?? "No Project")
+	private func header(_ state: ProjectDashboardState) -> some View {
+		HStack(alignment: .center, spacing: 18) {
+			VStack(alignment: .leading, spacing: 6) {
+				Text(state.projectTitle)
 					.font(.largeTitle.weight(.semibold))
-				Text("Visual agent orchestration for \(project?.repositoryName ?? "a repository")")
+				Text(state.repositorySubtitle)
 					.foregroundStyle(.secondary)
+				HStack(spacing: 8) {
+					StatusBadge(title: state.runtimeTitle, tint: project == nil ? .secondary : .green)
+					StatusBadge(title: state.agentTitle, tint: project == nil ? .secondary : .blue)
+				}
 			}
 			Spacer()
-			StatusBadge(title: project?.runtimeProviderKind.title ?? "No Runtime", tint: project == nil ? .secondary : .green)
+			Button {
+				dryRun()
+			} label: {
+				Label("Dry Run", systemImage: "checklist")
+			}
+			.buttonStyle(.bordered)
+			.disabled(project == nil)
+			Button {
+				runQueue()
+			} label: {
+				Label("Run Queue", systemImage: "play.circle.fill")
+			}
+			.buttonStyle(.borderedProminent)
+			.disabled(state.canRunQueue == false)
 		}
 	}
 
-	private var statsGrid: some View {
-		let completedToday = runs.filter {
-			Calendar.current.isDateInToday($0.startedAt) && ($0.status == .completed || $0.status == .completedWithFailures)
-		}.count
-		let successRate = runs.isEmpty ? "0%" : "\(Int((Double(runs.filter { $0.status == .completed }.count) / Double(runs.count)) * 100))%"
-		return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-			StatCard(title: "Open Tickets", value: "\(tickets.filter { $0.status != .completed }.count)", symbol: "ticket", tint: .blue)
+	private func metricsStrip(_ state: ProjectDashboardState) -> some View {
+		LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+			StatCard(title: "Open Tickets", value: "\(state.openTicketCount)", symbol: "ticket", tint: .blue)
 			StatCard(
-				title: "Queued Tickets",
-				value: "\(queueItems.count)",
+				title: "Queued",
+				value: "\(state.queuedTicketCount)",
 				symbol: "text.line.first.and.arrowtriangle.forward",
 				tint: .purple
 			)
-			StatCard(title: "Running Agents", value: "\(ticketRuns.filter { $0.status == .running }.count)", symbol: "cpu", tint: .orange)
-			StatCard(title: "Completed Today", value: "\(completedToday)", symbol: "checkmark.circle.fill", tint: .green)
-			StatCard(title: "PRs Created", value: "\(pullRequests.count)", symbol: "arrow.triangle.pull", tint: .indigo)
-			StatCard(
-				title: "Failed Runs",
-				value: "\(runs.filter { $0.status == .failed || $0.status == .completedWithFailures }.count)",
-				symbol: "xmark.octagon.fill",
-				tint: .red
-			)
-			StatCard(title: "Avg Completion", value: "6m", symbol: "clock", tint: .teal)
-			StatCard(title: "Success Rate", value: successRate, symbol: "chart.line.uptrend.xyaxis", tint: .green)
+			StatCard(title: "Running", value: "\(state.runningAgentCount)", symbol: "cpu", tint: .orange)
+			StatCard(title: "Completed Today", value: "\(state.completedTodayCount)", symbol: "checkmark.circle.fill", tint: .green)
+			StatCard(title: "Success Rate", value: state.successRateText, symbol: "chart.line.uptrend.xyaxis", tint: .teal)
+		}
+	}
+
+	private var utilitySection: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			Label("Project Utilities", systemImage: "wrench.and.screwdriver")
+				.font(.headline)
+			HStack(alignment: .top, spacing: 16) {
+				summaryPanel(
+					"Repository",
+					symbol: "shippingbox",
+					rows: [
+						("Name", project?.repositoryName ?? "No project"),
+						("Provider", project?.repositoryProviderKind.title ?? "Unknown"),
+						("Default Branch", project?.defaultBranch ?? "Unknown"),
+					]
+				)
+				summaryPanel(
+					"Issue Source",
+					symbol: "ticket",
+					rows: [
+						("Provider", project?.issueProviderKind.title ?? "Unknown"),
+						("Open Tickets", "\(tickets.filter { $0.status != .completed }.count)"),
+						("Queued", "\(queueItems.count)"),
+					]
+				)
+			}
+			HStack(alignment: .top, spacing: 16) {
+				runtimePanel
+				workspaceLocationsPanel
+			}
 		}
 	}
 
@@ -102,7 +152,7 @@ struct ProjectDashboardView: View {
 				LabeledContent(row.0, value: row.1)
 			}
 		}
-		.padding()
+		.padding(14)
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
@@ -138,7 +188,7 @@ struct ProjectDashboardView: View {
 					.foregroundStyle(.secondary)
 			}
 		}
-		.padding()
+		.padding(14)
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
@@ -161,54 +211,44 @@ struct ProjectDashboardView: View {
 					StatusBadge(title: health.state.title, tint: health.state.tint)
 				}
 			}
-		}
-		.padding()
-		.frame(maxWidth: .infinity, alignment: .leading)
-		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-	}
-
-	private var recentRunsPanel: some View {
-		VStack(alignment: .leading, spacing: 12) {
-			Label("Recent Runs", systemImage: "play.circle.fill")
-				.font(.headline)
-			ForEach(runs.prefix(5)) { run in
-				HStack {
-					Text(run.startedAt, format: .dateTime.month().day().hour().minute())
-					Spacer()
-					StatusBadge(title: run.status.title, tint: run.status.tint)
-				}
-			}
-			if runs.isEmpty {
-				Text("No runs yet.")
+			if runtimeHealth.isEmpty {
+				Text("Runtime checks have not reported yet.")
+					.font(.callout)
 					.foregroundStyle(.secondary)
 			}
 		}
-		.padding()
+		.padding(14)
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
+}
 
-	private var recentPullRequests: some View {
-		VStack(alignment: .leading, spacing: 12) {
-			Label("Recent Pull Requests", systemImage: "arrow.triangle.pull")
-				.font(.headline)
-			ForEach(pullRequests.prefix(5)) { pr in
-				HStack {
-					Text(pr.title)
-					Spacer()
-					Link("Open", destination: URL(string: pr.url) ?? URL(fileURLWithPath: "/"))
-				}
-			}
-			if pullRequests.isEmpty {
-				Text(
-					project == nil
-						? "Select a project to review pull requests."
-						: "Completed runs that open pull requests will appear here."
-				)
-				.foregroundStyle(.secondary)
-			}
-		}
-		.padding()
-		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-	}
+#Preview("Dashboard") {
+	ProjectDashboardView(
+		project: ProjectDashboardPreviewData.project,
+		tickets: ProjectDashboardPreviewData.tickets,
+		queueItems: ProjectDashboardPreviewData.queueItems,
+		runs: [ProjectDashboardPreviewData.run],
+		ticketRuns: ProjectDashboardPreviewData.ticketRuns,
+		pullRequests: ProjectDashboardPreviewData.pullRequests,
+		reports: ProjectDashboardPreviewData.reports,
+		events: ProjectDashboardPreviewData.events,
+		runtimeHealth: [],
+		symphonyDoctorStatus: nil,
+		preflightSummary: ProjectDashboardPreviewData.preflightSummary,
+		demoModeState: nil,
+		workspaceLocations: nil,
+		selectedTicketID: ProjectDashboardPreviewData.firstTicketID,
+		runQueue: {},
+		dryRun: {},
+		openTickets: {},
+		openQueue: {},
+		openRuns: {},
+		openReports: {},
+		openSettings: {},
+		inspectTicket: { _ in },
+		revealLocation: { _ in },
+		resetDemoProject: {}
+	)
+	.frame(width: 900, height: 760)
 }

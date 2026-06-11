@@ -1534,6 +1534,180 @@ struct AuditoriumCoreTests {
 		#expect(packet.nextAction.localizedCaseInsensitiveContains("retry"))
 	}
 
+	@Test func projectDashboardStateHandlesEmptyProjectAndQueue() {
+		let state = ProjectDashboardState(
+			project: nil,
+			tickets: [],
+			queueItems: [],
+			runs: [],
+			ticketRuns: [],
+			pullRequests: [],
+			reports: [],
+			events: [],
+			preflightSummary: nil,
+			now: Date(timeIntervalSince1970: 0)
+		)
+
+		#expect(state.projectTitle == "No Project")
+		#expect(state.readinessKind == .noProject)
+		#expect(state.canRunQueue == false)
+		#expect(state.queuePreview.isEmpty)
+		#expect(state.reviewItems.isEmpty)
+	}
+
+	@Test func projectDashboardStateMarksEnabledQueueAsReady() {
+		let project = dashboardProject()
+		let ticket = dashboardTicket(projectID: project.id, externalID: "1", status: .ready)
+		let queueItem = QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .high)
+
+		let state = ProjectDashboardState(
+			project: project,
+			tickets: [ticket],
+			queueItems: [queueItem],
+			runs: [],
+			ticketRuns: [],
+			pullRequests: [],
+			reports: [],
+			events: [],
+			preflightSummary: dashboardPreflight(
+				enabledIssueCount: 1,
+				checks: [.init(id: "queue", title: "Enabled Tickets", detail: "1 ticket will run.", state: .passed)]
+			),
+			now: Date(timeIntervalSince1970: 0)
+		)
+
+		#expect(state.readinessKind == .ready)
+		#expect(state.canRunQueue)
+		#expect(state.enabledQueueCount == 1)
+		#expect(state.queuePreview.map(\.externalID) == ["1"])
+	}
+
+	@Test func projectDashboardStateSurfacesBlockedPreflight() {
+		let project = dashboardProject()
+		let ticket = dashboardTicket(projectID: project.id, externalID: "2", status: .ready)
+		let queueItem = QueueItemRecord(ticketID: ticket.id, projectID: project.id, position: 0, priority: .medium)
+
+		let state = ProjectDashboardState(
+			project: project,
+			tickets: [ticket],
+			queueItems: [queueItem],
+			runs: [],
+			ticketRuns: [],
+			pullRequests: [],
+			reports: [],
+			events: [],
+			preflightSummary: dashboardPreflight(
+				enabledIssueCount: 1,
+				checks: [.init(id: "github", title: "GitHub Account", detail: "No GitHub account is connected.", state: .blocked)]
+			),
+			now: Date(timeIntervalSince1970: 0)
+		)
+
+		#expect(state.readinessKind == .blocked)
+		#expect(state.readinessTitle == "Blocked")
+		#expect(state.topBlocker == "GitHub Account")
+		#expect(state.canRunQueue == false)
+	}
+
+	@Test func projectDashboardStateSummarizesActiveRunAndReviewRows() {
+		let project = dashboardProject()
+		let runningTicket = dashboardTicket(projectID: project.id, externalID: "3", status: .running)
+		let failedTicket = dashboardTicket(projectID: project.id, externalID: "4", status: .failed)
+		let reviewTicket = dashboardTicket(projectID: project.id, externalID: "5", status: .needsReview)
+		let run = RunRecord(
+			projectID: project.id,
+			startedAt: Date(timeIntervalSince1970: 20),
+			status: .running,
+			totalTickets: 3,
+			completedTickets: 1,
+			failedTickets: 1,
+			blockedTickets: 0,
+			summary: "Running dashboard test tickets."
+		)
+		let runningTicketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: runningTicket.id,
+			status: .running,
+			startedAt: Date(timeIntervalSince1970: 21)
+		)
+		let failedTicketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: failedTicket.id,
+			status: .failed,
+			startedAt: Date(timeIntervalSince1970: 22),
+			failureReason: "Validation failed."
+		)
+		let reviewTicketRun = TicketRunRecord(
+			runID: run.id,
+			ticketID: reviewTicket.id,
+			status: .needsReview,
+			startedAt: Date(timeIntervalSince1970: 23),
+			pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/5"
+		)
+		let event = RuntimeEventRecord(runID: run.id, level: .info, category: .agent, message: "Agent is running.")
+
+		let state = ProjectDashboardState(
+			project: project,
+			tickets: [runningTicket, failedTicket, reviewTicket],
+			queueItems: [],
+			runs: [run],
+			ticketRuns: [runningTicketRun, failedTicketRun, reviewTicketRun],
+			pullRequests: [],
+			reports: [],
+			events: [event],
+			preflightSummary: dashboardPreflight(enabledIssueCount: 0, checks: []),
+			now: Date(timeIntervalSince1970: 0)
+		)
+
+		#expect(state.activeRun?.status == .running)
+		#expect(state.activeRun?.progressText == "2 of 3 finished")
+		#expect(state.activeRun?.runningTicketCount == 1)
+		#expect(state.reviewItems.map(\.externalID) == ["5", "4"])
+		#expect(state.activeRunEvents.map(\.message) == ["Agent is running."])
+	}
+
+	@Test func projectDashboardStateSortsRecentPullRequestsAndReports() {
+		let project = dashboardProject()
+		let ticket = dashboardTicket(projectID: project.id, externalID: "6", status: .needsReview)
+		let run = RunRecord(projectID: project.id, status: .completed, totalTickets: 1, completedTickets: 1)
+		let ticketRun = TicketRunRecord(runID: run.id, ticketID: ticket.id, status: .needsReview)
+		let pullRequest = PullRequestRecord(
+			provider: .github,
+			ticketRunID: ticketRun.id,
+			title: "Issue 6",
+			url: "https://github.com/charliewilco/Auditorium/pull/6",
+			branchName: "auditorium/issue-6",
+			targetBranch: "main",
+			status: .open,
+			checksStatus: .passed,
+			createdAt: Date(timeIntervalSince1970: 10)
+		)
+		let report = ReportRecord(
+			projectID: project.id,
+			runID: run.id,
+			title: "Run Report",
+			markdown: "Report",
+			filePath: "/tmp/report.md",
+			createdAt: Date(timeIntervalSince1970: 20)
+		)
+
+		let state = ProjectDashboardState(
+			project: project,
+			tickets: [ticket],
+			queueItems: [],
+			runs: [run],
+			ticketRuns: [ticketRun],
+			pullRequests: [pullRequest],
+			reports: [report],
+			events: [],
+			preflightSummary: dashboardPreflight(enabledIssueCount: 0, checks: []),
+			now: Date(timeIntervalSince1970: 0)
+		)
+
+		#expect(state.recentOutputs.map(\.title) == ["Run Report", "Issue 6"])
+		#expect(state.recentOutputs.map(\.kind) == [.report, .pullRequest])
+	}
+
 	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
 		TicketDescriptor(
 			provider: .githubIssues,
@@ -1549,6 +1723,52 @@ struct AuditoriumCoreTests {
 			updatedAt: Date(timeIntervalSince1970: 0),
 			estimatedComplexity: 1,
 			blockedBy: []
+		)
+	}
+
+	private func dashboardProject() -> Project {
+		Project(
+			name: "Dashboard Project",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .localWorkspace,
+			agentProviderKind: .codex
+		)
+	}
+
+	private func dashboardTicket(projectID: UUID, externalID: String, status: TicketStatus) -> TicketRecord {
+		TicketRecord(
+			provider: .githubIssues,
+			externalID: externalID,
+			title: "Issue \(externalID)",
+			body: "Body",
+			status: status,
+			labels: ["dashboard"],
+			assignee: nil,
+			priority: .medium,
+			webURL: "https://github.com/charliewilco/Auditorium/issues/\(externalID)",
+			createdAt: Date(timeIntervalSince1970: 0),
+			updatedAt: Date(timeIntervalSince1970: 0),
+			estimatedComplexity: 1,
+			sourceProjectID: projectID
+		)
+	}
+
+	private func dashboardPreflight(enabledIssueCount: Int, checks: [RunPreflightSummary.Check]) -> RunPreflightSummary {
+		RunPreflightSummary(
+			repositoryName: "charliewilco/Auditorium",
+			issueCount: enabledIssueCount,
+			enabledIssueCount: enabledIssueCount,
+			branchPrefix: "auditorium",
+			validationCommand: "swift test",
+			opensPullRequests: true,
+			workspaceRoot: "/tmp/auditorium/workspaces",
+			accountTitle: "GitHub",
+			scopeSummary: "repo, read:user",
+			checks: checks
 		)
 	}
 
