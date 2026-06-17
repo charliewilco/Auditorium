@@ -588,15 +588,13 @@ Package macOS app artifact:
 ./script/package_release.sh --unsigned
 ```
 
-Run all local checks:
+Run package checks:
 
 ```sh
 swift build
 swift test
 cargo fmt --all --check
 cargo test --all-targets
-xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
-xcodebuild build -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Release -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO
 ```
 
 Release signing and notarization policy lives in [docs/RELEASE.md](docs/RELEASE.md).

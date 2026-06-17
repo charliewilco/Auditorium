@@ -1,38 +1,68 @@
 import SwiftUI
 
 struct WelcomeView: View {
+	let rows: [WelcomeProjectSummary]
+	let version: String
 	let createProject: () -> Void
-	let openDemo: () -> Void
+	let checkPrerequisites: () -> Void
+	let seeAllProjects: () -> Void
+	let selectProject: (UUID) -> Void
+	let close: () -> Void
+	var configureWindow = true
 
 	var body: some View {
-		VStack(spacing: 28) {
-			Image(systemName: "music.quarternote.3")
-				.font(.system(size: 64, weight: .semibold))
-				.foregroundStyle(Color.accentColor)
-			VStack(spacing: 10) {
-				Text("Auditorium")
-					.font(.system(size: 48, weight: .bold))
-				Text("Queue the work. Hit play. Review the pull requests.")
-					.font(.title3)
-					.foregroundStyle(.secondary)
-				Text("Auditorium turns repositories and issue trackers into a visual control plane for coding agents.")
-					.font(.body)
-					.foregroundStyle(.secondary)
-					.multilineTextAlignment(.center)
-					.frame(maxWidth: 560)
+		GeometryReader { proxy in
+			let brandWidth = min(max(proxy.size.width * 0.62, 580), 760)
+			HStack(spacing: 0) {
+				WelcomeBrandPane(
+					version: version,
+					createProject: createProject,
+					checkPrerequisites: checkPrerequisites,
+					seeAllProjects: seeAllProjects
+				)
+				.frame(width: brandWidth)
+				WelcomeRecentsPane(rows: rows, selectProject: selectProject)
 			}
-			HStack(spacing: 12) {
-				Button(action: createProject) {
-					Label("Create Project", systemImage: "plus")
-				}
-				.buttonStyle(.borderedProminent)
-				Button(action: openDemo) {
-					Label("Open Demo Project", systemImage: "play.circle")
-				}
-				.buttonStyle(.bordered)
+			.frame(width: proxy.size.width, height: proxy.size.height)
+		}
+		.frame(minWidth: 980, idealWidth: 1120, maxWidth: .infinity, minHeight: 600, idealHeight: 690, maxHeight: .infinity)
+		.background(Color(red: 0.12, green: 0.12, blue: 0.13))
+		.clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+		.overlay {
+			RoundedRectangle(cornerRadius: 28, style: .continuous)
+				.stroke(.white.opacity(0.16), lineWidth: 1)
+		}
+		.background {
+			if configureWindow {
+				WelcomeWindowConfigurator(cornerRadius: 28)
 			}
 		}
-		.frame(maxWidth: .infinity, maxHeight: .infinity)
-		.padding()
+		.overlay(alignment: .top) {
+			Color.clear
+				.frame(height: 44)
+				.contentShape(Rectangle())
+				.gesture(WindowDragGesture())
+				.allowsWindowActivationEvents(true)
+		}
+		.overlay(alignment: .topLeading) {
+			WelcomeCloseButton(action: close)
+				.padding(.top, 24)
+				.padding(.leading, 24)
+		}
 	}
+}
+
+#Preview("Welcome") {
+	WelcomeView(
+		rows: WelcomeProjectSummary.previewRows,
+		version: "v1.0",
+		createProject: {},
+		checkPrerequisites: {},
+		seeAllProjects: {},
+		selectProject: { _ in },
+		close: {}
+	)
+	.frame(width: 1120, height: 690)
+	.padding()
+	.background(.black)
 }

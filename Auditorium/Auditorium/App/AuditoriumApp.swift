@@ -27,12 +27,24 @@ struct AuditoriumApp: App {
 	}
 
 	var body: some Scene {
-		WindowGroup {
+		WindowGroup("Welcome to Auditorium", id: AppSceneID.welcome) {
+			WelcomeStartWindowView()
+				.environment(appState)
+				.environment(\.appServices, services)
+				.frame(minWidth: 980, minHeight: 640)
+		}
+		.modelContainer(modelContainer)
+		.defaultSize(width: 1120, height: 690)
+		.windowStyle(.plain)
+		.windowResizability(.contentMinSize)
+
+		WindowGroup("Auditorium", id: AppSceneID.main) {
 			RootView()
 				.environment(appState)
 				.environment(\.appServices, services)
 		}
 		.modelContainer(modelContainer)
+		.defaultSize(width: 1280, height: 800)
 		.commands {
 			CommandGroup(replacing: .newItem) {
 				Button(AppCommand.newProject.title) {
