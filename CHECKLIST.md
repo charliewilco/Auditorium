@@ -18,7 +18,7 @@ Legend:
 - [x] Add root `CHECKLIST.md`.
 - [x] Add `.gitignore` for Xcode user state.
 - [x] Add developer-facing README with build/run/test commands.
-- [x] Add CI workflow for macOS build and tests.
+- [x] Add CI workflow for package build and tests.
 
 Acceptance gate:
 
@@ -468,7 +468,7 @@ Acceptance gate:
 - [x] Focused Swift unit target passes.
 - [x] Full Xcode scheme tests are reliable.
 	- Verified 2026-06-09 with `xcodebuild test -workspace Auditorium.xcworkspace -scheme Auditorium -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO`.
-- [x] GitHub Actions macOS build workflow.
+- [x] Manual GitHub Actions app packaging workflow.
 - [x] GitHub Actions SwiftPM core build/test workflow.
 - [x] GitHub Actions Rust test workflow.
 - [x] Release build configuration.
@@ -478,7 +478,7 @@ Acceptance gate:
 
 Acceptance gate:
 
-- [x] CI validates app and CLI on every PR.
+- [x] CI validates SwiftPM and Rust packages on every PR.
 - [x] Document signing flow.
 	- Prepared 2026-06-09 with `script/package_release.sh`, `config/ExportOptions-developer-id.plist`, and manual GitHub Actions workflow `release-package.yml`.
 	- Documented 2026-06-09 in `docs/SIGNING.md`.

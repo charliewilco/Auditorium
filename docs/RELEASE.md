@@ -23,7 +23,7 @@ xcodebuild build \
 	CODE_SIGNING_ALLOWED=NO
 ```
 
-CI builds both Debug and Release app configurations without signing so build regressions are caught without requiring Apple credentials.
+PR CI intentionally validates only the SwiftPM and Rust packages. Use the manual **Release Package** workflow or local release smoke command when app-build coverage is needed.
 
 ## Downloadable GitHub Artifact
 
