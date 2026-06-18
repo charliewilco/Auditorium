@@ -1708,6 +1708,77 @@ struct AuditoriumCoreTests {
 		#expect(state.recentOutputs.map(\.kind) == [.report, .pullRequest])
 	}
 
+	@Test func onboardingChecksValidateInstalledToolsAndAuthentication() async {
+		let detection = RuntimeDetectionService(commandRunner: { launchPath, arguments in
+			switch (launchPath, arguments) {
+			case ("/usr/bin/which", ["container"]):
+				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/container")
+			case ("/usr/bin/which", ["codex"]):
+				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/codex")
+			case ("/usr/bin/which", ["gh"]):
+				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/gh")
+			case ("/opt/homebrew/bin/container", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "container CLI version 0.12.3")
+			case ("/opt/homebrew/bin/container", ["system", "status"]):
+				RuntimeCommandResult(exitCode: 1, output: "apiserver is not running and not registered with launchd")
+			case ("/opt/homebrew/bin/codex", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "codex-cli 0.139.0")
+			case ("/opt/homebrew/bin/codex", ["login", "status"]):
+				RuntimeCommandResult(exitCode: 0, output: "Logged in using ChatGPT")
+			case ("/opt/homebrew/bin/gh", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "gh version 2.93.0\nhttps://github.com/cli/cli/releases/tag/v2.93.0")
+			case ("/opt/homebrew/bin/gh", ["auth", "status", "--hostname", "github.com"]):
+				RuntimeCommandResult(
+					exitCode: 0,
+					output: "github.com\n  ✓ Logged in to github.com account charliewilco (keyring)"
+				)
+			default:
+				nil
+			}
+		})
+
+		let checks = await detection.onboardingChecks()
+		let checksByID = Dictionary(uniqueKeysWithValues: checks.map { ($0.id, $0) })
+
+		#expect(checksByID["container"]?.state == .unavailable)
+		#expect(checksByID["container"]?.detail.contains("apiserver is not running") == true)
+		#expect(checksByID["codex-auth"]?.state == .available)
+		#expect(checksByID["codex-auth"]?.detail == "Logged in using ChatGPT")
+		#expect(checksByID["github-auth"]?.state == .available)
+		#expect(checksByID["github-auth"]?.detail == "GitHub CLI is authenticated for github.com as charliewilco.")
+	}
+
+	@Test func onboardingChecksReportMissingAuthenticationSeparatelyFromInstallation() async {
+		let detection = RuntimeDetectionService(commandRunner: { launchPath, arguments in
+			switch (launchPath, arguments) {
+			case ("/usr/bin/which", ["container"]):
+				RuntimeCommandResult(exitCode: 1, output: "")
+			case ("/usr/bin/which", ["codex"]):
+				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/codex")
+			case ("/usr/bin/which", ["gh"]):
+				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/gh")
+			case ("/opt/homebrew/bin/codex", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "codex-cli 0.139.0")
+			case ("/opt/homebrew/bin/codex", ["login", "status"]):
+				RuntimeCommandResult(exitCode: 1, output: "Not logged in")
+			case ("/opt/homebrew/bin/gh", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "gh version 2.93.0")
+			case ("/opt/homebrew/bin/gh", ["auth", "status", "--hostname", "github.com"]):
+				RuntimeCommandResult(exitCode: 1, output: "You are not logged into any GitHub hosts.")
+			default:
+				nil
+			}
+		})
+
+		let checksByID = Dictionary(uniqueKeysWithValues: await detection.onboardingChecks().map { ($0.id, $0) })
+
+		#expect(checksByID["container"]?.state == .needsSetup)
+		#expect(checksByID["codex-auth"]?.state == .needsSetup)
+		#expect(checksByID["codex-auth"]?.detail.contains("no authenticated session") == true)
+		#expect(checksByID["github-auth"]?.state == .needsSetup)
+		#expect(checksByID["github-auth"]?.detail.contains("authentication is missing or invalid") == true)
+	}
+
 	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
 		TicketDescriptor(
 			provider: .githubIssues,

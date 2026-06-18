@@ -5,11 +5,11 @@ struct WelcomeStartWindowView: View {
 	@Environment(AppState.self) private var appState
 	@Environment(\.openWindow) private var openWindow
 	@Environment(\.dismissWindow) private var dismissWindow
-	@Environment(\.openSettings) private var openSettings
 	@Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
 	@Query(sort: \RunRecord.startedAt, order: .reverse) private var runs: [RunRecord]
 	@Query(sort: \TicketRunRecord.startedAt, order: .reverse) private var ticketRuns: [TicketRunRecord]
 	@Query(sort: \PullRequestRecord.createdAt, order: .reverse) private var pullRequests: [PullRequestRecord]
+	@State private var isShowingPrerequisites = false
 
 	var body: some View {
 		WelcomeView(
@@ -21,6 +21,9 @@ struct WelcomeStartWindowView: View {
 			selectProject: selectProject,
 			close: closeWelcome
 		)
+		.sheet(isPresented: $isShowingPrerequisites) {
+			WelcomePrerequisitesSheet()
+		}
 	}
 
 	private var appVersion: String {
@@ -77,7 +80,7 @@ struct WelcomeStartWindowView: View {
 	}
 
 	private func checkPrerequisites() {
-		openSettings()
+		isShowingPrerequisites = true
 	}
 
 	private func seeAllProjects() {
