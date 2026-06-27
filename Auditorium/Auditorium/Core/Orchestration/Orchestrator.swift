@@ -13,6 +13,7 @@ final class Orchestrator {
 	private let mockAgentProvider: any AgentProvider
 	private let localWorkspaceSourceProvider: (any SourceCodeProvider)?
 	private let codexAgentProvider: any AgentProvider
+	private let containerCodexAgentProvider: any AgentProvider
 	private let usesSymphonyForLocalWorkspaceCodex: Bool
 	private var activeTask: Task<Void, Never>?
 
@@ -34,6 +35,7 @@ final class Orchestrator {
 		mockAgentProvider: (any AgentProvider)? = nil,
 		localWorkspaceSourceProvider: (any SourceCodeProvider)? = nil,
 		codexAgentProvider: (any AgentProvider)? = nil,
+		containerCodexAgentProvider: (any AgentProvider)? = nil,
 		usesSymphonyForLocalWorkspaceCodex: Bool = false
 	) {
 		self.workspaceService = workspaceService
@@ -46,6 +48,7 @@ final class Orchestrator {
 		self.mockAgentProvider = mockAgentProvider ?? MockCodexAgentProvider()
 		self.localWorkspaceSourceProvider = localWorkspaceSourceProvider
 		self.codexAgentProvider = codexAgentProvider ?? CodexCLIProcessAgentProvider()
+		self.containerCodexAgentProvider = containerCodexAgentProvider ?? ContainerizedCodexAgentProvider()
 		self.usesSymphonyForLocalWorkspaceCodex = usesSymphonyForLocalWorkspaceCodex
 	}
 
@@ -94,6 +97,15 @@ final class Orchestrator {
 				return
 			}
 			try await executeWithSymphony(project: project, queueItems: queueItems, concurrency: concurrency, context: context)
+			return
+		}
+		if project.runtimeProviderKind == .containerWorkspace, project.agentProviderKind == .codex {
+			try await executeWithContainerWorkspaceCodex(
+				project: project,
+				queueItems: queueItems,
+				concurrency: concurrency,
+				context: context
+			)
 			return
 		}
 		guard project.runtimeProviderKind == .mockRuntime else {
@@ -153,6 +165,39 @@ final class Orchestrator {
 			runSummary: "Running \(plan.queueSnapshot.count) queued tickets with Local Workspace and Codex.",
 			startEventMessage: "Local Workspace Codex run started with bounded concurrency \(plan.concurrency).",
 			batchEvent: { "Dispatching batch of \($0.count) local ticket runs." },
+			commitAndPush: true
+		)
+	}
+
+	private func executeWithContainerWorkspaceCodex(project: Project, queueItems: [QueueItemRecord], concurrency: Int, context: ModelContext)
+		async throws
+	{
+		let plan = OrchestrationRunPlan.make(
+			queueItems: queueItems,
+			requestedConcurrency: concurrency,
+			workflowPolicyMarkdown: project.workflowPolicyMarkdown
+		)
+		let sourceProvider = try await resolveLocalWorkspaceSourceProvider(project: project, context: context)
+		let repository = repositoryDescriptor(for: project)
+		let policy = try WorkflowPolicyParser().parse(plan.workflowPolicyMarkdown)
+		try workspaceService.ensureProjectLayout(projectID: project.id)
+		let runtime = ContainerWorkspaceRuntimeProvider(
+			workspaceService: workspaceService,
+			projectID: project.id,
+			sourceProvider: sourceProvider,
+			branchPrefix: policy.branchPrefix
+		)
+		try await executeProviderBatches(
+			project: project,
+			plan: plan,
+			context: context,
+			repository: repository,
+			runtime: runtime,
+			agent: containerCodexAgentProvider,
+			sourceProvider: sourceProvider,
+			runSummary: "Running \(plan.queueSnapshot.count) queued tickets with Container Workspace and Codex.",
+			startEventMessage: "Container Workspace Codex run started with bounded concurrency \(plan.concurrency).",
+			batchEvent: { "Dispatching batch of \($0.count) containerized ticket runs." },
 			commitAndPush: true
 		)
 	}
@@ -519,6 +564,27 @@ final class Orchestrator {
 		]
 	}
 
+	private func runtimeEnvironment(project: Project, context: ModelContext) async throws -> [String: String] {
+		var environment = try nonRetryableSync {
+			try environmentSecretService.resolveEnabledEnvironment(projectID: project.id, context: context)
+		}
+		if let providerRegistry {
+			let githubToken = try await nonRetryableAsync {
+				try await providerRegistry.githubToken(
+					for: project,
+					context: context,
+					operation: "injecting GitHub credentials into the runtime environment"
+				)
+			}
+			let token = githubToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+			if let token, token.isEmpty == false {
+				environment["GH_TOKEN"] = token
+				environment["GITHUB_TOKEN"] = token
+			}
+		}
+		return environment
+	}
+
 	private func cancelRun(run: RunRecord, ticketRuns: [TicketRunRecord], tickets: [TicketRecord], context: ModelContext) throws {
 		for ticketRun in ticketRuns where ticketRun.status == .pending || ticketRun.status == .preparing || ticketRun.status == .running {
 			ticketRun.status = .canceled
@@ -654,9 +720,7 @@ final class Orchestrator {
 			)
 		)
 		ticketRun.status = .running
-		let runtimeEnvironment = try nonRetryableSync {
-			try environmentSecretService.resolveEnabledEnvironment(projectID: project.id, context: context)
-		}
+		let runtimeEnvironment = try await runtimeEnvironment(project: project, context: context)
 		let handle = try await runtime.startExecution(
 			RuntimeExecutionRequest(
 				ticket: descriptor,
@@ -677,7 +741,13 @@ final class Orchestrator {
 		try ModelIntegrityValidator.save(context: context)
 
 		let stream = try await agent.runAgent(
-			AgentRunRequest(ticket: descriptor, repository: repository, workspace: workspace, policyMarkdown: workflowPolicyMarkdown)
+			AgentRunRequest(
+				ticket: descriptor,
+				repository: repository,
+				workspace: workspace,
+				policyMarkdown: workflowPolicyMarkdown,
+				environment: runtimeEnvironment
+			)
 		)
 		var finalOutcome: MockTicketOutcome?
 		var finalSummary = ""

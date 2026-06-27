@@ -170,6 +170,10 @@ struct RunPreflightSummary: Equatable {
 		if project.runtimeProviderKind == .localWorkspace {
 			requiredIDs.append(("git", "Git"))
 		}
+		if project.runtimeProviderKind == .containerWorkspace {
+			requiredIDs.append(("container", "Container CLI"))
+			requiredIDs.append(("git", "Git"))
+		}
 		if project.agentProviderKind == .codex {
 			requiredIDs.append(("codex", "Codex CLI"))
 		}
