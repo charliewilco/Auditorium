@@ -59,6 +59,7 @@ enum IssueProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
 
 enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
 	case localWorkspace
+	case containerWorkspace
 	case mockRuntime
 
 	var id: String { rawValue }
@@ -66,6 +67,7 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var title: String {
 		switch self {
 		case .localWorkspace: "Local Workspace"
+		case .containerWorkspace: "Container Workspace"
 		case .mockRuntime: "Mock Runtime"
 		}
 	}
@@ -73,6 +75,7 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var symbol: String {
 		switch self {
 		case .localWorkspace: "folder"
+		case .containerWorkspace: "shippingbox"
 		case .mockRuntime: "cpu"
 		}
 	}
@@ -80,6 +83,7 @@ enum RuntimeProviderKind: String, CaseIterable, Codable, Identifiable, Sendable 
 	var runtimeHealthCheckID: String {
 		switch self {
 		case .localWorkspace: "git"
+		case .containerWorkspace: "container"
 		case .mockRuntime: "mock-runtime"
 		}
 	}

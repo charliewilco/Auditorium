@@ -798,13 +798,16 @@ struct AuditoriumCoreTests {
 
 	@Test func providerRuntimeSummariesSeparateDetectionFromImplementation() {
 		let statuses = ProviderStateSummaries.runtimeProviders(from: [
-			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil)
+			RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+			RuntimeHealthCheck(id: "container", name: "Container CLI", state: .available, detail: "running", version: nil),
 		])
 
 		let localWorkspace = statuses.first { $0.kind == .localWorkspace }
+		let containerWorkspace = statuses.first { $0.kind == .containerWorkspace }
 		let mockRuntime = statuses.first { $0.kind == .mockRuntime }
 
 		#expect(localWorkspace?.isRunnable == true)
+		#expect(containerWorkspace?.isRunnable == true)
 		#expect(mockRuntime?.isRunnable == true)
 	}
 
@@ -1777,6 +1780,84 @@ struct AuditoriumCoreTests {
 		#expect(checksByID["codex-auth"]?.detail.contains("no authenticated session") == true)
 		#expect(checksByID["github-auth"]?.state == .needsSetup)
 		#expect(checksByID["github-auth"]?.detail.contains("authentication is missing or invalid") == true)
+	}
+
+	@Test func codexAuthBundleCopiesOnlyAuthFileAndCleansUp() async throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCodexAuthBundleTests-\(UUID().uuidString)")
+		let sourceCodexHome = root.appending(path: "source/.codex")
+		let temporaryRoot = root.appending(path: "tmp")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: sourceCodexHome, withIntermediateDirectories: true)
+		try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+		try #"{"tokens":"secret"}"#.write(to: sourceCodexHome.appending(path: "auth.json"), atomically: true, encoding: .utf8)
+		try "model = \"test\"\n".write(to: sourceCodexHome.appending(path: "config.toml"), atomically: true, encoding: .utf8)
+		try FileManager.default.createDirectory(at: sourceCodexHome.appending(path: "sessions"), withIntermediateDirectories: true)
+		let service = CodexAuthBundleService(
+			sourceCodexHome: sourceCodexHome,
+			temporaryRoot: temporaryRoot,
+			statusValidator: {}
+		)
+
+		let bundle = try await service.createBundle()
+		defer { service.cleanUp(bundle) }
+
+		#expect(FileManager.default.fileExists(atPath: bundle.directory.appending(path: "auth.json").path()))
+		#expect(FileManager.default.fileExists(atPath: bundle.directory.appending(path: "config.toml").path()) == false)
+		#expect(FileManager.default.fileExists(atPath: bundle.directory.appending(path: "sessions").path()) == false)
+		service.cleanUp(bundle)
+		#expect(FileManager.default.fileExists(atPath: bundle.directory.path()) == false)
+	}
+
+	@Test func containerizedCodexArgumentsInheritEnvironmentWithoutSecretValues() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumContainerCodexArguments-\(UUID().uuidString)")
+		let workspace = root.appending(path: "workspace")
+		let codexHome = root.appending(path: ".codex")
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+		try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+		let request = AgentRunRequest(
+			ticket: ticket(number: 42, labels: ["runtime"], assignee: nil),
+			repository: RepositoryDescriptor(
+				provider: .github,
+				owner: "charliewilco",
+				name: "Auditorium",
+				fullName: "charliewilco/Auditorium",
+				cloneURL: URL(string: "https://github.com/charliewilco/Auditorium.git")!,
+				webURL: URL(string: "https://github.com/charliewilco/Auditorium")!,
+				defaultBranch: "main"
+			),
+			workspace: WorkspaceDescriptor(path: workspace, runtimeID: "container-42", branchName: "auditorium/42"),
+			policyMarkdown: WorkflowPolicy.defaultMarkdown,
+			environment: [
+				"GH_TOKEN": "gho_super_secret",
+				"RUNTIME_TOKEN": "runtime-secret-value",
+				"INVALID-NAME": "invalid-secret-value",
+			]
+		)
+		let arguments = ContainerizedCodexAgentProvider.containerRunArguments(
+			configuration: ContainerizedCodexAgentConfiguration(
+				imageName: "localhost/auditorium-codex:test",
+				hostUserID: "501",
+				hostGroupID: "20"
+			),
+			request: request,
+			authBundle: CodexAuthBundle(directory: codexHome),
+			containerName: "auditorium-container-42"
+		)
+		let joinedArguments = arguments.joined(separator: " ")
+
+		#expect(arguments.contains("container"))
+		#expect(arguments.contains("run"))
+		#expect(arguments.contains("localhost/auditorium-codex:test"))
+		#expect(arguments.contains("GH_TOKEN"))
+		#expect(arguments.contains("RUNTIME_TOKEN"))
+		#expect(arguments.contains("INVALID-NAME") == false)
+		#expect(joinedArguments.contains("gho_super_secret") == false)
+		#expect(joinedArguments.contains("runtime-secret-value") == false)
+		#expect(joinedArguments.contains("invalid-secret-value") == false)
+		#expect(joinedArguments.contains("source=\(workspace.path())") == true)
+		#expect(joinedArguments.contains("source=\(codexHome.path())") == true)
+		#expect(arguments.contains("--ignore-user-config"))
 	}
 
 	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
