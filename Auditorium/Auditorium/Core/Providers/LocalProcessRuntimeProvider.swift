@@ -58,7 +58,6 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 	}
 
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {
-		try Task.checkCancellation()
 		try FileManager.default.createDirectory(at: metadataDirectory(for: handle.workspacePath), withIntermediateDirectories: true)
 		try "stopped\n".write(
 			to: metadataDirectory(for: handle.workspacePath).appending(path: "runtime-stopped"),

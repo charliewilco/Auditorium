@@ -199,9 +199,9 @@ final class GitHubIssueTrackerProvider: IssueTrackerProvider {
 		}
 	}
 
-	func addComment(ticketID: String, body: String) async throws {
+	func addComment(ticketID: String, body: String) async throws -> URL? {
 		let issue = try resolvedIssue(ticketID: ticketID)
-		try await requireClient().addComment(repositoryFullName: issue.repository, issueNumber: issue.number, body: body)
+		return try await requireClient().addComment(repositoryFullName: issue.repository, issueNumber: issue.number, body: body)
 	}
 
 	func addLabels(ticketID: String, labels: [String]) async throws {
@@ -244,7 +244,7 @@ struct LinearIssueTrackerProvider: IssueTrackerProvider {
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor] { throw ProviderError.notImplemented("Linear Issue Provider") }
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws { throw ProviderError.notImplemented("Linear Issue Provider") }
-	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("Linear Issue Provider") }
+	func addComment(ticketID: String, body: String) async throws -> URL? { throw ProviderError.notImplemented("Linear Issue Provider") }
 }
 
 typealias LinearIssueProvider = LinearIssueTrackerProvider
@@ -254,7 +254,7 @@ struct AsanaIssueTrackerProvider: IssueTrackerProvider {
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor] { throw ProviderError.notImplemented("Asana Issue Provider") }
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws { throw ProviderError.notImplemented("Asana Issue Provider") }
-	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("Asana Issue Provider") }
+	func addComment(ticketID: String, body: String) async throws -> URL? { throw ProviderError.notImplemented("Asana Issue Provider") }
 }
 
 typealias AsanaIssueProvider = AsanaIssueTrackerProvider
@@ -264,7 +264,7 @@ struct GitLabIssueTrackerProvider: IssueTrackerProvider {
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor] { throw ProviderError.notImplemented("GitLab Issue Provider") }
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws { throw ProviderError.notImplemented("GitLab Issue Provider") }
-	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("GitLab Issue Provider") }
+	func addComment(ticketID: String, body: String) async throws -> URL? { throw ProviderError.notImplemented("GitLab Issue Provider") }
 }
 
 typealias GitLabIssueProvider = GitLabIssueTrackerProvider
@@ -276,7 +276,7 @@ struct AzureBoardsIssueTrackerProvider: IssueTrackerProvider {
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {
 		throw ProviderError.notImplemented("Azure Boards Issue Provider")
 	}
-	func addComment(ticketID: String, body: String) async throws { throw ProviderError.notImplemented("Azure Boards Issue Provider") }
+	func addComment(ticketID: String, body: String) async throws -> URL? { throw ProviderError.notImplemented("Azure Boards Issue Provider") }
 }
 
 typealias AzureBoardsIssueProvider = AzureBoardsIssueTrackerProvider

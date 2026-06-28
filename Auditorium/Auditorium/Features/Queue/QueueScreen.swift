@@ -7,6 +7,9 @@ struct QueueScreen: View {
 	let tickets: [TicketRecord]
 	let queueItems: [QueueItemRecord]
 	let preflightSummary: RunPreflightSummary?
+	let addTickets: (Set<UUID>) -> Void
+	let queueNextTickets: () -> Void
+	let fillQueueAndRun: () -> Void
 	let runQueue: () -> Void
 	let dryRun: () -> Void
 	let clearQueue: () -> Void
@@ -15,45 +18,59 @@ struct QueueScreen: View {
 	let toggleItem: (QueueItemRecord, Bool) -> Void
 	let setItemsEnabled: (Set<UUID>, Bool) -> Void
 	let moveItems: (IndexSet, Int) -> Void
+	@State private var selectedAvailableTicketIDs = Set<UUID>()
+	@State private var availableTicketFilter = ""
+
+	private var queuedTicketIDs: Set<UUID> {
+		Set(queueItems.map(\.ticketID))
+	}
+
+	private var availableTickets: [TicketRecord] {
+		tickets
+			.filter { queuedTicketIDs.contains($0.id) == false }
+			.sorted { first, second in
+				if first.priority.sortWeight != second.priority.sortWeight {
+					return first.priority.sortWeight > second.priority.sortWeight
+				}
+				return first.updatedAt > second.updatedAt
+			}
+	}
+
+	private var filteredAvailableTickets: [TicketRecord] {
+		guard availableTicketFilter.isEmpty == false else { return availableTickets }
+		return availableTickets.filter {
+			$0.title.localizedCaseInsensitiveContains(availableTicketFilter)
+				|| $0.externalID.localizedCaseInsensitiveContains(availableTicketFilter)
+				|| $0.labels.contains { $0.localizedCaseInsensitiveContains(availableTicketFilter) }
+		}
+	}
 
 	var body: some View {
 		VStack(spacing: 0) {
 			toolbar
-			if queueItems.isEmpty {
+			if tickets.isEmpty && queueItems.isEmpty {
 				EmptyStateView(
-					symbol: "text.line.first.and.arrowtriangle.forward",
-					title: "Queue Is Empty",
-					message: "Add tickets from the Ticket Browser to build an agent run.",
-					recoverySuggestion:
-						"Queued tickets keep their order, enabled state, and per-run snapshot before Codex starts.",
+					symbol: "ticket",
+					title: "No Tickets Imported",
+					message: "Import or seed tickets before building an agent queue.",
+					recoverySuggestion: "The queue works from project tickets and keeps each ticket tied to its run history.",
 					actionTitle: "Open Tickets",
 					action: { appState.selectedDestination = .tickets }
 				)
 			}
 			else {
-				ScrollView {
-					VStack(alignment: .leading, spacing: 16) {
-						if let preflightSummary {
-							RunPreflightSummaryView(summary: preflightSummary)
-						}
-						List(selection: $selectedQueueItemIDs) {
-							ForEach(queueItems) { item in
-								if let ticket = tickets.first(where: { $0.id == item.ticketID }) {
-									QueueRow(
-										ticket: ticket,
-										item: item,
-										toggle: { toggleItem(item, $0) },
-										remove: { removeItem(item) }
-									)
-									.tag(item.id)
-								}
-							}
-							.onMove(perform: moveItems)
-						}
-						.frame(minHeight: 320)
+				VStack(alignment: .leading, spacing: 14) {
+					if let preflightSummary {
+						RunPreflightSummaryView(summary: preflightSummary)
 					}
-					.padding()
+					HSplitView {
+						availableTicketsPane
+							.frame(minWidth: 280, idealWidth: 340)
+						queuedTicketsPane
+							.frame(minWidth: 440)
+					}
 				}
+				.padding()
 			}
 		}
 		.navigationTitle("Queue")
@@ -62,6 +79,9 @@ struct QueueScreen: View {
 		}
 		.onChange(of: queueItems.map(\.id)) { _, ids in
 			selectedQueueItemIDs.formIntersection(Set(ids))
+		}
+		.onChange(of: availableTickets.map(\.id)) { _, ids in
+			selectedAvailableTicketIDs.formIntersection(Set(ids))
 		}
 	}
 
@@ -77,6 +97,16 @@ struct QueueScreen: View {
 				Label("Dry Run", systemImage: "checklist")
 			}
 			.buttonStyle(.bordered)
+			Button(action: queueNextTickets) {
+				Label("Queue Next 12", systemImage: "tray.and.arrow.down")
+			}
+			.buttonStyle(.bordered)
+			.disabled(project == nil)
+			Button(action: fillQueueAndRun) {
+				Label("Fill and Run", systemImage: "play.square.stack")
+			}
+			.buttonStyle(.bordered)
+			.disabled(project == nil || preflightSummary?.canStartRun == false)
 			Button(action: clearQueue) {
 				Label("Clear Queue", systemImage: "trash")
 			}
@@ -115,6 +145,88 @@ struct QueueScreen: View {
 		.padding()
 	}
 
+	private var availableTicketsPane: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack {
+				Label("Available Tickets", systemImage: "ticket")
+					.font(.headline)
+				Spacer()
+				Button {
+					addAvailableSelection()
+				} label: {
+					Label("Add", systemImage: "plus.circle")
+				}
+				.buttonStyle(.borderedProminent)
+				.disabled(selectedAvailableTicketIDs.isEmpty)
+			}
+			TextField("Filter tickets", text: $availableTicketFilter)
+				.textFieldStyle(.roundedBorder)
+			if filteredAvailableTickets.isEmpty {
+				QueuePaneEmptyState(
+					symbol: availableTickets.isEmpty ? "checkmark.circle" : "magnifyingglass",
+					title: availableTickets.isEmpty ? "All Tickets Queued" : "No Matches",
+					message: availableTickets.isEmpty
+						? "Every imported ticket is already connected to the queue."
+						: "Adjust the filter to show more imported tickets."
+				)
+			}
+			else {
+				List(selection: $selectedAvailableTicketIDs) {
+					ForEach(filteredAvailableTickets) { ticket in
+						AvailableTicketRow(
+							ticket: ticket,
+							add: { addTickets([ticket.id]) },
+							inspect: { appState.inspectTicket(ticket.id) }
+						)
+						.tag(ticket.id)
+					}
+				}
+				.frame(minHeight: 320)
+			}
+		}
+	}
+
+	private var queuedTicketsPane: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack {
+				Label("Queued Tickets", systemImage: "text.line.first.and.arrowtriangle.forward")
+					.font(.headline)
+				Spacer()
+				Text("\(queueItems.filter(\.isEnabled).count) enabled")
+					.font(.caption.weight(.medium))
+					.foregroundStyle(.secondary)
+			}
+			if queueItems.isEmpty {
+				QueuePaneEmptyState(
+					symbol: "text.line.first.and.arrowtriangle.forward",
+					title: "Queue Is Empty",
+					message: "Select tickets from the available list, then add them to the run queue."
+				)
+			}
+			else {
+				List(selection: $selectedQueueItemIDs) {
+					ForEach(queueItems) { item in
+						if let ticket = tickets.first(where: { $0.id == item.ticketID }) {
+							QueueRow(
+								ticket: ticket,
+								item: item,
+								toggle: { toggleItem(item, $0) },
+								remove: { removeItem(item) }
+							)
+							.tag(item.id)
+						}
+						else {
+							MissingQueueRow(item: item, remove: { removeItem(item) })
+								.tag(item.id)
+						}
+					}
+					.onMove(perform: moveItems)
+				}
+				.frame(minHeight: 320)
+			}
+		}
+	}
+
 	private func inspectSingleSelection(_ ids: Set<UUID>) {
 		guard ids.count == 1,
 			let itemID = ids.first,
@@ -134,6 +246,12 @@ struct QueueScreen: View {
 		let ids = selectedQueueItemIDs
 		selectedQueueItemIDs.removeAll()
 		removeItems(ids)
+	}
+
+	private func addAvailableSelection() {
+		let ids = selectedAvailableTicketIDs
+		selectedAvailableTicketIDs.removeAll()
+		addTickets(ids)
 	}
 }
 
@@ -228,6 +346,96 @@ private struct RunPlanValue: View {
 				.lineLimit(2)
 		}
 		.frame(maxWidth: .infinity, alignment: .leading)
+	}
+}
+
+private struct QueuePaneEmptyState: View {
+	let symbol: String
+	let title: String
+	let message: String
+
+	var body: some View {
+		VStack(spacing: 10) {
+			Image(systemName: symbol)
+				.font(.system(size: 28))
+				.foregroundStyle(.secondary)
+			Text(title)
+				.font(.headline)
+			Text(message)
+				.font(.callout)
+				.foregroundStyle(.secondary)
+				.multilineTextAlignment(.center)
+				.frame(maxWidth: 300)
+		}
+		.frame(maxWidth: .infinity, minHeight: 320)
+	}
+}
+
+private struct AvailableTicketRow: View {
+	let ticket: TicketRecord
+	let add: () -> Void
+	let inspect: () -> Void
+
+	var body: some View {
+		HStack(spacing: 10) {
+			Image(systemName: ticket.provider.symbol)
+				.foregroundStyle(.secondary)
+				.frame(width: 18)
+			VStack(alignment: .leading, spacing: 3) {
+				Text("\(ticket.externalID) \(ticket.title)")
+					.font(.callout.weight(.medium))
+					.lineLimit(2)
+				Text(ticket.labels.joined(separator: ", "))
+					.font(.caption)
+					.foregroundStyle(.secondary)
+					.lineLimit(1)
+			}
+			Spacer()
+			StatusBadge(title: ticket.priority.title, tint: priorityTint)
+			Button(action: add) {
+				Image(systemName: "plus.circle")
+			}
+			.buttonStyle(.borderless)
+			.help("Add ticket to queue")
+		}
+		.contentShape(Rectangle())
+		.onTapGesture(perform: inspect)
+		.padding(.vertical, 4)
+	}
+
+	private var priorityTint: Color {
+		switch ticket.priority {
+		case .low: .secondary
+		case .medium: .blue
+		case .high: .orange
+		case .urgent: .red
+		}
+	}
+}
+
+private struct MissingQueueRow: View {
+	let item: QueueItemRecord
+	let remove: () -> Void
+
+	var body: some View {
+		HStack(spacing: 12) {
+			Image(systemName: "exclamationmark.triangle.fill")
+				.foregroundStyle(.orange)
+			VStack(alignment: .leading, spacing: 3) {
+				Text("Missing ticket")
+					.font(.headline)
+				Text("Queue position \(item.position + 1)")
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
+			Spacer()
+			Button(action: remove) {
+				Image(systemName: "xmark")
+			}
+			.buttonStyle(.borderless)
+			.help("Remove missing queue item")
+		}
+		.padding(.vertical, 5)
 	}
 }
 

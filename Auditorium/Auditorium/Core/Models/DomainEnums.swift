@@ -236,6 +236,24 @@ enum TicketRunStatus: String, CaseIterable, Codable, Identifiable, Sendable {
 		case .canceled: .gray
 		}
 	}
+
+	var isTerminalForReportBack: Bool {
+		switch self {
+		case .blocked, .needsReview, .completed, .failed, .canceled:
+			return true
+		case .pending, .preparing, .running:
+			return false
+		}
+	}
+
+	var shouldApplyHandoffLabel: Bool {
+		switch self {
+		case .needsReview, .completed:
+			return true
+		case .pending, .preparing, .running, .blocked, .failed, .canceled:
+			return false
+		}
+	}
 }
 
 enum EventLevel: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -290,6 +308,136 @@ enum PriorityLevel: String, CaseIterable, Codable, Identifiable, Sendable {
 		case .medium: 2
 		case .high: 3
 		case .urgent: 4
+		}
+	}
+}
+
+enum TicketReportBackStatus: String, CaseIterable, Codable, Identifiable, Sendable {
+	case pending
+	case inFlight
+	case succeeded
+	case failed
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .pending: "Pending"
+		case .inFlight: "In Flight"
+		case .succeeded: "Succeeded"
+		case .failed: "Failed"
+		}
+	}
+}
+
+enum TicketRunLifecyclePhase: String, CaseIterable, Codable, Identifiable, Sendable {
+	case queued
+	case preparing
+	case running
+	case artifactPersisted
+	case prCreated
+	case noPullRequest
+	case reportBackPending
+	case reported
+	case reviewReady
+	case failed
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .queued: "Queued"
+		case .preparing: "Preparing"
+		case .running: "Running"
+		case .artifactPersisted: "Artifacts Persisted"
+		case .prCreated: "PR Created"
+		case .noPullRequest: "No PR"
+		case .reportBackPending: "Report-back Pending"
+		case .reported: "Reported"
+		case .reviewReady: "Review Ready"
+		case .failed: "Failed"
+		}
+	}
+}
+
+enum ContainerRunStatus: String, CaseIterable, Codable, Identifiable, Sendable {
+	case starting
+	case running
+	case completed
+	case failed
+	case killed
+	case orphaned
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .starting: "Starting"
+		case .running: "Running"
+		case .completed: "Completed"
+		case .failed: "Failed"
+		case .killed: "Killed"
+		case .orphaned: "Orphaned"
+		}
+	}
+}
+
+enum ContainerCleanupEligibility: String, CaseIterable, Codable, Identifiable, Sendable {
+	case notEligible
+	case eligible
+	case preserveWorkspace
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .notEligible: "Not Eligible"
+		case .eligible: "Eligible"
+		case .preserveWorkspace: "Preserve Workspace"
+		}
+	}
+}
+
+enum ContainerReconciliationState: String, CaseIterable, Codable, Identifiable, Sendable {
+	case unreconciled
+	case active
+	case terminal
+	case killed
+	case orphaned
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .unreconciled: "Unreconciled"
+		case .active: "Active"
+		case .terminal: "Terminal"
+		case .killed: "Killed"
+		case .orphaned: "Orphaned"
+		}
+	}
+}
+
+enum DispatcherRunStatus: String, CaseIterable, Codable, Identifiable, Sendable {
+	case planned
+	case running
+	case completed
+	case completedWithFailures
+	case canceled
+	case failed
+	case reconciled
+
+	var id: String { rawValue }
+
+	var title: String {
+		switch self {
+		case .planned: "Planned"
+		case .running: "Running"
+		case .completed: "Completed"
+		case .completedWithFailures: "Completed with Failures"
+		case .canceled: "Canceled"
+		case .failed: "Failed"
+		case .reconciled: "Reconciled"
 		}
 	}
 }

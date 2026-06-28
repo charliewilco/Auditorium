@@ -62,13 +62,16 @@ struct ContainerizedCodexAgentConfiguration: Sendable {
 struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 	let configuration: ContainerizedCodexAgentConfiguration
 	let authBundleService: CodexAuthBundleService
+	let containerControl: ContainerRuntimeControl
 
 	init(
 		configuration: ContainerizedCodexAgentConfiguration = ContainerizedCodexAgentConfiguration(),
-		authBundleService: CodexAuthBundleService = CodexAuthBundleService()
+		authBundleService: CodexAuthBundleService = CodexAuthBundleService(),
+		containerControl: ContainerRuntimeControl? = nil
 	) {
 		self.configuration = configuration
 		self.authBundleService = authBundleService
+		self.containerControl = containerControl ?? ContainerRuntimeControl(executablePath: configuration.containerExecutablePath)
 	}
 
 	func runAgent(_ request: AgentRunRequest) async throws -> AsyncThrowingStream<AgentEvent, Error> {
@@ -91,7 +94,7 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 							outcome: nil
 						)
 					)
-					try await Self.ensureImage(configuration: configuration)
+					try await Self.ensureImage(configuration: configuration, containerControl: containerControl)
 					authBundle = try await authBundleService.createBundle()
 					let arguments = Self.containerRunArguments(
 						configuration: configuration,
@@ -141,7 +144,7 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 				cancellationToken.cancel()
 				task.cancel()
 				Task.detached {
-					await Self.killContainer(named: containerName, configuration: configuration)
+					_ = await containerControl.killContainer(named: containerName)
 				}
 			}
 		}
@@ -185,13 +188,12 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 		return arguments
 	}
 
-	nonisolated private static func containerName(for workspace: WorkspaceDescriptor) -> String {
-		let safeID = workspace.runtimeID
-			.lowercased()
-			.map { character in
-				character.isLetter || character.isNumber || character == "-" ? character : "-"
-			}
-		return "auditorium-\(String(safeID))"
+	nonisolated static func containerName(for workspace: WorkspaceDescriptor) -> String {
+		ContainerRuntimeControl.containerName(for: workspace)
+	}
+
+	nonisolated static func containerName(forRuntimeID runtimeID: String) -> String {
+		ContainerRuntimeControl.containerName(forRuntimeID: runtimeID)
 	}
 
 	nonisolated private static func isValidEnvironmentName(_ name: String) -> Bool {
@@ -244,6 +246,7 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 				message: "container_codex_completed",
 				summary: "Containerized Codex CLI completed successfully.",
 				outcome: .completed,
+				metadataJSON: #"{"exitCode":\#(result.exitCode)}"#,
 				logPath: logURL.path()
 			)
 		}
@@ -253,25 +256,16 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 			message: "container_codex_failed",
 			summary: "Containerized Codex CLI exited with status \(result.exitCode).",
 			outcome: .failed,
+			metadataJSON: #"{"exitCode":\#(result.exitCode)}"#,
 			logPath: logURL.path()
 		)
 	}
 
-	nonisolated private static func killContainer(named name: String, configuration: ContainerizedCodexAgentConfiguration) async {
-		_ = try? await ProcessCommand.runStreaming(
-			executable: configuration.containerExecutablePath,
-			arguments: ["container", "kill", name],
-			allowsNonZeroExit: true
-		)
-	}
-
-	nonisolated private static func ensureImage(configuration: ContainerizedCodexAgentConfiguration) async throws {
-		let inspect = try await ProcessCommand.runStreaming(
-			executable: configuration.containerExecutablePath,
-			arguments: ["container", "image", "inspect", configuration.imageName],
-			allowsNonZeroExit: true
-		)
-		if inspect.exitCode == 0 {
+	nonisolated private static func ensureImage(
+		configuration: ContainerizedCodexAgentConfiguration,
+		containerControl: ContainerRuntimeControl
+	) async throws {
+		if try await containerControl.imageExists(named: configuration.imageName) {
 			return
 		}
 		guard configuration.buildsImageIfMissing,
@@ -282,9 +276,6 @@ struct ContainerizedCodexAgentProvider: AgentProvider, Sendable {
 				"Container image \(configuration.imageName) was not found. Build it with: container build --tag \(configuration.imageName) Auditorium/Auditorium/Resources/containers/codex"
 			)
 		}
-		_ = try await ProcessCommand.runStreaming(
-			executable: configuration.containerExecutablePath,
-			arguments: ["container", "build", "--tag", configuration.imageName, imageBuildContext.path()]
-		)
+		try await containerControl.buildImage(named: configuration.imageName, context: imageBuildContext)
 	}
 }

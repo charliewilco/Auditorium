@@ -8,7 +8,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -18,7 +18,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -28,7 +28,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -38,7 +38,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -48,7 +48,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -58,7 +58,7 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
-			modelTypes
+			legacyModelTypes
 		}
 	}
 
@@ -68,21 +68,77 @@ enum AppSchema {
 		}
 
 		static var models: [any PersistentModel.Type] {
+			legacyModelTypes
+		}
+	}
+
+	enum V8: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 7, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypesV8
+		}
+	}
+
+	enum V9: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 8, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypesV11
+		}
+	}
+
+	enum V10: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 9, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypesV11
+		}
+	}
+
+	enum V11: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 10, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
+			modelTypesV11
+		}
+	}
+
+	enum V12: VersionedSchema {
+		static var versionIdentifier: Schema.Version {
+			Schema.Version(1, 11, 0)
+		}
+
+		static var models: [any PersistentModel.Type] {
 			modelTypes
 		}
 	}
 
 	enum MigrationPlan: SchemaMigrationPlan {
 		static var schemas: [any VersionedSchema.Type] {
-			[V7.self]
+			[V7.self, V8.self, V9.self, V10.self, V11.self, V12.self]
 		}
 
 		static var stages: [MigrationStage] {
-			[]
+			[
+				.lightweight(fromVersion: V7.self, toVersion: V8.self),
+				.lightweight(fromVersion: V8.self, toVersion: V9.self),
+				.lightweight(fromVersion: V9.self, toVersion: V10.self),
+				.lightweight(fromVersion: V10.self, toVersion: V11.self),
+				.lightweight(fromVersion: V11.self, toVersion: V12.self),
+			]
 		}
 	}
 
-	static let modelTypes: [any PersistentModel.Type] = [
+	static let legacyModelTypes: [any PersistentModel.Type] = [
 		Project.self,
 		RepositoryRecord.self,
 		IssueTrackerRecord.self,
@@ -98,8 +154,23 @@ enum AppSchema {
 		ProjectEnvironmentSecretRecord.self,
 	]
 
+	static let modelTypesV8: [any PersistentModel.Type] =
+		legacyModelTypes + [
+			TicketReportBackRecord.self
+		]
+
+	static let modelTypesV11: [any PersistentModel.Type] =
+		modelTypesV8 + [
+			ContainerRunRecord.self
+		]
+
+	static let modelTypes: [any PersistentModel.Type] =
+		modelTypesV11 + [
+			DispatcherRunRecord.self
+		]
+
 	static var currentSchema: Schema {
-		Schema(versionedSchema: V7.self)
+		Schema(versionedSchema: V12.self)
 	}
 
 	static func makeModelContainer(inMemory: Bool = false, storeURL: URL? = nil) throws -> ModelContainer {

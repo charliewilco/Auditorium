@@ -5,17 +5,20 @@ struct ContainerWorkspaceRuntimeProvider: RuntimeProvider {
 	let projectID: UUID
 	let sourceProvider: any SourceCodeProvider
 	let branchPrefix: String
+	let containerControl: ContainerRuntimeControl
 
 	init(
 		workspaceService: ApplicationWorkspaceService,
 		projectID: UUID,
 		sourceProvider: any SourceCodeProvider,
-		branchPrefix: String = "auditorium"
+		branchPrefix: String = "auditorium",
+		containerControl: ContainerRuntimeControl = ContainerRuntimeControl()
 	) {
 		self.workspaceService = workspaceService
 		self.projectID = projectID
 		self.sourceProvider = sourceProvider
 		self.branchPrefix = branchPrefix
+		self.containerControl = containerControl
 	}
 
 	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor {
@@ -59,12 +62,24 @@ struct ContainerWorkspaceRuntimeProvider: RuntimeProvider {
 	}
 
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {
-		try Task.checkCancellation()
-		try FileManager.default.createDirectory(at: metadataDirectory(for: handle.workspacePath), withIntermediateDirectories: true)
-		try "stopped\n".write(
-			to: metadataDirectory(for: handle.workspacePath).appending(path: "container-runtime-stopped"),
-			atomically: true,
-			encoding: .utf8
+		let containerName = ContainerRuntimeControl.containerName(forRuntimeID: handle.id)
+		let killResult = await containerControl.killContainer(named: containerName)
+		let metadata = ContainerRuntimeStopMetadata(
+			id: handle.id,
+			containerName: containerName,
+			workspacePath: handle.workspacePath.path(),
+			stoppedAt: .now,
+			killExitCode: killResult.result?.exitCode,
+			killFailureReason: killResult.failureReason
+		)
+		let encoder = JSONEncoder()
+		encoder.dateEncodingStrategy = .iso8601
+		encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+		let metadataDirectory = metadataDirectory(for: handle.workspacePath)
+		try FileManager.default.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
+		try encoder.encode(metadata).write(
+			to: metadataDirectory.appending(path: "container-runtime-stopped"),
+			options: .atomic
 		)
 	}
 
@@ -75,6 +90,7 @@ struct ContainerWorkspaceRuntimeProvider: RuntimeProvider {
 	private func metadataDirectory(for workspace: URL) -> URL {
 		workspace.appending(path: ".auditorium")
 	}
+
 }
 
 private struct ContainerRuntimeHandleMetadata: Codable {
@@ -84,4 +100,13 @@ private struct ContainerRuntimeHandleMetadata: Codable {
 	let ticketExternalID: String
 	let injectedVariableCount: Int
 	let startedAt: Date
+}
+
+private struct ContainerRuntimeStopMetadata: Codable {
+	let id: String
+	let containerName: String
+	let workspacePath: String
+	let stoppedAt: Date
+	let killExitCode: Int32?
+	let killFailureReason: String?
 }
