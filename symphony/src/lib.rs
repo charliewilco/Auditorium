@@ -18,6 +18,8 @@ use tokio::time::{sleep, timeout};
 
 const CODEX_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 const DEFAULT_CODEX_COMMAND: &str = "codex exec --json --ephemeral --ignore-user-config --disable apps --disable plugins --sandbox workspace-write -c approval_policy=\"never\"";
+const LEGACY_DEFAULT_CODEX_COMMAND: &str =
+    "codex exec --json --sandbox workspace-write -c approval_policy=\"never\"";
 
 const DEFAULT_WORKFLOW: &str = r#"---
 tracker:
@@ -1442,6 +1444,13 @@ pub fn resolve_config(
         max_retry_backoff_ms: int_from_map(agent, "agent", "max_retry_backoff_ms")?
             .unwrap_or(300_000),
         codex_command: string_from_map(codex, "codex", "command")?
+            .map(|command| {
+                if command == LEGACY_DEFAULT_CODEX_COMMAND {
+                    DEFAULT_CODEX_COMMAND.to_string()
+                } else {
+                    command
+                }
+            })
             .unwrap_or_else(|| DEFAULT_CODEX_COMMAND.to_string()),
         branch_prefix,
         max_retries: int_from_root(&definition.config, "max_retries")?.unwrap_or(2) as usize,
@@ -2892,6 +2901,40 @@ Body
                 "-c",
                 "approval_policy=never"
             ]
+        );
+    }
+
+    #[test]
+    fn migrates_only_the_legacy_generated_codex_command() {
+        let legacy_workflow = parse_workflow(
+            r#"---
+codex:
+  command: "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
+---
+Body
+"#,
+        )
+        .unwrap();
+        let legacy_config =
+            resolve_config(&legacy_workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(legacy_config.codex_command, DEFAULT_CODEX_COMMAND);
+
+        let custom_workflow = parse_workflow(
+            r#"---
+codex:
+  command: "codex exec --json --sandbox read-only"
+---
+Body
+"#,
+        )
+        .unwrap();
+        let custom_config =
+            resolve_config(&custom_workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(
+            custom_config.codex_command,
+            "codex exec --json --sandbox read-only"
         );
     }
 
