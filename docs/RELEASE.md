@@ -38,9 +38,10 @@ Unsigned artifacts are for smoke testing and internal development only. They are
 The package includes:
 
 - `Auditorium.app`
-- Bundled `symphony` CLI at `Auditorium.app/Contents/Resources/bin/symphony`
+- Bundled universal `symphony` CLI at `Auditorium.app/Contents/Resources/bin/symphony`
 
 At runtime the app prepends that bundled `bin` directory to `PATH` when it exists, then falls back to a separately installed `symphony` during development.
+The packaging script builds arm64 and x86_64 CLI slices and verifies that the bundled executable supports every architecture in the app executable.
 
 You can create the same artifact locally:
 
@@ -119,6 +120,8 @@ Notarization credentials can be provided with either:
 - [x] Release build passed.
 - [x] `symphony` bundled in the app artifact.
 - [x] Code signature verified for unsigned/ad-hoc smoke artifacts.
+- [x] Developer ID archive and export succeeded locally on August 8, 2026.
+- [x] Developer ID signatures and universal arm64/x86_64 app and `symphony` executables verified locally.
 - [ ] Developer ID notarization succeeded.
 - [ ] `spctl` accepted the Developer ID app.
 - [ ] Clean Mac launch passed from the downloaded zip.
