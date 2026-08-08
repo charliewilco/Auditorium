@@ -50,10 +50,18 @@ final class Orchestrator {
 	}
 
 	func runQueue(projectID: UUID, concurrency: Int, context: ModelContext) {
+		startRun(projectID: projectID, ticketID: nil, concurrency: concurrency, context: context)
+	}
+
+	func runTicket(projectID: UUID, ticketID: UUID, context: ModelContext) {
+		startRun(projectID: projectID, ticketID: ticketID, concurrency: 1, context: context)
+	}
+
+	private func startRun(projectID: UUID, ticketID: UUID?, concurrency: Int, context: ModelContext) {
 		activeTask?.cancel()
 		activeTask = Task {
 			do {
-				try await execute(projectID: projectID, concurrency: concurrency, context: context)
+				try await execute(projectID: projectID, ticketID: ticketID, concurrency: concurrency, context: context)
 			}
 			catch is CancellationError {
 			}
@@ -70,13 +78,19 @@ final class Orchestrator {
 		activeTask = nil
 	}
 
-	func execute(projectID: UUID, concurrency: Int, context: ModelContext) async throws {
+	func execute(projectID: UUID, ticketID: UUID? = nil, concurrency: Int, context: ModelContext) async throws {
 		let projects = try context.fetch(FetchDescriptor<Project>())
 		guard let project = projects.first(where: { $0.id == projectID }) else {
 			throw ProviderError.unavailable("Project was not found.")
 		}
 		let queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>())
-			.filter { $0.projectID == projectID && $0.isEnabled }
+			.filter { item in
+				guard item.projectID == projectID else { return false }
+				if let ticketID {
+					return item.ticketID == ticketID
+				}
+				return item.isEnabled
+			}
 			.sorted { $0.position < $1.position }
 		guard !queueItems.isEmpty else {
 			throw ProviderError.unavailable("No enabled queue items to run.")

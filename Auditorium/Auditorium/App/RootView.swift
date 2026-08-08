@@ -314,9 +314,8 @@ struct RootView: View {
 	private func runSelectedTicket() {
 		guard let ticket = selectedTicket, let projectID = appState.selectedProjectID else { return }
 		do {
-			try QueueService().clearQueue(projectID: projectID, context: modelContext)
 			try QueueService().addTickets([ticket.id], projectID: projectID, context: modelContext)
-			runQueue()
+			startRun(ticketID: ticket.id)
 		}
 		catch {
 			NSAlert(error: error).runModal()
@@ -324,6 +323,10 @@ struct RootView: View {
 	}
 
 	private func runQueue() {
+		startRun(ticketID: nil)
+	}
+
+	private func startRun(ticketID: UUID?) {
 		guard let project = selectedProject else { return }
 		let preferences = runSecurityPreferences
 		if let runPreflightSummary, runPreflightSummary.canStartRun == false {
@@ -341,7 +344,7 @@ struct RootView: View {
 		if preferences.requireRunConfirmation,
 			confirm(
 				title: "Start Run?",
-				message: "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items."
+				message: runConfirmationMessage(ticketID: ticketID)
 			) == false
 		{
 			return
@@ -352,7 +355,19 @@ struct RootView: View {
 			return
 		}
 		appState.selectedDestination = .runs
-		ensureRunCoordinator().startQueue(project: project, concurrency: appState.queueConcurrency, context: modelContext)
+		if let ticketID {
+			ensureRunCoordinator().startTicket(project: project, ticketID: ticketID, context: modelContext)
+		}
+		else {
+			ensureRunCoordinator().startQueue(project: project, concurrency: appState.queueConcurrency, context: modelContext)
+		}
+	}
+
+	private func runConfirmationMessage(ticketID: UUID?) -> String {
+		if let ticketID, let ticket = projectTickets.first(where: { $0.id == ticketID }) {
+			return "Auditorium will run \(ticket.externalID) without changing the rest of the queue."
+		}
+		return "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items."
 	}
 
 	private func cancelActiveRun() {

@@ -514,6 +514,56 @@ struct AuditoriumTests {
 		#expect(try context.fetch(FetchDescriptor<ProviderAccountRecord>()).isEmpty)
 	}
 
+	@Test func runningOneTicketPreservesUnrelatedQueuedWork() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let workspace = ApplicationWorkspaceService(rootDirectory: root)
+		let projectID = try DemoDataSeeder(workspaceService: workspace).openDemoProject(in: context)
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+			.filter { $0.sourceProjectID == projectID }
+			.sorted { $0.externalID < $1.externalID }
+		let selectedTicket = try #require(tickets.first)
+		let unrelatedTickets = Array(tickets.dropFirst().prefix(2))
+		#expect(unrelatedTickets.count == 2)
+		try QueueService().addTickets(
+			[selectedTicket.id, unrelatedTickets[0].id, unrelatedTickets[1].id],
+			projectID: projectID,
+			context: context
+		)
+		let disabledItem = try #require(
+			try context.fetch(FetchDescriptor<QueueItemRecord>()).first { $0.ticketID == unrelatedTickets[1].id }
+		)
+		try QueueService().setQueueItem(disabledItem, isEnabled: false, context: context)
+		let queueBeforeRun = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == projectID }
+			.sorted { $0.position < $1.position }
+		let orchestrator = Orchestrator(
+			workspaceService: workspace,
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockSourceProvider: StaticSourceCodeProvider(kind: .github),
+			mockAgentProvider: StaticAgentProvider(events: [
+				AgentEvent(level: .success, category: .agent, message: "done", summary: "Done.", outcome: .completed)
+			])
+		)
+
+		try await orchestrator.execute(projectID: projectID, ticketID: selectedTicket.id, concurrency: 1, context: context)
+
+		let queueAfterRun = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == projectID }
+			.sorted { $0.position < $1.position }
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		#expect(queueAfterRun.map(\.id) == queueBeforeRun.map(\.id))
+		#expect(queueAfterRun.map(\.ticketID) == queueBeforeRun.map(\.ticketID))
+		#expect(queueAfterRun.map(\.position) == queueBeforeRun.map(\.position))
+		#expect(queueAfterRun.map(\.isEnabled) == queueBeforeRun.map(\.isEnabled))
+		#expect(run.queueSnapshot.map(\.ticketID) == [selectedTicket.id])
+		#expect(selectedTicket.status == .needsReview)
+		#expect(unrelatedTickets.allSatisfy { $0.status == .queued })
+	}
+
 	@Test func runRecordPersistsQueueSnapshotBeforeQueueMutations() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext

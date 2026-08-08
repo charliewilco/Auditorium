@@ -38,6 +38,10 @@ final class AppRunCoordinator {
 		orchestrator.runQueue(projectID: project.id, concurrency: concurrency, context: context)
 	}
 
+	func startTicket(project: Project, ticketID: UUID, context: ModelContext) {
+		orchestrator.runTicket(projectID: project.id, ticketID: ticketID, context: context)
+	}
+
 	func cancelActiveRun() {
 		orchestrator.cancel()
 	}
