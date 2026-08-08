@@ -87,7 +87,7 @@ struct RuntimeDetectionService {
 		let ghPath = await findExecutable(named: "gh")
 
 		return [
-			check(for: "git", displayName: "Git", path: gitPath),
+			await gitReadiness(path: gitPath),
 			await codexAuthentication(path: codexPath),
 			await githubAuthentication(path: ghPath),
 		]
@@ -164,6 +164,30 @@ struct RuntimeDetectionService {
 
 	private func commandResult(_ launchPath: String, arguments: [String]) async -> RuntimeCommandResult? {
 		await commandRunner(launchPath, arguments)
+	}
+
+	private func gitReadiness(path: String?) async -> RuntimeHealthCheck {
+		guard let path else {
+			return RuntimeHealthCheck(
+				id: "git",
+				name: "Git",
+				state: .needsSetup,
+				detail: "Git was not found.",
+				version: nil
+			)
+		}
+
+		guard let version = await commandOutput(path, arguments: ["--version"]) else {
+			return RuntimeHealthCheck(
+				id: "git",
+				name: "Git",
+				state: .needsSetup,
+				detail: "Git was found at \(path), but it could not run. Install the Xcode Command Line Tools.",
+				version: nil
+			)
+		}
+
+		return RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: path, version: version)
 	}
 
 	private func codexAuthentication(path: String?) async -> RuntimeHealthCheck {
