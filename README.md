@@ -88,7 +88,7 @@ Working today:
 - Mock orchestration can create ticket runs, stream events, generate fake PR URLs, and produce markdown reports.
 - Runtime detection checks Git, Codex CLI, and GitHub CLI.
 - Provider protocols exist for source-code and issue-tracker adapters.
-- GitHub OAuth device flow, repository listing, issue import, credential preflight, branch push, and pull request adapter coverage exist.
+- GitHub CLI browser authentication, repository listing, issue import, credential preflight, branch push, and pull request adapter coverage exist.
 - The app coordinator can hand a queued GitHub issue to `symphony`, stream runtime events, persist the ticket run, and store the resulting pull request URL.
 - `symphony` CLI can initialize workflows, run doctor checks, run mock issues, run queued issues, coordinate concurrent work, and perform the real GitHub/Codex issue-to-pull-request path.
 
@@ -106,7 +106,7 @@ v0 is intentionally GitHub-only:
 
 - GitHub repositories
 - GitHub Issues
-- GitHub OAuth
+- GitHub CLI authentication
 - Codex CLI as the primary agent
 - Local Workspace as the real execution runtime
 - Local SwiftData persistence
@@ -308,7 +308,7 @@ The demo project is offline and deterministic.
 
 ### 2b. Create A GitHub Project
 
-For the real v0 path, configure a GitHub OAuth client ID in Settings or the setup wizard, complete the GitHub browser approval, choose an accessible repository, and import open issues.
+For the real v0 path, choose **Connect with GitHub Browser Login** in the setup wizard. Auditorium reuses an existing authenticated GitHub CLI session or opens GitHub's browser login, then stores the resulting credential in Keychain when the project is created. No OAuth client ID is required. A personal access token remains available as an advanced fallback.
 
 ### 3. Browse Tickets
 
