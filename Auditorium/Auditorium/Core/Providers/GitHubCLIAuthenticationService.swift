@@ -19,6 +19,14 @@ struct GitHubCLICommandResult: Sendable, Equatable {
 
 struct GitHubCLIAuthenticationService: Sendable {
 	typealias CommandRunner = @Sendable (_ arguments: [String], _ allowsNonZeroExit: Bool) async throws -> GitHubCLICommandResult
+	private static let defaultSearchPaths = [
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	]
 
 	private let commandRunner: CommandRunner
 
@@ -27,8 +35,9 @@ struct GitHubCLIAuthenticationService: Sendable {
 			commandRunner
 			?? { arguments, allowsNonZeroExit in
 				let result = try await ProcessCommand.runStreaming(
-					executable: "gh",
-					arguments: arguments,
+					executable: "/usr/bin/env",
+					arguments: ["gh"] + arguments,
+					environment: Self.processEnvironment(inherited: ProcessInfo.processInfo.environment),
 					allowsNonZeroExit: allowsNonZeroExit
 				)
 				return GitHubCLICommandResult(
@@ -37,6 +46,18 @@ struct GitHubCLIAuthenticationService: Sendable {
 					standardError: result.standardError
 				)
 			}
+	}
+
+	static func processEnvironment(inherited: [String: String]) -> [String: String] {
+		var environment = inherited
+		var paths = environment["PATH", default: "/usr/bin:/bin:/usr/sbin:/sbin"]
+			.split(separator: ":")
+			.map(String.init)
+		for path in defaultSearchPaths where paths.contains(path) == false {
+			paths.append(path)
+		}
+		environment["PATH"] = paths.joined(separator: ":")
+		return environment
 	}
 
 	func authenticate() async throws -> String {

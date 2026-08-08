@@ -1038,6 +1038,19 @@ struct AuditoriumCoreTests {
 		#expect(await runner.receivedCommands().count == 1)
 	}
 
+	@Test func githubCLIAuthenticationExtendsFinderSearchPathForHomebrew() {
+		let environment = GitHubCLIAuthenticationService.processEnvironment(inherited: [
+			"PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+			"AUDITORIUM_TEST": "preserved",
+		])
+		let paths = environment["PATH"]?.split(separator: ":").map(String.init)
+
+		#expect(paths?.contains("/opt/homebrew/bin") == true)
+		#expect(paths?.contains("/usr/local/bin") == true)
+		#expect(paths?.filter { $0 == "/usr/bin" }.count == 1)
+		#expect(environment["AUDITORIUM_TEST"] == "preserved")
+	}
+
 	@Test func githubCLIAuthenticationRunsBrowserLoginWithoutAClientID() async throws {
 		let runner = ScriptedGitHubCLICommandRunner(steps: [
 			.init(
