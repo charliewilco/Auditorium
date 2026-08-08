@@ -2192,6 +2192,224 @@ struct AuditoriumTests {
 		#expect(events.filter { $0.ticketRunID != nil && $0.message == "Ticket run reconciled as failed after app relaunch." }.count == 2)
 	}
 
+	@Test func runReconciliationSurvivesAFileBackedRelaunchWithoutMutatingTheQueueOrTerminalEvidence() throws {
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumRelaunchTests-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: root) }
+		let storeURL = root.appending(path: "Auditorium.store")
+		let now = Date(timeIntervalSince1970: 1_780_200_000)
+		let projectID = UUID()
+		let interruptedTicketID = UUID()
+		let completedTicketID = UUID()
+		let unrelatedTicketID = UUID()
+		let interruptedQueueItemID = UUID()
+		let completedQueueItemID = UUID()
+		let unrelatedQueueItemID = UUID()
+		let runID = UUID()
+		let interruptedTicketRunID = UUID()
+		let completedTicketRunID = UUID()
+		let pullRequestID = UUID()
+		let reportID = UUID()
+		let priorEventID = UUID()
+
+		do {
+			let container = try AppSchema.makeModelContainer(storeURL: storeURL)
+			let context = container.mainContext
+			let project = Project(
+				id: projectID,
+				name: "Durable Relaunch",
+				repositoryProviderKind: .github,
+				repositoryName: "charliewilco/Auditorium",
+				repositoryURL: "https://github.com/charliewilco/Auditorium",
+				defaultBranch: "main",
+				issueProviderKind: .githubIssues,
+				runtimeProviderKind: .localWorkspace,
+				agentProviderKind: .codex
+			)
+			let interruptedTicket = TicketRecord(
+				id: interruptedTicketID,
+				provider: .githubIssues,
+				externalID: "401",
+				title: "Interrupted ticket",
+				body: "Body",
+				status: .running,
+				labels: ["relaunch"],
+				assignee: nil,
+				priority: .high,
+				webURL: "https://github.com/charliewilco/Auditorium/issues/401",
+				createdAt: .now,
+				updatedAt: .now,
+				estimatedComplexity: 3,
+				sourceProjectID: projectID
+			)
+			let completedTicket = TicketRecord(
+				id: completedTicketID,
+				provider: .githubIssues,
+				externalID: "402",
+				title: "Completed ticket",
+				body: "Body",
+				status: .needsReview,
+				labels: ["relaunch"],
+				assignee: nil,
+				priority: .medium,
+				webURL: "https://github.com/charliewilco/Auditorium/issues/402",
+				createdAt: .now,
+				updatedAt: .now,
+				estimatedComplexity: 2,
+				sourceProjectID: projectID
+			)
+			let unrelatedTicket = TicketRecord(
+				id: unrelatedTicketID,
+				provider: .githubIssues,
+				externalID: "403",
+				title: "Unrelated queued ticket",
+				body: "Body",
+				status: .queued,
+				labels: ["relaunch"],
+				assignee: nil,
+				priority: .low,
+				webURL: "https://github.com/charliewilco/Auditorium/issues/403",
+				createdAt: .now,
+				updatedAt: .now,
+				estimatedComplexity: 1,
+				sourceProjectID: projectID
+			)
+			let interruptedQueueItem = QueueItemRecord(
+				id: interruptedQueueItemID,
+				ticketID: interruptedTicketID,
+				projectID: projectID,
+				position: 0,
+				priority: .high
+			)
+			let completedQueueItem = QueueItemRecord(
+				id: completedQueueItemID,
+				ticketID: completedTicketID,
+				projectID: projectID,
+				position: 1,
+				priority: .medium,
+				isEnabled: false
+			)
+			let unrelatedQueueItem = QueueItemRecord(
+				id: unrelatedQueueItemID,
+				ticketID: unrelatedTicketID,
+				projectID: projectID,
+				position: 2,
+				priority: .low
+			)
+			let run = RunRecord(id: runID, projectID: projectID, status: .running, totalTickets: 2, summary: "Running")
+			run.queueSnapshot = [
+				QueueRunSnapshot(
+					id: interruptedQueueItemID,
+					ticketID: interruptedTicketID,
+					position: 0,
+					priority: .high,
+					concurrencyGroup: "default"
+				),
+				QueueRunSnapshot(
+					id: completedQueueItemID,
+					ticketID: completedTicketID,
+					position: 1,
+					priority: .medium,
+					concurrencyGroup: "default"
+				),
+			]
+			let interruptedTicketRun = TicketRunRecord(
+				id: interruptedTicketRunID,
+				runID: runID,
+				ticketID: interruptedTicketID,
+				branchName: "auditorium/issue-401",
+				status: .running,
+				startedAt: .now
+			)
+			let completedTicketRun = TicketRunRecord(
+				id: completedTicketRunID,
+				runID: runID,
+				ticketID: completedTicketID,
+				branchName: "auditorium/issue-402",
+				status: .needsReview,
+				startedAt: .now,
+				endedAt: .now,
+				pullRequestURL: "https://github.com/charliewilco/Auditorium/pull/402",
+				summary: "Pull request opened."
+			)
+			let pullRequest = PullRequestRecord(
+				id: pullRequestID,
+				provider: .github,
+				ticketRunID: completedTicketRunID,
+				title: "Completed work",
+				url: "https://github.com/charliewilco/Auditorium/pull/402",
+				branchName: "auditorium/issue-402",
+				targetBranch: "main",
+				status: .open,
+				checksStatus: .passed
+			)
+			let report = ReportRecord(
+				id: reportID,
+				projectID: projectID,
+				runID: runID,
+				title: "Durable report",
+				markdown: "Completed ticket evidence.",
+				filePath: root.appending(path: "report.md").path()
+			)
+			let priorEvent = RuntimeEventRecord(
+				id: priorEventID,
+				runID: runID,
+				ticketRunID: completedTicketRunID,
+				level: .info,
+				category: .pullRequest,
+				message: "Pull request opened."
+			)
+
+			context.insert(project)
+			context.insert(interruptedTicket)
+			context.insert(completedTicket)
+			context.insert(unrelatedTicket)
+			context.insert(interruptedQueueItem)
+			context.insert(completedQueueItem)
+			context.insert(unrelatedQueueItem)
+			context.insert(run)
+			context.insert(interruptedTicketRun)
+			context.insert(completedTicketRun)
+			context.insert(pullRequest)
+			context.insert(report)
+			context.insert(priorEvent)
+			try context.save()
+		}
+
+		let reopenedContainer = try AppSchema.makeModelContainer(storeURL: storeURL)
+		let context = reopenedContainer.mainContext
+		let result = try RunReconciliationService().reconcileInterruptedRuns(context: context, now: now)
+
+		#expect(result == RunReconciliationResult(reconciledRuns: 1, reconciledTicketRuns: 1))
+		let queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>(sortBy: [SortDescriptor(\.position)]))
+		#expect(queueItems.map(\.id) == [interruptedQueueItemID, completedQueueItemID, unrelatedQueueItemID])
+		#expect(queueItems.map(\.isEnabled) == [true, false, true])
+		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
+		#expect(tickets.first { $0.id == interruptedTicketID }?.status == .failed)
+		#expect(tickets.first { $0.id == completedTicketID }?.status == .needsReview)
+		#expect(tickets.first { $0.id == unrelatedTicketID }?.status == .queued)
+		let run = try #require(try context.fetch(FetchDescriptor<RunRecord>()).first { $0.id == runID })
+		#expect(run.status == .failed)
+		#expect(run.queueSnapshot.map(\.id) == [interruptedQueueItemID, completedQueueItemID])
+		#expect(run.completedTickets == 1)
+		#expect(run.failedTickets == 1)
+		#expect(run.pullRequestsCreated == 1)
+		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
+		#expect(ticketRuns.first { $0.id == interruptedTicketRunID }?.status == .failed)
+		#expect(ticketRuns.first { $0.id == completedTicketRunID }?.status == .needsReview)
+		#expect(ticketRuns.first { $0.id == completedTicketRunID }?.pullRequestURL == "https://github.com/charliewilco/Auditorium/pull/402")
+		let pullRequest = try #require(try context.fetch(FetchDescriptor<PullRequestRecord>()).first { $0.id == pullRequestID })
+		#expect(pullRequest.status == .open)
+		#expect(pullRequest.checksStatus == .passed)
+		let report = try #require(try context.fetch(FetchDescriptor<ReportRecord>()).first { $0.id == reportID })
+		#expect(report.markdown == "Completed ticket evidence.")
+		let events = try context.fetch(FetchDescriptor<RuntimeEventRecord>())
+		#expect(events.contains { $0.id == priorEventID && $0.message == "Pull request opened." })
+		#expect(events.filter { $0.message == "Ticket run reconciled as failed after app relaunch." }.count == 1)
+		#expect(events.filter { $0.message == "Run reconciled as failed after app relaunch." }.count == 1)
+		#expect(try ModelIntegrityValidator.validate(context: context).isEmpty)
+	}
+
 	@Test func workflowPolicyParserReadsFrontMatter() throws {
 		let policy = try WorkflowPolicyParser().parse(WorkflowPolicy.defaultMarkdown)
 
