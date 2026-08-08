@@ -81,6 +81,8 @@ After addressing code-review findings in the queue, onboarding, GitHub authentic
 
 Strict recursive Swift formatting passed, `swift test` passed 60 tests, `cargo test --all-targets` passed 52 library and 17 CLI tests, and the full Debug Xcode app test scheme passed. The unsigned release package also rebuilt successfully; its bundled `symphony` executable was universal `x86_64 arm64`, the ad-hoc app signature passed strict verification, the bundled CLI help command succeeded, and the zip SHA-256 was `c41867f2500a0a3f92f1b6eccc0285713f41fa8b7f3f0491acc54dbc91cdef12`.
 
+The exact current-head batch integration at commit `9ffba9d9ce74343187784a1540a967e50b0a09dd` and tree `b5e2a0d39ec7dd6b6b32a446ed6452a936d00106` also completed a fresh Developer ID archive and export. The app and nested `symphony` executable were universal `x86_64 arm64`, passed strict signature verification for team `824752FF3X`, and carried trusted timestamps. The signed zip SHA-256 was `f11d0914bf83a2f724e0d4af1a8cc6ec0a1843a88e444326344682004de08fd7`. Gatekeeper rejected it with `source=Unnotarized Developer ID` and exit 3, while `stapler validate` reported no ticket and exit 65; those are recorded failures, not distribution approval.
+
 The live GitHub acceptance above was not rerun at this exact post-review tree. Its external issue-to-pull-request result remains pinned separately, while the post-review functional changes are covered by the combined local suites and each PR's refreshed hosted CI.
 
 ## Visual Review
