@@ -2,6 +2,9 @@
 
 Captured on August 8, 2026 against a local integration of the following focused changes from `origin/main` at `6defb6a105e0d0bece6872767f53d4efc8c7a9b3`:
 
+- Integrated candidate commit: `37d36b52cbacfbadefde37f43ac445de662243c8`.
+- Integrated candidate tree: `62fdc77d3e1200d24a92cb42d8e474888ce6a4c7`.
+
 - [PR #18](https://github.com/charliewilco/Auditorium/pull/18): preserve unrelated queue items when running or retrying one ticket.
 - [PR #19](https://github.com/charliewilco/Auditorium/pull/19): remove Apple Container from Local Workspace onboarding.
 - [PR #20](https://github.com/charliewilco/Auditorium/pull/20): use GitHub CLI browser authentication without a user-provided OAuth client ID.
