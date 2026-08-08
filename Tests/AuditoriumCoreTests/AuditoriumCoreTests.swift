@@ -1384,6 +1384,44 @@ struct AuditoriumCoreTests {
 		#expect(summary.opensPullRequests)
 		#expect(summary.accountTitle == "GitHub Charlie")
 
+		let disabledQueueItem = QueueItemRecord(
+			ticketID: ticket.id,
+			projectID: project.id,
+			position: 0,
+			priority: .medium,
+			isEnabled: false
+		)
+		let selectedTicketSummary = RunPreflightSummary.make(
+			project: project,
+			queueItems: [disabledQueueItem],
+			tickets: [ticket],
+			runtimeHealth: [
+				RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+				RuntimeHealthCheck(
+					id: "codex",
+					name: "Codex CLI",
+					state: .available,
+					detail: "/opt/homebrew/bin/codex",
+					version: nil
+				),
+				RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),
+			],
+			providerAccounts: [account],
+			preferences: RunSecurityPreferences(
+				allowNetworkAccess: true,
+				allowFilesystemWrite: true,
+				requireRunConfirmation: true,
+				requirePullRequestConfirmation: true
+			),
+			workspaceRoot: "/tmp/workspaces",
+			ticketID: ticket.id,
+			secretReader: { _ in "gho_token" }
+		)
+
+		#expect(selectedTicketSummary.canStartRun)
+		#expect(selectedTicketSummary.enabledIssueCount == 1)
+		#expect(selectedTicketSummary.checks.first { $0.id == "queue" }?.title == "Selected Ticket")
+
 		let noPullRequestProject = Project(
 			name: "No PR",
 			repositoryProviderKind: .github,
