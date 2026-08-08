@@ -1,4 +1,3 @@
-import AppKit
 import SwiftData
 import SwiftUI
 
@@ -21,7 +20,6 @@ struct ProjectSetupWizard: View {
 	@State private var creationErrorMessage: String?
 	@State private var oauthMessage = ""
 	@State private var isAuthorizingGitHub = false
-	@AppStorage("githubOAuthClientID") private var githubOAuthClientID = ""
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -95,7 +93,7 @@ struct ProjectSetupWizard: View {
 		case .repositoryCredentials:
 			oauthForm(
 				title: "\(draft.repositoryProviderKind.title) Credentials",
-				placeholder: "GitHub OAuth access token",
+				placeholder: "GitHub personal access token",
 				text: Binding(
 					get: { draft.repositoryCredential },
 					set: {
@@ -162,7 +160,7 @@ struct ProjectSetupWizard: View {
 		case .issueCredentials:
 			oauthForm(
 				title: "\(draft.issueProviderKind.title) Credentials",
-				placeholder: "GitHub OAuth access token",
+				placeholder: "GitHub personal access token",
 				text: Binding(
 					get: { draft.issueCredential },
 					set: {
@@ -334,9 +332,9 @@ struct ProjectSetupWizard: View {
 		VStack(alignment: .leading, spacing: 14) {
 			Text(title)
 				.font(.headline)
-			Label("GitHub OAuth", systemImage: "person.crop.circle.badge.checkmark")
+			Label("GitHub Browser Login", systemImage: "person.crop.circle.badge.checkmark")
 				.font(.subheadline.weight(.semibold))
-			Text("Auditorium uses one GitHub OAuth connection for source code and issues.")
+			Text("Auditorium uses one GitHub connection for source code and issues.")
 				.foregroundStyle(.secondary)
 			if !githubAccountSelections.isEmpty {
 				HStack {
@@ -353,12 +351,11 @@ struct ProjectSetupWizard: View {
 					}
 				}
 			}
-			TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
 			HStack {
 				Button("Connect with GitHub") {
 					connect()
 				}
-				.disabled(githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAuthorizingGitHub)
+				.disabled(isAuthorizingGitHub)
 				if isAuthorizingGitHub {
 					ProgressView()
 						.controlSize(.small)
@@ -368,7 +365,11 @@ struct ProjectSetupWizard: View {
 				Text(oauthMessage)
 					.foregroundStyle(.secondary)
 			}
+			Text("GitHub CLI opens a browser for authentication. Auditorium then stores the access token in Keychain.")
+				.foregroundStyle(.secondary)
 			Divider()
+			Text("Personal access token fallback")
+				.font(.subheadline.weight(.semibold))
 			SecureField(placeholder, text: text)
 			Text("Requested scopes: \(GitHubOAuth.descriptor.scopes.joined(separator: ", "))")
 				.foregroundStyle(.secondary)
@@ -392,23 +393,18 @@ struct ProjectSetupWizard: View {
 	}
 
 	private func connectGitHub() async {
-		let clientID = githubOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !clientID.isEmpty else {
-			return
-		}
 		isAuthorizingGitHub = true
-		oauthMessage = ""
+		oauthMessage = "Opening GitHub in your browser. The one-time code is copied to the clipboard."
 		defer { isAuthorizingGitHub = false }
 
 		do {
-			let service = GitHubOAuthDeviceFlowService()
-			let deviceCode = try await service.requestDeviceCode(clientID: clientID)
-			let verificationURL = deviceCode.verificationURIComplete ?? deviceCode.verificationURI
-			oauthMessage = "Enter code \(deviceCode.userCode) in GitHub, then return here."
-			NSWorkspace.shared.open(verificationURL)
-			let token = try await service.pollToken(clientID: clientID, deviceCode: deviceCode)
-			draft.applyGitHubOAuthTokenResponse(token, clientID: clientID)
-			oauthMessage = "GitHub connected with scopes: \(token.scope)"
+			let token = try await services.githubAuthentication.authenticate()
+			draft.repositoryCredential = token
+			draft.issueCredential = token
+			draft.selectedRepositoryAccountID = nil
+			draft.selectedIssueAccountID = nil
+			draft.clearGitHubOAuthTokenMetadata()
+			oauthMessage = "GitHub connected. The access token will be stored in Keychain when you create the project."
 		}
 		catch {
 			oauthMessage = error.localizedDescription

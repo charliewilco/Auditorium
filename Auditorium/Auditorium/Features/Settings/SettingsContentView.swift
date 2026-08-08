@@ -25,7 +25,6 @@ struct SettingsContentView: View {
 	@Environment(\.appServices) private var services
 	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
 	@Query(sort: \ProjectEnvironmentSecretRecord.name) private var environmentSecrets: [ProjectEnvironmentSecretRecord]
-	@AppStorage("githubOAuthClientID") private var githubOAuthClientID = ""
 	@AppStorage("requireRunConfirmation") private var requireRunConfirmation = true
 	@AppStorage("requirePROpenConfirmation") private var requirePROpenConfirmation = true
 	@AppStorage("allowNetworkAccess") private var allowNetworkAccess = false
@@ -51,7 +50,6 @@ struct SettingsContentView: View {
 						"Credential metadata is stored in SwiftData. Secret values are stored in Keychain under co.charliewil.Auditorium."
 					)
 					.foregroundStyle(.secondary)
-					TextField("GitHub OAuth Client ID", text: $githubOAuthClientID)
 					githubAccountStateView
 					if providerAccounts.isEmpty {
 						Text("No connected provider accounts.")

@@ -8,6 +8,7 @@ struct AppServices {
 	let reportGenerator: ReportGenerator
 	let projectCreation: ProjectCreationService
 	let symphony: SymphonyCLIProcessRunner
+	let githubAuthentication: GitHubCLIAuthenticationService
 
 	init(environment: [String: String] = ProcessInfo.processInfo.environment) {
 		keychain = KeychainService(service: environment["AUDITORIUM_KEYCHAIN_SERVICE"] ?? "co.charliewil.Auditorium")
@@ -16,6 +17,7 @@ struct AppServices {
 		reportGenerator = ReportGenerator()
 		projectCreation = ProjectCreationService()
 		symphony = SymphonyCLIProcessRunner()
+		githubAuthentication = GitHubCLIAuthenticationService()
 	}
 
 	@MainActor var projectEnvironmentSecrets: ProjectEnvironmentSecretService {
