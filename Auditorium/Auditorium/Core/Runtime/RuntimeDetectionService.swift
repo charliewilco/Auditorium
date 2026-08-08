@@ -82,12 +82,12 @@ struct RuntimeDetectionService {
 			return staticChecks
 		}
 
-		let containerPath = await findExecutable(named: "container")
+		let gitPath = await findExecutable(named: "git")
 		let codexPath = await findExecutable(named: "codex")
 		let ghPath = await findExecutable(named: "gh")
 
 		return [
-			await containerReadiness(path: containerPath),
+			check(for: "git", displayName: "Git", path: gitPath),
 			await codexAuthentication(path: codexPath),
 			await githubAuthentication(path: ghPath),
 		]
@@ -166,38 +166,6 @@ struct RuntimeDetectionService {
 		await commandRunner(launchPath, arguments)
 	}
 
-	private func containerReadiness(path: String?) async -> RuntimeHealthCheck {
-		guard let path else {
-			return RuntimeHealthCheck(
-				id: "container",
-				name: "Container CLI",
-				state: .needsSetup,
-				detail: "container was not found.",
-				version: nil
-			)
-		}
-
-		let version = await commandOutput(path, arguments: ["--version"])
-		let status = await commandResult(path, arguments: ["system", "status"])
-		if status?.exitCode == 0 {
-			return RuntimeHealthCheck(
-				id: "container",
-				name: "Container CLI",
-				state: .available,
-				detail: "Container CLI is installed and the container system is running.",
-				version: version
-			)
-		}
-
-		return RuntimeHealthCheck(
-			id: "container",
-			name: "Container CLI",
-			state: .unavailable,
-			detail: containerUnavailableDetail(path: path, output: status?.output),
-			version: version
-		)
-	}
-
 	private func codexAuthentication(path: String?) async -> RuntimeHealthCheck {
 		guard let path else {
 			return RuntimeHealthCheck(
@@ -261,14 +229,6 @@ struct RuntimeDetectionService {
 			detail: "GitHub CLI is installed at \(path), but github.com authentication is missing or invalid.",
 			version: version
 		)
-	}
-
-	private func containerUnavailableDetail(path: String, output: String?) -> String {
-		let trimmedOutput = output?.trimmingCharacters(in: .whitespacesAndNewlines)
-		if let trimmedOutput, trimmedOutput.isEmpty == false {
-			return "Container CLI is installed at \(path), but \(trimmedOutput)."
-		}
-		return "Container CLI is installed at \(path), but the container system is not running."
 	}
 
 	private func githubAuthenticatedDetail(output: String?) -> String {
