@@ -1717,6 +1717,8 @@ struct AuditoriumCoreTests {
 				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/codex")
 			case ("/usr/bin/which", ["gh"]):
 				RuntimeCommandResult(exitCode: 0, output: "/opt/homebrew/bin/gh")
+			case ("/usr/bin/git", ["--version"]):
+				RuntimeCommandResult(exitCode: 0, output: "git version 2.50.1")
 			case ("/opt/homebrew/bin/codex", ["--version"]):
 				RuntimeCommandResult(exitCode: 0, output: "codex-cli 0.139.0")
 			case ("/opt/homebrew/bin/codex", ["login", "status"]):
@@ -1739,6 +1741,7 @@ struct AuditoriumCoreTests {
 		#expect(checks.map(\.id) == ["git", "codex-auth", "github-auth"])
 		#expect(checksByID["git"]?.state == .available)
 		#expect(checksByID["git"]?.detail == "/usr/bin/git")
+		#expect(checksByID["git"]?.version == "git version 2.50.1")
 		#expect(checksByID["codex-auth"]?.state == .available)
 		#expect(checksByID["codex-auth"]?.detail == "Logged in using ChatGPT")
 		#expect(checksByID["github-auth"]?.state == .available)
@@ -1775,6 +1778,27 @@ struct AuditoriumCoreTests {
 		#expect(checksByID["codex-auth"]?.detail.contains("no authenticated session") == true)
 		#expect(checksByID["github-auth"]?.state == .needsSetup)
 		#expect(checksByID["github-auth"]?.detail.contains("authentication is missing or invalid") == true)
+	}
+
+	@Test func onboardingChecksRejectGitShimThatCannotRun() async {
+		let detection = RuntimeDetectionService(commandRunner: { launchPath, arguments in
+			switch (launchPath, arguments) {
+			case ("/usr/bin/which", ["git"]):
+				RuntimeCommandResult(exitCode: 0, output: "/usr/bin/git")
+			case ("/usr/bin/which", ["codex"]), ("/usr/bin/which", ["gh"]):
+				RuntimeCommandResult(exitCode: 1, output: "")
+			case ("/usr/bin/git", ["--version"]):
+				RuntimeCommandResult(exitCode: 1, output: "xcode-select: note: no developer tools were found")
+			default:
+				nil
+			}
+		})
+
+		let gitCheck = await detection.onboardingChecks().first { $0.id == "git" }
+
+		#expect(gitCheck?.state == .needsSetup)
+		#expect(gitCheck?.detail.contains("could not run") == true)
+		#expect(gitCheck?.detail.contains("Xcode Command Line Tools") == true)
 	}
 
 	private func ticket(number: Int, labels: [String], assignee: String?) -> TicketDescriptor {
