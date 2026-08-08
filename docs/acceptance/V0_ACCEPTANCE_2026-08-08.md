@@ -91,6 +91,7 @@ Both package modes completed after the universal CLI fix:
 - Strict app and nested executable signature verification passed for team `824752FF3X` with trusted timestamps.
 - The signed zip SHA-256 was `7bc676f20aec4caf00c82c9a8b53fd8fa2b76f1873d604b38b1f575be2be4547`.
 - Gatekeeper rejected the signed app with `source=Unnotarized Developer ID`, which is the expected result before notarization.
+- `xcrun notarytool history --keychain-profile Auditorium-notary` confirmed that the documented Keychain profile is not present; no alternate notarization credential environment was configured.
 
 ## Remaining External Gates
 
