@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::time::{sleep, timeout};
 
 const CODEX_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
+const DEFAULT_CODEX_COMMAND: &str = "codex exec --json --ephemeral --ignore-user-config --disable apps --disable plugins --sandbox workspace-write -c approval_policy=\"never\"";
 
 const DEFAULT_WORKFLOW: &str = r#"---
 tracker:
@@ -34,7 +35,7 @@ agent:
   max_turns: 1
   max_retry_backoff_ms: 300000
 codex:
-  command: "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
+  command: "codex exec --json --ephemeral --ignore-user-config --disable apps --disable plugins --sandbox workspace-write -c approval_policy=\"never\""
 branch_prefix: "auditorium"
 run_tests: true
 open_pull_request: true
@@ -1440,9 +1441,8 @@ pub fn resolve_config(
         max_turns: int_from_map(agent, "agent", "max_turns")?.unwrap_or(1) as usize,
         max_retry_backoff_ms: int_from_map(agent, "agent", "max_retry_backoff_ms")?
             .unwrap_or(300_000),
-        codex_command: string_from_map(codex, "codex", "command")?.unwrap_or_else(|| {
-            "codex exec --json --sandbox workspace-write -c approval_policy=\"never\"".to_string()
-        }),
+        codex_command: string_from_map(codex, "codex", "command")?
+            .unwrap_or_else(|| DEFAULT_CODEX_COMMAND.to_string()),
         branch_prefix,
         max_retries: int_from_root(&definition.config, "max_retries")?.unwrap_or(2) as usize,
         run_tests: bool_from_root(&definition.config, "run_tests")?.unwrap_or(true),
@@ -2866,9 +2866,32 @@ Body
         assert_eq!(config.max_retries, 2);
         assert!(config.run_tests);
         assert!(config.open_pull_request);
+        assert_eq!(config.codex_command, DEFAULT_CODEX_COMMAND);
+    }
+
+    #[test]
+    fn generated_workflow_uses_the_deterministic_codex_command() {
+        let workflow = parse_workflow(DEFAULT_WORKFLOW).unwrap();
+        let config = resolve_config(&workflow, Path::new("/tmp/WORKFLOW.md")).unwrap();
+
+        assert_eq!(config.codex_command, DEFAULT_CODEX_COMMAND);
         assert_eq!(
-            config.codex_command,
-            "codex exec --json --sandbox workspace-write -c approval_policy=\"never\""
+            split_command_line(&config.codex_command).unwrap(),
+            vec![
+                "codex",
+                "exec",
+                "--json",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--disable",
+                "apps",
+                "--disable",
+                "plugins",
+                "--sandbox",
+                "workspace-write",
+                "-c",
+                "approval_policy=never"
+            ]
         );
     }
 
