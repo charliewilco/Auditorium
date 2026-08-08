@@ -235,6 +235,10 @@ struct RootView: View {
 	}
 
 	private var runPreflightSummary: RunPreflightSummary? {
+		makeRunPreflightSummary(ticketID: nil)
+	}
+
+	private func makeRunPreflightSummary(ticketID: UUID?) -> RunPreflightSummary? {
 		guard let project = selectedProject else { return nil }
 		return RunPreflightSummary.make(
 			project: project,
@@ -243,7 +247,8 @@ struct RootView: View {
 			runtimeHealth: runtimeHealth,
 			providerAccounts: providerAccounts,
 			preferences: runSecurityPreferences,
-			workspaceRoot: services.workspace.workspacesDirectory(projectID: project.id).path()
+			workspaceRoot: services.workspace.workspacesDirectory(projectID: project.id).path(),
+			ticketID: ticketID
 		) { account in
 			try services.keychain.readSecret(account: account)
 		}
@@ -329,8 +334,8 @@ struct RootView: View {
 	private func startRun(ticketID: UUID?) {
 		guard let project = selectedProject else { return }
 		let preferences = runSecurityPreferences
-		if let runPreflightSummary, runPreflightSummary.canStartRun == false {
-			NSAlert(error: ProviderError.unavailable(runPreflightSummary.blockingChecks.map(\.detail).joined(separator: "\n"))).runModal()
+		if let preflightSummary = makeRunPreflightSummary(ticketID: ticketID), preflightSummary.canStartRun == false {
+			NSAlert(error: ProviderError.unavailable(preflightSummary.blockingChecks.map(\.detail).joined(separator: "\n"))).runModal()
 			return
 		}
 		let policy = RunSecurityPolicy()
