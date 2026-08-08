@@ -72,6 +72,17 @@ The following passed on the integrated candidate:
 
 Hosted CI for the focused code PRs runs SwiftPM and Rust checks only. It does not build or test the Xcode app, export screenshots, package the app, sign it, or notarize it.
 
+### Post-Review Integrated Candidate
+
+After addressing code-review findings in the queue, onboarding, GitHub authentication, release, and default Codex command PRs, the combined candidate was revalidated at:
+
+- Commit: `4e1b6879daa30f89ca393379394faa5d65e6129a`.
+- Tree: `edb70041b51ff9f12782b0943a1e8e910baac040`.
+
+Strict recursive Swift formatting passed, `swift test` passed 60 tests, `cargo test --all-targets` passed 52 library and 17 CLI tests, and the full Debug Xcode app test scheme passed. The unsigned release package also rebuilt successfully; its bundled `symphony` executable was universal `x86_64 arm64`, the ad-hoc app signature passed strict verification, the bundled CLI help command succeeded, and the zip SHA-256 was `c41867f2500a0a3f92f1b6eccc0285713f41fa8b7f3f0491acc54dbc91cdef12`.
+
+The live GitHub acceptance above was not rerun at this exact post-review tree. Its external issue-to-pull-request result remains pinned separately, while the post-review functional changes are covered by the combined local suites and each PR's refreshed hosted CI.
+
 ## Visual Review
 
 `script/export_screenshots.sh` generated all 16 deterministic desktop and compact PNGs. Every output was inspected. The reviewed dashboard, tickets, queue, run detail, reports, settings, and empty/error surfaces had no overlapping controls or clipped primary actions; long branch, pull request, and report values truncated within their containers.
