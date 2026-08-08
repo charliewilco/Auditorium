@@ -6,19 +6,39 @@ OUTPUT_DIR="${OUTPUT_DIR:-"$ROOT/dist"}"
 DERIVED_DATA="${DERIVED_DATA:-"$ROOT/.build/xcode-release"}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-"$OUTPUT_DIR/Auditorium.xcarchive"}"
 EXPORT_OPTIONS_PLIST="${EXPORT_OPTIONS_PLIST:-"$ROOT/config/ExportOptions-developer-id.plist"}"
+SYMPHONY_BINARY="$ROOT/target/auditorium-universal-release/symphony"
 MODE="development"
 NOTARIZE=0
 
 build_symphony() {
-	cargo build --release -p symphony
+	rustup target add aarch64-apple-darwin x86_64-apple-darwin
+	cargo build --release -p symphony --target aarch64-apple-darwin
+	cargo build --release -p symphony --target x86_64-apple-darwin
+	mkdir -p "$(dirname "$SYMPHONY_BINARY")"
+	lipo -create \
+		"$ROOT/target/aarch64-apple-darwin/release/symphony" \
+		"$ROOT/target/x86_64-apple-darwin/release/symphony" \
+		-output "$SYMPHONY_BINARY"
+	lipo "$SYMPHONY_BINARY" -verify_arch arm64 x86_64
 }
 
 copy_symphony_into_app() {
 	local app="$1"
 	local bin_dir="$app/Contents/Resources/bin"
 	mkdir -p "$bin_dir"
-	ditto "$ROOT/target/release/symphony" "$bin_dir/symphony"
+	ditto "$SYMPHONY_BINARY" "$bin_dir/symphony"
 	chmod 755 "$bin_dir/symphony"
+}
+
+verify_packaged_architectures() {
+	local app="$1"
+	local app_binary="$app/Contents/MacOS/Auditorium"
+	local symphony_binary="$app/Contents/Resources/bin/symphony"
+	local architecture
+
+	for architecture in $(lipo -archs "$app_binary"); do
+		lipo "$symphony_binary" -verify_arch "$architecture"
+	done
 }
 
 usage() {
@@ -109,6 +129,8 @@ else
 		codesign --force --deep --sign - "$APP"
 	fi
 fi
+
+verify_packaged_architectures "$APP"
 
 if [[ "$MODE" != "unsigned" ]]; then
 	codesign --verify --deep --strict --verbose=2 "$APP"
