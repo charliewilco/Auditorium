@@ -487,8 +487,8 @@ Acceptance gate:
 	- Verified 2026-06-09 locally after packaging hardening: `./script/package_release.sh --unsigned` builds a Release app zip, bundles `symphony` at `Auditorium.app/Contents/Resources/bin/symphony`, ad-hoc signs the unsigned artifact, passes `codesign --verify --deep --strict`, and launches `dist/Auditorium.app`.
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27220850927> from commit `cdbaa51`: the uploaded `Auditorium.zip` contains both `Auditorium.app/Contents/MacOS/Auditorium` and `Auditorium.app/Contents/Resources/bin/symphony`.
 	- Verified 2026-06-09 with GitHub Actions run <https://github.com/charliewilco/Auditorium/actions/runs/27224590161> from commit `9923b0e`: the uploaded `Auditorium.zip` contains both `Auditorium.app/Contents/MacOS/Auditorium` and `Auditorium.app/Contents/Resources/bin/symphony`.
-	- Still not checked: local codesigning identities include Apple Development but no Developer ID Application identity, so a signed clean-Mac launch remains unverified.
-	- Final verification still requires Apple Developer ID/notary credentials and launch of the signed, notarized `Auditorium.app` on a separate clean Mac.
+	- Verified 2026-08-08: a local Developer ID Application identity successfully archived and exported the app; the app and nested universal `symphony` executable passed strict signature verification with trusted timestamps for team `824752FF3X`.
+	- Final verification still requires notarization credentials, stapling, Gatekeeper acceptance, and launch of the downloaded signed and notarized `Auditorium.app` on a separate clean Mac.
 
 Release readiness checklist:
 
