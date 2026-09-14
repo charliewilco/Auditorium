@@ -49,9 +49,16 @@ struct RunPreflightSummary: Equatable {
 		providerAccounts: [ProviderAccountRecord],
 		preferences: RunSecurityPreferences,
 		workspaceRoot: String,
+		ticketID: UUID? = nil,
 		secretReader: (String) throws -> String?
 	) -> RunPreflightSummary {
-		let enabledQueueItems = queueItems.filter(\.isEnabled).sorted { $0.position < $1.position }
+		let runnableQueueItems: [QueueItemRecord]
+		if let ticketID {
+			runnableQueueItems = queueItems.filter { $0.ticketID == ticketID }.sorted { $0.position < $1.position }
+		}
+		else {
+			runnableQueueItems = queueItems.filter(\.isEnabled).sorted { $0.position < $1.position }
+		}
 		var checks: [Check] = []
 		let parsedPolicy: ParsedWorkflowPolicy?
 		do {
@@ -80,10 +87,11 @@ struct RunPreflightSummary: Equatable {
 		checks.append(
 			Check(
 				id: "queue",
-				title: "Enabled Tickets",
-				detail: enabledQueueItems.isEmpty
-					? "No enabled queue items are ready to run." : "\(enabledQueueItems.count) tickets will run.",
-				state: enabledQueueItems.isEmpty ? .blocked : .passed
+				title: ticketID == nil ? "Enabled Tickets" : "Selected Ticket",
+				detail: runnableQueueItems.isEmpty
+					? (ticketID == nil ? "No enabled queue items are ready to run." : "The selected ticket is not queued.")
+					: (ticketID == nil ? "\(runnableQueueItems.count) tickets will run." : "The selected ticket will run."),
+				state: runnableQueueItems.isEmpty ? .blocked : .passed
 			)
 		)
 
@@ -101,7 +109,7 @@ struct RunPreflightSummary: Equatable {
 		return RunPreflightSummary(
 			repositoryName: project.repositoryName,
 			issueCount: tickets.count,
-			enabledIssueCount: enabledQueueItems.count,
+			enabledIssueCount: runnableQueueItems.count,
 			branchPrefix: parsedPolicy?.branchPrefix ?? "Unavailable",
 			validationCommand: parsedPolicy?.validationCommand
 				?? (parsedPolicy?.runTests == true

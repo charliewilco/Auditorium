@@ -249,6 +249,10 @@ struct RootView: View {
 	}
 
 	private var runPreflightSummary: RunPreflightSummary? {
+		makeRunPreflightSummary(ticketID: nil)
+	}
+
+	private func makeRunPreflightSummary(ticketID: UUID?) -> RunPreflightSummary? {
 		guard let project = selectedProject else { return nil }
 		return RunPreflightSummary.make(
 			project: project,
@@ -257,7 +261,8 @@ struct RootView: View {
 			runtimeHealth: runtimeHealth,
 			providerAccounts: providerAccounts,
 			preferences: runSecurityPreferences,
-			workspaceRoot: services.workspace.workspacesDirectory(projectID: project.id).path()
+			workspaceRoot: services.workspace.workspacesDirectory(projectID: project.id).path(),
+			ticketID: ticketID
 		) { account in
 			try services.keychain.readSecret(account: account)
 		}
@@ -389,9 +394,8 @@ struct RootView: View {
 	private func runSelectedTicket() {
 		guard let ticket = selectedTicket, let projectID = appState.selectedProjectID else { return }
 		do {
-			try QueueService().clearQueue(projectID: projectID, context: modelContext)
 			try QueueService().addTickets([ticket.id], projectID: projectID, context: modelContext)
-			runQueue()
+			startRun(ticketID: ticket.id)
 		}
 		catch {
 			NSAlert(error: error).runModal()
@@ -403,10 +407,14 @@ struct RootView: View {
 	}
 
 	private func startQueue(resumeCommand: DispatcherResumeCommand? = nil) {
+		startRun(ticketID: nil, resumeCommand: resumeCommand)
+	}
+
+	private func startRun(ticketID: UUID?, resumeCommand: DispatcherResumeCommand? = nil) {
 		guard let project = selectedProject else { return }
 		let preferences = runSecurityPreferences
-		if let runPreflightSummary, runPreflightSummary.canStartRun == false {
-			NSAlert(error: ProviderError.unavailable(runPreflightSummary.blockingChecks.map(\.detail).joined(separator: "\n"))).runModal()
+		if let preflightSummary = makeRunPreflightSummary(ticketID: ticketID), preflightSummary.canStartRun == false {
+			NSAlert(error: ProviderError.unavailable(preflightSummary.blockingChecks.map(\.detail).joined(separator: "\n"))).runModal()
 			return
 		}
 		let policy = RunSecurityPolicy()
@@ -420,7 +428,7 @@ struct RootView: View {
 		if preferences.requireRunConfirmation,
 			confirm(
 				title: "Start Run?",
-				message: "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items."
+				message: runConfirmationMessage(ticketID: ticketID)
 			) == false
 		{
 			return
@@ -432,7 +440,10 @@ struct RootView: View {
 		}
 		appState.selectedDestination = .runs
 		do {
-			if let resumeCommand {
+			if let ticketID {
+				ensureRunCoordinator().startTicket(project: project, ticketID: ticketID, context: modelContext)
+			}
+			else if let resumeCommand {
 				try ensureRunCoordinator().startApprovedRecoveredWork(
 					resumeCommand,
 					project: project,
@@ -447,6 +458,13 @@ struct RootView: View {
 		catch {
 			NSAlert(error: error).runModal()
 		}
+	}
+
+	private func runConfirmationMessage(ticketID: UUID?) -> String {
+		if let ticketID, let ticket = projectTickets.first(where: { $0.id == ticketID }) {
+			return "Auditorium will run \(ticket.externalID) without changing the rest of the queue."
+		}
+		return "Auditorium will start \(projectQueueItems.filter(\.isEnabled).count) enabled queue items."
 	}
 
 	private func cancelActiveRun() {

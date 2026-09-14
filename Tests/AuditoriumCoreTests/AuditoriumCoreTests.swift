@@ -709,6 +709,72 @@ struct AuditoriumCoreTests {
 		#expect(plan.skippedItems.first?.detail == "Retry count 1 is not eligible under max retries 0.")
 	}
 
+	@Test func orchestratorSingleTicketRunPreservesUnrelatedQueueItems() async throws {
+		let container = try AppSchema.makeModelContainer(inMemory: true)
+		let context = container.mainContext
+		let root = FileManager.default.temporaryDirectory.appending(path: "AuditoriumCoreTests-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: root) }
+		let project = Project(
+			name: "Single Ticket Run",
+			repositoryProviderKind: .github,
+			repositoryName: "charliewilco/Auditorium",
+			repositoryURL: "https://github.com/charliewilco/Auditorium",
+			defaultBranch: "main",
+			issueProviderKind: .githubIssues,
+			runtimeProviderKind: .mockRuntime,
+			agentProviderKind: .mockAgent,
+			workflowPolicyMarkdown: WorkflowPolicy.defaultMarkdown
+		)
+		let selected = ticketRecord(projectID: project.id, externalID: "31", status: .ready)
+		let unrelatedEnabled = ticketRecord(projectID: project.id, externalID: "32", status: .ready)
+		let unrelatedDisabled = ticketRecord(projectID: project.id, externalID: "33", status: .ready)
+		let selectedItem = QueueItemRecord(
+			ticketID: selected.id,
+			projectID: project.id,
+			position: 0,
+			priority: .high,
+			isEnabled: false
+		)
+		let unrelatedEnabledItem = QueueItemRecord(
+			ticketID: unrelatedEnabled.id,
+			projectID: project.id,
+			position: 1,
+			priority: .medium
+		)
+		let unrelatedDisabledItem = QueueItemRecord(
+			ticketID: unrelatedDisabled.id,
+			projectID: project.id,
+			position: 2,
+			priority: .low,
+			isEnabled: false
+		)
+		context.insert(project)
+		[selected, unrelatedEnabled, unrelatedDisabled].forEach(context.insert)
+		[selectedItem, unrelatedEnabledItem, unrelatedDisabledItem].forEach(context.insert)
+		try context.save()
+		let queueBeforeRun = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == project.id }
+			.sorted { $0.position < $1.position }
+		let orchestrator = Orchestrator(
+			workspaceService: ApplicationWorkspaceService(rootDirectory: root),
+			runtimeDetection: RuntimeDetectionService(staticChecks: []),
+			reportGenerator: ReportGenerator(),
+			mockAgentProvider: InstantAgentProvider()
+		)
+
+		try await orchestrator.execute(projectID: project.id, ticketID: selected.id, concurrency: 1, context: context)
+
+		let queueAfterRun = try context.fetch(FetchDescriptor<QueueItemRecord>())
+			.filter { $0.projectID == project.id }
+			.sorted { $0.position < $1.position }
+		let run = try #require(context.fetch(FetchDescriptor<RunRecord>()).first)
+		#expect(queueAfterRun.map(\.id) == queueBeforeRun.map(\.id))
+		#expect(queueAfterRun.map(\.ticketID) == queueBeforeRun.map(\.ticketID))
+		#expect(queueAfterRun.map(\.position) == queueBeforeRun.map(\.position))
+		#expect(queueAfterRun.map(\.isEnabled) == queueBeforeRun.map(\.isEnabled))
+		#expect(run.queueSnapshot.map(\.ticketID) == [selected.id])
+	}
+
 	@Test func orchestratorPersistsDispatcherSkipEventsInRunJournal() async throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -3281,6 +3347,44 @@ struct AuditoriumCoreTests {
 		#expect(summary.validationCommand == "swift test")
 		#expect(summary.opensPullRequests)
 		#expect(summary.accountTitle == "GitHub Charlie")
+
+		let disabledQueueItem = QueueItemRecord(
+			ticketID: ticket.id,
+			projectID: project.id,
+			position: 0,
+			priority: .medium,
+			isEnabled: false
+		)
+		let selectedTicketSummary = RunPreflightSummary.make(
+			project: project,
+			queueItems: [disabledQueueItem],
+			tickets: [ticket],
+			runtimeHealth: [
+				RuntimeHealthCheck(id: "git", name: "Git", state: .available, detail: "/usr/bin/git", version: nil),
+				RuntimeHealthCheck(
+					id: "codex",
+					name: "Codex CLI",
+					state: .available,
+					detail: "/opt/homebrew/bin/codex",
+					version: nil
+				),
+				RuntimeHealthCheck(id: "gh", name: "GitHub CLI", state: .available, detail: "/opt/homebrew/bin/gh", version: nil),
+			],
+			providerAccounts: [account],
+			preferences: RunSecurityPreferences(
+				allowNetworkAccess: true,
+				allowFilesystemWrite: true,
+				requireRunConfirmation: true,
+				requirePullRequestConfirmation: true
+			),
+			workspaceRoot: "/tmp/workspaces",
+			ticketID: ticket.id,
+			secretReader: { _ in "gho_token" }
+		)
+
+		#expect(selectedTicketSummary.canStartRun)
+		#expect(selectedTicketSummary.enabledIssueCount == 1)
+		#expect(selectedTicketSummary.checks.first { $0.id == "queue" }?.title == "Selected Ticket")
 
 		let noPullRequestProject = Project(
 			name: "No PR",

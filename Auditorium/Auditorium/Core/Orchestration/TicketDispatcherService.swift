@@ -48,11 +48,14 @@ struct TicketDispatcherService {
 	func makeDispatchPlan(
 		project: Project,
 		requestedConcurrency: Int,
+		ticketID: UUID? = nil,
 		context: ModelContext,
 		now: Date = .now
 	) throws -> TicketDispatchPlan {
 		let queueItems = try context.fetch(FetchDescriptor<QueueItemRecord>())
-			.filter { $0.projectID == project.id }
+			.filter { item in
+				item.projectID == project.id && (ticketID == nil || item.ticketID == ticketID)
+			}
 			.sorted(by: dispatchOrder)
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 			.filter { $0.sourceProjectID == project.id }
@@ -74,7 +77,7 @@ struct TicketDispatcherService {
 		var skippedItems: [TicketDispatchSkip] = []
 
 		for item in queueItems {
-			guard item.isEnabled else {
+			guard item.isEnabled || item.ticketID == ticketID else {
 				skippedItems.append(skip(item, ticketID: item.ticketID, reason: .disabled, detail: "Queue item is disabled."))
 				continue
 			}
@@ -150,7 +153,8 @@ struct TicketDispatcherService {
 			orchestrationPlan: OrchestrationRunPlan.make(
 				queueItems: dispatchableItems,
 				requestedConcurrency: requestedConcurrency,
-				workflowPolicyMarkdown: project.workflowPolicyMarkdown
+				workflowPolicyMarkdown: project.workflowPolicyMarkdown,
+				includeDisabledItems: ticketID != nil
 			),
 			skippedItems: skippedItems
 		)

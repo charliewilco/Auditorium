@@ -54,12 +54,17 @@ struct OrchestrationRunPlan: Equatable, Sendable {
 		return "group:\(group)"
 	}
 
-	static func make(queueItems: [QueueItemRecord], requestedConcurrency: Int, workflowPolicyMarkdown: String) -> OrchestrationRunPlan {
+	static func make(
+		queueItems: [QueueItemRecord],
+		requestedConcurrency: Int,
+		workflowPolicyMarkdown: String,
+		includeDisabledItems: Bool = false
+	) -> OrchestrationRunPlan {
 		let parsedPolicy = try? WorkflowPolicyParser().parse(workflowPolicyMarkdown)
 		let concurrency = max(1, requestedConcurrency > 0 ? requestedConcurrency : parsedPolicy?.concurrency ?? 1)
 		let snapshot =
 			queueItems
-			.filter(\.isEnabled)
+			.filter { includeDisabledItems || $0.isEnabled }
 			.sorted { $0.position < $1.position }
 			.map {
 				QueueRunSnapshot(

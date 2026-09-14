@@ -67,6 +67,10 @@ final class AppRunCoordinator {
 		)
 	}
 
+	func startTicket(project: Project, ticketID: UUID, context: ModelContext) {
+		supervisor.startTicket(project: project, ticketID: ticketID, context: context)
+	}
+
 	func cancelActiveRun() {
 		supervisor.stopActiveRun()
 	}
