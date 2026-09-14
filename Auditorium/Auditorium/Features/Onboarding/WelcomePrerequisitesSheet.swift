@@ -12,7 +12,7 @@ struct WelcomePrerequisitesSheet: View {
 				VStack(alignment: .leading, spacing: 4) {
 					Text("Onboarding Check")
 						.font(.title2.weight(.semibold))
-					Text("Auditorium needs local container support, Codex, and GitHub access before real runs.")
+					Text("Auditorium needs Git, Codex, and GitHub access for Local Workspace runs.")
 						.foregroundStyle(.secondary)
 						.fixedSize(horizontal: false, vertical: true)
 				}

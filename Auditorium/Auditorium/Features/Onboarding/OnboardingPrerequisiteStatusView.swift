@@ -53,11 +53,11 @@ struct OnboardingPrerequisiteStatusView: View {
 #Preview {
 	OnboardingPrerequisiteStatusView(checks: [
 		RuntimeHealthCheck(
-			id: "container",
-			name: "Container CLI",
-			state: .unavailable,
-			detail: "Container CLI is installed, but the container system is not running.",
-			version: "container CLI version 0.12.3"
+			id: "git",
+			name: "Git",
+			state: .available,
+			detail: "/usr/bin/git",
+			version: nil
 		),
 		RuntimeHealthCheck(
 			id: "codex-auth",
