@@ -403,6 +403,8 @@ cargo run -p symphony -- run \
 	--json
 ```
 
+When `run_tests` is true, `symphony` reads `validation.command` from `WORKFLOW.md` and runs it during issue execution. This repository's default command is `cargo test --all-targets`, and the validation output is captured in the generated markdown report.
+
 For real runs, make sure:
 
 - `gh auth status` succeeds.

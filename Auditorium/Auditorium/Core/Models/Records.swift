@@ -335,6 +335,8 @@ final class TicketRunRecord {
 	var runtimeID: String
 	var branchName: String
 	var statusRaw: String
+	var lifecyclePhaseRaw: String
+	var failedPhaseRaw: String?
 	var startedAt: Date?
 	var endedAt: Date?
 	var retryCount: Int
@@ -352,6 +354,8 @@ final class TicketRunRecord {
 		runtimeID: String = "",
 		branchName: String = "",
 		status: TicketRunStatus = .pending,
+		lifecyclePhase: TicketRunLifecyclePhase = .queued,
+		failedPhase: TicketRunLifecyclePhase? = nil,
 		startedAt: Date? = nil,
 		endedAt: Date? = nil,
 		retryCount: Int = 0,
@@ -368,6 +372,8 @@ final class TicketRunRecord {
 		self.runtimeID = runtimeID
 		self.branchName = branchName
 		self.statusRaw = status.rawValue
+		self.lifecyclePhaseRaw = lifecyclePhase.rawValue
+		self.failedPhaseRaw = failedPhase?.rawValue
 		self.startedAt = startedAt
 		self.endedAt = endedAt
 		self.retryCount = retryCount
@@ -381,6 +387,16 @@ final class TicketRunRecord {
 	var status: TicketRunStatus {
 		get { TicketRunStatus(rawValue: statusRaw) ?? .pending }
 		set { statusRaw = newValue.rawValue }
+	}
+
+	var lifecyclePhase: TicketRunLifecyclePhase {
+		get { TicketRunLifecyclePhase(rawValue: lifecyclePhaseRaw) ?? .queued }
+		set { lifecyclePhaseRaw = newValue.rawValue }
+	}
+
+	var failedPhase: TicketRunLifecyclePhase? {
+		get { failedPhaseRaw.flatMap(TicketRunLifecyclePhase.init(rawValue:)) }
+		set { failedPhaseRaw = newValue?.rawValue }
 	}
 }
 
@@ -585,6 +601,60 @@ final class ReportRecord {
 }
 
 @Model
+final class TicketReportBackRecord {
+	var id: UUID
+	var ticketRunID: UUID
+	var providerRaw: String
+	var externalTicketID: String
+	var statusRaw: String
+	var attemptCount: Int
+	var attemptedAt: Date
+	var retryAfter: Date?
+	var inFlightStartedAt: Date?
+	var commentURL: String?
+	var failureReason: String?
+	var updatedAt: Date
+
+	init(
+		id: UUID = UUID(),
+		ticketRunID: UUID,
+		provider: IssueProviderKind,
+		externalTicketID: String,
+		status: TicketReportBackStatus = .pending,
+		attemptCount: Int = 0,
+		attemptedAt: Date = .now,
+		retryAfter: Date? = nil,
+		inFlightStartedAt: Date? = nil,
+		commentURL: String? = nil,
+		failureReason: String? = nil,
+		updatedAt: Date = .now
+	) {
+		self.id = id
+		self.ticketRunID = ticketRunID
+		self.providerRaw = provider.rawValue
+		self.externalTicketID = externalTicketID
+		self.statusRaw = status.rawValue
+		self.attemptCount = attemptCount
+		self.attemptedAt = attemptedAt
+		self.retryAfter = retryAfter
+		self.inFlightStartedAt = inFlightStartedAt
+		self.commentURL = commentURL
+		self.failureReason = failureReason
+		self.updatedAt = updatedAt
+	}
+
+	var provider: IssueProviderKind {
+		get { IssueProviderKind(rawValue: providerRaw) ?? .githubIssues }
+		set { providerRaw = newValue.rawValue }
+	}
+
+	var status: TicketReportBackStatus {
+		get { TicketReportBackStatus(rawValue: statusRaw) ?? .pending }
+		set { statusRaw = newValue.rawValue }
+	}
+}
+
+@Model
 final class ProviderAccountRecord {
 	var id: UUID
 	var providerKindRaw: String
@@ -675,6 +745,224 @@ final class ProjectEnvironmentSecretRecord {
 		self.isEnabled = isEnabled
 		self.createdAt = createdAt
 		self.updatedAt = updatedAt
+	}
+}
+
+@Model
+final class ContainerRunRecord {
+	var id: UUID
+	var projectID: UUID
+	var runID: UUID
+	var ticketRunID: UUID
+	var runtimeID: String
+	var containerName: String
+	var statusRaw: String
+	var imageName: String
+	var environmentVariableNamesJSON: String
+	var workspacePath: String
+	var logPath: String
+	var startedAt: Date
+	var lastSeenAt: Date
+	var endedAt: Date?
+	var exitCode: Int?
+	var cleanupEligibilityRaw: String
+	var reconciliationStateRaw: String
+	var failureReason: String?
+
+	init(
+		id: UUID = UUID(),
+		projectID: UUID,
+		runID: UUID,
+		ticketRunID: UUID,
+		runtimeID: String,
+		containerName: String,
+		status: ContainerRunStatus = .starting,
+		imageName: String = "",
+		environmentVariableNames: [String] = [],
+		workspacePath: String = "",
+		logPath: String = "",
+		startedAt: Date = .now,
+		lastSeenAt: Date = .now,
+		endedAt: Date? = nil,
+		exitCode: Int? = nil,
+		cleanupEligibility: ContainerCleanupEligibility = .notEligible,
+		reconciliationState: ContainerReconciliationState = .unreconciled,
+		failureReason: String? = nil
+	) {
+		self.id = id
+		self.projectID = projectID
+		self.runID = runID
+		self.ticketRunID = ticketRunID
+		self.runtimeID = runtimeID
+		self.containerName = containerName
+		self.statusRaw = status.rawValue
+		self.imageName = imageName
+		self.environmentVariableNamesJSON = Self.encodeList(environmentVariableNames)
+		self.workspacePath = workspacePath
+		self.logPath = logPath
+		self.startedAt = startedAt
+		self.lastSeenAt = lastSeenAt
+		self.endedAt = endedAt
+		self.exitCode = exitCode
+		self.cleanupEligibilityRaw = cleanupEligibility.rawValue
+		self.reconciliationStateRaw = reconciliationState.rawValue
+		self.failureReason = failureReason
+	}
+
+	var status: ContainerRunStatus {
+		get { ContainerRunStatus(rawValue: statusRaw) ?? .starting }
+		set { statusRaw = newValue.rawValue }
+	}
+
+	var environmentVariableNames: [String] {
+		get { Self.decodeList(environmentVariableNamesJSON) }
+		set { environmentVariableNamesJSON = Self.encodeList(newValue) }
+	}
+
+	var cleanupEligibility: ContainerCleanupEligibility {
+		get { ContainerCleanupEligibility(rawValue: cleanupEligibilityRaw) ?? .notEligible }
+		set { cleanupEligibilityRaw = newValue.rawValue }
+	}
+
+	var reconciliationState: ContainerReconciliationState {
+		get { ContainerReconciliationState(rawValue: reconciliationStateRaw) ?? .unreconciled }
+		set { reconciliationStateRaw = newValue.rawValue }
+	}
+
+	private static func encodeList(_ values: [String]) -> String {
+		(try? String(data: JSONEncoder().encode(values), encoding: .utf8)) ?? "[]"
+	}
+
+	private static func decodeList(_ json: String) -> [String] {
+		(try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+	}
+}
+
+@Model
+final class DispatcherRunRecord {
+	var id: UUID
+	var projectID: UUID
+	var runID: UUID
+	var statusRaw: String
+	var requestedConcurrency: Int
+	var effectiveConcurrency: Int
+	var selectedTicketRunIDsJSON: String
+	var pendingTicketRunIDsJSON: String
+	var runningTicketRunIDsJSON: String
+	var terminalTicketRunIDsJSON: String
+	var skippedQueueItemIDsJSON: String
+	var skipReasonCountsJSON: String
+	var selectedCount: Int
+	var skippedCount: Int
+	var pendingCount: Int
+	var runningCount: Int
+	var terminalCount: Int
+	var startedAt: Date
+	var updatedAt: Date
+	var completedAt: Date?
+	var resumeAction: String
+	var failureReason: String?
+
+	init(
+		id: UUID = UUID(),
+		projectID: UUID,
+		runID: UUID,
+		status: DispatcherRunStatus = .planned,
+		requestedConcurrency: Int,
+		effectiveConcurrency: Int,
+		selectedTicketRunIDs: [UUID] = [],
+		pendingTicketRunIDs: [UUID] = [],
+		runningTicketRunIDs: [UUID] = [],
+		terminalTicketRunIDs: [UUID] = [],
+		skippedQueueItemIDs: [UUID] = [],
+		skipReasonCounts: [String: Int] = [:],
+		selectedCount: Int = 0,
+		skippedCount: Int = 0,
+		pendingCount: Int = 0,
+		runningCount: Int = 0,
+		terminalCount: Int = 0,
+		startedAt: Date = .now,
+		updatedAt: Date = .now,
+		completedAt: Date? = nil,
+		resumeAction: String = "Run dispatcher.",
+		failureReason: String? = nil
+	) {
+		self.id = id
+		self.projectID = projectID
+		self.runID = runID
+		self.statusRaw = status.rawValue
+		self.requestedConcurrency = requestedConcurrency
+		self.effectiveConcurrency = effectiveConcurrency
+		self.selectedTicketRunIDsJSON = Self.encodeUUIDs(selectedTicketRunIDs)
+		self.pendingTicketRunIDsJSON = Self.encodeUUIDs(pendingTicketRunIDs)
+		self.runningTicketRunIDsJSON = Self.encodeUUIDs(runningTicketRunIDs)
+		self.terminalTicketRunIDsJSON = Self.encodeUUIDs(terminalTicketRunIDs)
+		self.skippedQueueItemIDsJSON = Self.encodeUUIDs(skippedQueueItemIDs)
+		self.skipReasonCountsJSON = Self.encodeDictionary(skipReasonCounts)
+		self.selectedCount = selectedCount
+		self.skippedCount = skippedCount
+		self.pendingCount = pendingCount
+		self.runningCount = runningCount
+		self.terminalCount = terminalCount
+		self.startedAt = startedAt
+		self.updatedAt = updatedAt
+		self.completedAt = completedAt
+		self.resumeAction = resumeAction
+		self.failureReason = failureReason
+	}
+
+	var status: DispatcherRunStatus {
+		get { DispatcherRunStatus(rawValue: statusRaw) ?? .planned }
+		set { statusRaw = newValue.rawValue }
+	}
+
+	var selectedTicketRunIDs: [UUID] {
+		get { Self.decodeUUIDs(selectedTicketRunIDsJSON) }
+		set { selectedTicketRunIDsJSON = Self.encodeUUIDs(newValue) }
+	}
+
+	var pendingTicketRunIDs: [UUID] {
+		get { Self.decodeUUIDs(pendingTicketRunIDsJSON) }
+		set { pendingTicketRunIDsJSON = Self.encodeUUIDs(newValue) }
+	}
+
+	var runningTicketRunIDs: [UUID] {
+		get { Self.decodeUUIDs(runningTicketRunIDsJSON) }
+		set { runningTicketRunIDsJSON = Self.encodeUUIDs(newValue) }
+	}
+
+	var terminalTicketRunIDs: [UUID] {
+		get { Self.decodeUUIDs(terminalTicketRunIDsJSON) }
+		set { terminalTicketRunIDsJSON = Self.encodeUUIDs(newValue) }
+	}
+
+	var skippedQueueItemIDs: [UUID] {
+		get { Self.decodeUUIDs(skippedQueueItemIDsJSON) }
+		set { skippedQueueItemIDsJSON = Self.encodeUUIDs(newValue) }
+	}
+
+	var skipReasonCounts: [String: Int] {
+		get { Self.decodeDictionary(skipReasonCountsJSON) }
+		set { skipReasonCountsJSON = Self.encodeDictionary(newValue) }
+	}
+
+	private static func encodeUUIDs(_ values: [UUID]) -> String {
+		(try? String(data: JSONEncoder().encode(values.map(\.uuidString)), encoding: .utf8)) ?? "[]"
+	}
+
+	private static func decodeUUIDs(_ json: String) -> [UUID] {
+		guard let strings = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) else {
+			return []
+		}
+		return strings.compactMap(UUID.init(uuidString:))
+	}
+
+	private static func encodeDictionary(_ value: [String: Int]) -> String {
+		(try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "{}"
+	}
+
+	private static func decodeDictionary(_ json: String) -> [String: Int] {
+		(try? JSONDecoder().decode([String: Int].self, from: Data(json.utf8))) ?? [:]
 	}
 }
 

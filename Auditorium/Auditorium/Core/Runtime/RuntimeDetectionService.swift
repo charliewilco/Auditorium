@@ -27,11 +27,13 @@ struct RuntimeDetectionService {
 		}
 
 		let gitPath = await findExecutable(named: "git")
+		let containerPath = await findExecutable(named: "container")
 		let codexPath = await findExecutable(named: "codex")
 		let ghPath = await findExecutable(named: "gh")
 
 		var checks: [RuntimeHealthCheck] = []
 		checks.append(check(for: "git", displayName: "Git", path: gitPath))
+		checks.append(await containerReadiness(path: containerPath))
 		checks.append(check(for: "codex", displayName: "Codex CLI", path: codexPath))
 		checks.append(check(for: "gh", displayName: "GitHub CLI", path: ghPath))
 		return checks
@@ -347,7 +349,7 @@ struct RuntimeDetectionService {
 
 	private static func implementationState(for kind: RuntimeProviderKind) -> ProviderImplementationState {
 		switch kind {
-		case .localWorkspace, .mockRuntime:
+		case .localWorkspace, .containerWorkspace, .mockRuntime:
 			.implemented
 		}
 	}
@@ -356,6 +358,8 @@ struct RuntimeDetectionService {
 		switch kind {
 		case .localWorkspace:
 			"Implemented with local clone, branch, process, and file workspace execution."
+		case .containerWorkspace:
+			"Implemented with Apple container workspaces, ephemeral Codex auth mounts, and runtime environment injection."
 		case .mockRuntime:
 			"Implemented as an offline mock runtime."
 		}

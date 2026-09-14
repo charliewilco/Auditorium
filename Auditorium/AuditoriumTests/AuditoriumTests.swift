@@ -532,10 +532,15 @@ struct AuditoriumTests {
 			projectID: projectID,
 			context: context
 		)
-		let disabledItem = try #require(
-			try context.fetch(FetchDescriptor<QueueItemRecord>()).first { $0.ticketID == unrelatedTickets[1].id }
+		let queuedItems = try context.fetch(FetchDescriptor<QueueItemRecord>())
+		let selectedItem = try #require(queuedItems.first { $0.ticketID == selectedTicket.id })
+		let unrelatedDisabledItem = try #require(queuedItems.first { $0.ticketID == unrelatedTickets[1].id })
+		try QueueService().setQueueItems(
+			[selectedItem.id, unrelatedDisabledItem.id],
+			isEnabled: false,
+			projectID: projectID,
+			context: context
 		)
-		try QueueService().setQueueItem(disabledItem, isEnabled: false, context: context)
 		let queueBeforeRun = try context.fetch(FetchDescriptor<QueueItemRecord>())
 			.filter { $0.projectID == projectID }
 			.sorted { $0.position < $1.position }
@@ -2214,7 +2219,16 @@ struct AuditoriumTests {
 
 		let result = try RunReconciliationService().reconcileInterruptedRuns(context: context, now: now)
 
-		#expect(result == RunReconciliationResult(reconciledRuns: 1, reconciledTicketRuns: 2))
+		#expect(
+			result
+				== RunReconciliationResult(
+					reconciledRuns: 1,
+					reconciledTicketRuns: 2,
+					killedContainers: [],
+					orphanedContainers: [],
+					reconciledProjectIDs: [project.id]
+				)
+		)
 		#expect(run.status == .failed)
 		#expect(run.endedAt == now)
 		#expect(run.completedTickets == 1)
@@ -5379,5 +5393,5 @@ private struct StaticIssueTrackerProvider: IssueTrackerProvider {
 	}
 
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {}
-	func addComment(ticketID: String, body: String) async throws {}
+	func addComment(ticketID: String, body: String) async throws -> URL? { nil }
 }

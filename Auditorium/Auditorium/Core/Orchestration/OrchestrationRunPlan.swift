@@ -15,17 +15,56 @@ struct OrchestrationRunPlan: Equatable, Sendable {
 	let queueSnapshot: [QueueRunSnapshot]
 
 	var batches: [[QueueRunSnapshot]] {
-		stride(from: 0, to: queueSnapshot.count, by: concurrency).map { start in
-			Array(queueSnapshot[start..<min(start + concurrency, queueSnapshot.count)])
+		var remaining = queueSnapshot
+		var result: [[QueueRunSnapshot]] = []
+
+		while remaining.isEmpty == false {
+			var batch: [QueueRunSnapshot] = []
+			var usedGroups: Set<String> = []
+			var selectedIndexes: [Int] = []
+
+			for (index, item) in remaining.enumerated() {
+				guard batch.count < concurrency else { break }
+				let groupKey = concurrencyGroupKey(for: item)
+				guard usedGroups.contains(groupKey) == false else { continue }
+				batch.append(item)
+				usedGroups.insert(groupKey)
+				selectedIndexes.append(index)
+			}
+
+			if batch.isEmpty, let first = remaining.first {
+				batch = [first]
+				selectedIndexes = [0]
+			}
+
+			for index in selectedIndexes.reversed() {
+				remaining.remove(at: index)
+			}
+			result.append(batch)
 		}
+
+		return result
 	}
 
-	static func make(queueItems: [QueueItemRecord], requestedConcurrency: Int, workflowPolicyMarkdown: String) -> OrchestrationRunPlan {
+	private func concurrencyGroupKey(for item: QueueRunSnapshot) -> String {
+		let group = item.concurrencyGroup.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+		if group.isEmpty || group == "default" {
+			return "item:\(item.id.uuidString)"
+		}
+		return "group:\(group)"
+	}
+
+	static func make(
+		queueItems: [QueueItemRecord],
+		requestedConcurrency: Int,
+		workflowPolicyMarkdown: String,
+		includeDisabledItems: Bool = false
+	) -> OrchestrationRunPlan {
 		let parsedPolicy = try? WorkflowPolicyParser().parse(workflowPolicyMarkdown)
 		let concurrency = max(1, requestedConcurrency > 0 ? requestedConcurrency : parsedPolicy?.concurrency ?? 1)
 		let snapshot =
 			queueItems
-			.filter(\.isEnabled)
+			.filter { includeDisabledItems || $0.isEnabled }
 			.sorted { $0.position < $1.position }
 			.map {
 				QueueRunSnapshot(

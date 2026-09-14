@@ -5,7 +5,7 @@ import SwiftData
 final class AppRunCoordinator {
 	private let workspaceService: ApplicationWorkspaceService
 	private let reportGenerator: ReportGenerator
-	private let orchestrator: Orchestrator
+	private let supervisor: ProjectRunSupervisor
 
 	init(
 		workspaceService: ApplicationWorkspaceService,
@@ -16,11 +16,12 @@ final class AppRunCoordinator {
 		mockSourceProvider: (any SourceCodeProvider)? = nil,
 		mockAgentProvider: (any AgentProvider)? = nil,
 		localWorkspaceSourceProvider: (any SourceCodeProvider)? = nil,
-		codexAgentProvider: (any AgentProvider)? = nil
+		codexAgentProvider: (any AgentProvider)? = nil,
+		containerCodexAgentProvider: (any AgentProvider)? = nil
 	) {
 		self.workspaceService = workspaceService
 		self.reportGenerator = reportGenerator
-		orchestrator = Orchestrator(
+		supervisor = ProjectRunSupervisor(
 			workspaceService: workspaceService,
 			runtimeDetection: runtimeDetection,
 			reportGenerator: reportGenerator,
@@ -30,20 +31,77 @@ final class AppRunCoordinator {
 			mockAgentProvider: mockAgentProvider,
 			localWorkspaceSourceProvider: localWorkspaceSourceProvider,
 			codexAgentProvider: codexAgentProvider,
-			usesSymphonyForLocalWorkspaceCodex: true
+			containerCodexAgentProvider: containerCodexAgentProvider
 		)
 	}
 
 	func startQueue(project: Project, concurrency: Int, context: ModelContext) {
-		orchestrator.runQueue(projectID: project.id, concurrency: concurrency, context: context)
+		supervisor.startQueuedRun(project: project, concurrency: concurrency, context: context)
+	}
+
+	@discardableResult
+	func fillQueue(
+		project: Project,
+		context: ModelContext,
+		limit: Int = 12
+	) async throws -> QueueFillResult {
+		try await supervisor.fillQueue(
+			project: project,
+			context: context,
+			policy: QueueFillPolicy(limit: limit)
+		)
+	}
+
+	@discardableResult
+	func fillQueueAndStart(
+		project: Project,
+		concurrency: Int,
+		context: ModelContext,
+		limit: Int = 12
+	) async throws -> QueueFillResult {
+		try await supervisor.fillQueueAndStart(
+			project: project,
+			concurrency: concurrency,
+			context: context,
+			policy: QueueFillPolicy(limit: limit)
+		)
 	}
 
 	func startTicket(project: Project, ticketID: UUID, context: ModelContext) {
-		orchestrator.runTicket(projectID: project.id, ticketID: ticketID, context: context)
+		supervisor.startTicket(project: project, ticketID: ticketID, context: context)
 	}
 
 	func cancelActiveRun() {
-		orchestrator.cancel()
+		supervisor.stopActiveRun()
+	}
+
+	@discardableResult
+	func resumeAfterLaunch(context: ModelContext, now: Date = .now) async throws -> RunReconciliationResult {
+		try await supervisor.resumeAfterLaunch(context: context, now: now)
+	}
+
+	@discardableResult
+	func recoverInterruptedWork(projectID: UUID? = nil, context: ModelContext, now: Date = .now) throws -> DispatcherRecoveryResult {
+		try supervisor.recoverInterruptedWork(projectID: projectID, context: context, now: now)
+	}
+
+	@discardableResult
+	func prepareRecoveredWorkResume(projectID: UUID? = nil, context: ModelContext, now: Date = .now) throws -> DispatcherResumeCommand {
+		try supervisor.prepareRecoveredWorkResume(projectID: projectID, context: context, now: now)
+	}
+
+	func startApprovedRecoveredWork(
+		_ command: DispatcherResumeCommand,
+		project: Project,
+		concurrency: Int,
+		context: ModelContext
+	) throws {
+		try supervisor.startApprovedRecoveredWork(command, project: project, concurrency: concurrency, context: context)
+	}
+
+	@discardableResult
+	func retryHandoffs(projectID: UUID, context: ModelContext, now: Date = .now) async throws -> TicketReportBackSweepResult {
+		try await supervisor.retryHandoffs(projectID: projectID, context: context, now: now)
 	}
 
 	@discardableResult

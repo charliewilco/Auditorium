@@ -4,28 +4,68 @@ import SwiftData
 struct RunReconciliationResult: Equatable {
 	let reconciledRuns: Int
 	let reconciledTicketRuns: Int
+	let killedContainers: [String]
+	let orphanedContainers: [String]
+	let reconciledProjectIDs: [UUID]
 }
 
 @MainActor
 struct RunReconciliationService {
+	let killContainer: @MainActor (String) -> Void
+	let inspectContainer: @MainActor (String) -> Bool
+
+	init(
+		containerControl: ContainerRuntimeControl = ContainerRuntimeControl(),
+		killContainer: (@MainActor (String) -> Void)? = nil,
+		inspectContainer: (@MainActor (String) -> Bool)? = nil
+	) {
+		self.killContainer =
+			killContainer
+			?? { name in
+				_ = containerControl.killContainerBlocking(named: name)
+			}
+		self.inspectContainer =
+			inspectContainer
+			?? { name in
+				containerControl.inspectContainerBlocking(named: name)
+			}
+	}
+
 	func reconcileInterruptedRuns(context: ModelContext, now: Date = .now) throws -> RunReconciliationResult {
 		let runs = try context.fetch(FetchDescriptor<RunRecord>())
 		let ticketRuns = try context.fetch(FetchDescriptor<TicketRunRecord>())
 		let tickets = try context.fetch(FetchDescriptor<TicketRecord>())
 		var reconciledRuns = 0
 		var reconciledTicketRuns = 0
+		var killedContainers: [String] = []
+		var reconciledProjectIDs: [UUID] = []
 
 		for run in runs where Self.isActive(run.status) {
 			reconciledRuns += 1
+			if reconciledProjectIDs.contains(run.projectID) == false {
+				reconciledProjectIDs.append(run.projectID)
+			}
 			let relatedTicketRuns = ticketRuns.filter { $0.runID == run.id }
 			var reconciledTicketRunsForRun = 0
 			for ticketRun in relatedTicketRuns where Self.isActive(ticketRun.status) {
+				if let containerName = Self.containerName(for: ticketRun), killedContainers.contains(containerName) == false {
+					killContainer(containerName)
+					try? ContainerRunTrackingService().markKilled(containerName: containerName, context: context, now: now)
+					killedContainers.append(containerName)
+				}
 				reconciledTicketRuns += 1
 				reconciledTicketRunsForRun += 1
 				let previousStatus = ticketRun.status
 				ticketRun.status = .failed
 				ticketRun.endedAt = now
 				ticketRun.failureReason = "Run was interrupted during a previous app session."
+				TicketRunLifecycleService().fail(
+					ticketRun,
+					runID: run.id,
+					context: context,
+					now: now,
+					reason: ticketRun.failureReason ?? "Run was interrupted during a previous app session."
+				)
 				if let ticket = tickets.first(where: { $0.id == ticketRun.ticketID }) {
 					reconcile(ticket: ticket, previousTicketRunStatus: previousStatus, now: now)
 				}
@@ -57,12 +97,40 @@ struct RunReconciliationService {
 					message: "Run reconciled as failed after app relaunch."
 				)
 			)
+			try DispatcherStateService().markReconciled(
+				run: run,
+				ticketRuns: relatedTicketRuns,
+				context: context,
+				now: now,
+				reason: run.summary
+			)
+			try TicketReportBackService().ensurePendingReportBacks(
+				run: run,
+				ticketRuns: relatedTicketRuns,
+				tickets: tickets,
+				context: context,
+				now: now
+			)
 		}
 
 		if reconciledRuns > 0 {
 			try ModelIntegrityValidator.save(context: context)
 		}
-		return RunReconciliationResult(reconciledRuns: reconciledRuns, reconciledTicketRuns: reconciledTicketRuns)
+		let orphanedContainers = try ContainerRunTrackingService().markMissingActiveContainersAsOrphaned(
+			context: context,
+			inspectContainer: inspectContainer,
+			now: now
+		)
+		if orphanedContainers.isEmpty == false {
+			try ModelIntegrityValidator.save(context: context)
+		}
+		return RunReconciliationResult(
+			reconciledRuns: reconciledRuns,
+			reconciledTicketRuns: reconciledTicketRuns,
+			killedContainers: killedContainers,
+			orphanedContainers: orphanedContainers,
+			reconciledProjectIDs: reconciledProjectIDs
+		)
 	}
 
 	private static func isActive(_ status: RunStatus) -> Bool {
@@ -96,5 +164,12 @@ struct RunReconciliationService {
 		case .blocked, .needsReview, .completed, .failed, .canceled:
 			break
 		}
+	}
+
+	private static func containerName(for ticketRun: TicketRunRecord) -> String? {
+		guard ticketRun.runtimeID.hasPrefix("container-") else {
+			return nil
+		}
+		return ContainerRuntimeControl.containerName(forRuntimeID: ticketRun.runtimeID)
 	}
 }

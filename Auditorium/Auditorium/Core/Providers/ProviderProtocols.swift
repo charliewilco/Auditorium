@@ -53,17 +53,48 @@ extension SourceCodeProvider {
 	}
 }
 
-protocol IssueTrackerProvider {
+struct TicketHandoffRequest: Equatable, Sendable {
+	let ticketID: String
+	let body: String
+	let labels: [String]
+}
+
+struct TicketHandoffReceipt: Equatable, Sendable {
+	let commentURL: URL?
+}
+
+protocol TicketProvider {
 	var kind: IssueProviderKind { get }
 	var authentication: ProviderAuthenticationDescriptor { get }
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor]
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws
-	func addComment(ticketID: String, body: String) async throws
+}
+
+protocol HandoffProvider {
+	var kind: IssueProviderKind { get }
+	var authentication: ProviderAuthenticationDescriptor { get }
+
+	@discardableResult
+	func publishHandoff(_ request: TicketHandoffRequest) async throws -> TicketHandoffReceipt
+}
+
+protocol IssueTrackerProvider: TicketProvider, HandoffProvider {
+	@discardableResult
+	func addComment(ticketID: String, body: String) async throws -> URL?
 	func addLabels(ticketID: String, labels: [String]) async throws
 }
 
 extension IssueTrackerProvider {
+	@discardableResult
+	func publishHandoff(_ request: TicketHandoffRequest) async throws -> TicketHandoffReceipt {
+		let commentURL = try await addComment(ticketID: request.ticketID, body: request.body)
+		if request.labels.isEmpty == false {
+			try await addLabels(ticketID: request.ticketID, labels: request.labels)
+		}
+		return TicketHandoffReceipt(commentURL: commentURL)
+	}
+
 	func addLabels(ticketID: String, labels: [String]) async throws {
 		if labels.isEmpty == false {
 			throw ProviderError.notImplemented("\(kind.title) label updates")
@@ -83,6 +114,7 @@ extension IssueTrackerProvider {
 
 typealias RepositoryProvider = SourceCodeProvider
 typealias IssueProvider = IssueTrackerProvider
+typealias TicketHandoffProvider = HandoffProvider
 
 protocol RuntimeProvider {
 	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor
