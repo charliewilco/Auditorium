@@ -2984,6 +2984,140 @@ struct AuditoriumCoreTests {
 		#expect(metadata.refreshTokenExpiresAt == Date(timeIntervalSince1970: 8_200))
 	}
 
+	@Test func githubCLIAuthenticationReusesExistingLoginWithoutStartingANewFlow() async throws {
+		let runner = ScriptedGitHubCLICommandRunner(steps: [
+			.init(
+				arguments: ["auth", "token", "--hostname", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: "existing-token\n", standardError: "")
+			)
+		])
+		let service = GitHubCLIAuthenticationService { arguments, allowsNonZeroExit in
+			try await runner.run(arguments: arguments, allowsNonZeroExit: allowsNonZeroExit)
+		}
+
+		let token = try await service.authenticate()
+
+		#expect(token == "existing-token")
+		#expect(await runner.receivedCommands().count == 1)
+	}
+
+	@Test func githubCLIAuthenticationExtendsFinderSearchPathForHomebrew() {
+		let environment = GitHubCLIAuthenticationService.processEnvironment(inherited: [
+			"PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+			"AUDITORIUM_TEST": "preserved",
+		])
+		let paths = environment["PATH"]?.split(separator: ":").map(String.init)
+
+		#expect(paths?.contains("/opt/homebrew/bin") == true)
+		#expect(paths?.contains("/usr/local/bin") == true)
+		#expect(paths?.filter { $0 == "/usr/bin" }.count == 1)
+		#expect(environment["AUDITORIUM_TEST"] == "preserved")
+	}
+
+	@Test func githubCLIAuthenticationRunsBrowserLoginWithoutAClientID() async throws {
+		let runner = ScriptedGitHubCLICommandRunner(steps: [
+			.init(
+				arguments: ["auth", "token", "--hostname", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 1, standardOutput: "", standardError: "not logged in")
+			),
+			.init(
+				arguments: ["config", "get", "git_protocol", "--host", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: "ssh\n", standardError: "")
+			),
+			.init(
+				arguments: [
+					"auth", "login",
+					"--hostname", "github.com",
+					"--git-protocol", "ssh",
+					"--web",
+					"--clipboard",
+					"--scopes", "repo,read:user",
+					"--skip-ssh-key",
+				],
+				allowsNonZeroExit: false,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: "authenticated", standardError: "")
+			),
+			.init(
+				arguments: ["auth", "token", "--hostname", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: "new-token\n", standardError: "")
+			),
+		])
+		let service = GitHubCLIAuthenticationService { arguments, allowsNonZeroExit in
+			try await runner.run(arguments: arguments, allowsNonZeroExit: allowsNonZeroExit)
+		}
+
+		let token = try await service.authenticate()
+		let commands = await runner.receivedCommands()
+
+		#expect(token == "new-token")
+		#expect(commands.count == 4)
+		#expect(commands.flatMap(\.arguments).contains("client_id") == false)
+		#expect(commands.flatMap(\.arguments).contains("new-token") == false)
+	}
+
+	@Test func githubCLIAuthenticationRejectsSuccessfulLoginWithoutAToken() async {
+		let runner = ScriptedGitHubCLICommandRunner(steps: [
+			.init(
+				arguments: ["auth", "token", "--hostname", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 1, standardOutput: "", standardError: "not logged in")
+			),
+			.init(
+				arguments: ["config", "get", "git_protocol", "--host", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 1, standardOutput: "", standardError: "")
+			),
+			.init(
+				arguments: [
+					"auth", "login",
+					"--hostname", "github.com",
+					"--git-protocol", "https",
+					"--web",
+					"--clipboard",
+					"--scopes", "repo,read:user",
+					"--skip-ssh-key",
+				],
+				allowsNonZeroExit: false,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: "authenticated", standardError: "")
+			),
+			.init(
+				arguments: ["auth", "token", "--hostname", "github.com"],
+				allowsNonZeroExit: true,
+				result: GitHubCLICommandResult(exitCode: 0, standardOutput: " \n", standardError: "")
+			),
+		])
+		let service = GitHubCLIAuthenticationService { arguments, allowsNonZeroExit in
+			try await runner.run(arguments: arguments, allowsNonZeroExit: allowsNonZeroExit)
+		}
+
+		do {
+			_ = try await service.authenticate()
+		}
+		catch let error as GitHubCLIAuthenticationError {
+			#expect(error == .missingToken)
+			return
+		}
+		catch {
+			Issue.record(error)
+			return
+		}
+		Issue.record("Expected authentication without a token to fail.")
+	}
+
+	@Test func githubCLIAuthenticationPropagatesCancellation() async {
+		let service = GitHubCLIAuthenticationService { _, _ in
+			throw CancellationError()
+		}
+
+		await #expect(throws: CancellationError.self) {
+			_ = try await service.authenticate()
+		}
+	}
+
 	@Test func projectCreationStoresOAuthMetadataAndRefreshSecret() throws {
 		let container = try AppSchema.makeModelContainer(inMemory: true)
 		let context = container.mainContext
@@ -4180,6 +4314,41 @@ private struct MockGitHubTransport: GitHubAPITransport {
 		let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: headers)!
 		return (Data(payload.utf8), response)
 	}
+}
+
+private struct ScriptedGitHubCLICommand: Sendable {
+	let arguments: [String]
+	let allowsNonZeroExit: Bool
+	let result: GitHubCLICommandResult
+}
+
+private actor ScriptedGitHubCLICommandRunner {
+	private var steps: [ScriptedGitHubCLICommand]
+	private var commands: [ScriptedGitHubCLICommand] = []
+
+	init(steps: [ScriptedGitHubCLICommand]) {
+		self.steps = steps
+	}
+
+	func run(arguments: [String], allowsNonZeroExit: Bool) throws -> GitHubCLICommandResult {
+		guard steps.isEmpty == false else {
+			throw ScriptedGitHubCLICommandRunnerError.unexpectedCommand(arguments)
+		}
+		let step = steps.removeFirst()
+		guard step.arguments == arguments, step.allowsNonZeroExit == allowsNonZeroExit else {
+			throw ScriptedGitHubCLICommandRunnerError.unexpectedCommand(arguments)
+		}
+		commands.append(step)
+		return step.result
+	}
+
+	func receivedCommands() -> [ScriptedGitHubCLICommand] {
+		commands
+	}
+}
+
+private enum ScriptedGitHubCLICommandRunnerError: Error {
+	case unexpectedCommand([String])
 }
 
 private enum ScriptedGitHubTransportResult: Sendable {
