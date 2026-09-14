@@ -94,8 +94,8 @@ Working today:
 
 Current trust level:
 
-- Ready: demo flow, `symphony` CLI flow, app-to-CLI integration, and real GitHub smoke tests are implemented and test-backed.
-- Needs final proof: Developer ID signing, notarization, Gatekeeper validation, clean-Mac launch, and a fresh credentialed manual pass on the signed artifact.
+- Ready: demo flow, `symphony` CLI flow, app-to-CLI integration, real GitHub smoke tests, and local Developer ID archive/export and signature verification are implemented and evidence-backed.
+- Needs final proof: notarization and stapling, Gatekeeper acceptance, clean-Mac launch, and a fresh credentialed manual pass on the signed artifact.
 - Future: non-GitHub providers, hosted/team orchestration, and background automation beyond explicit user opt-in.
 
 See [SPEC.md](SPEC.md) for the full product specification and [CHECKLIST.md](CHECKLIST.md) for the implementation tracker.

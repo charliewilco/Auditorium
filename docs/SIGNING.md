@@ -59,10 +59,10 @@ NOTARYTOOL_PROFILE=Auditorium-notary ./script/package_release.sh --developer-id 
 The script will:
 
 1. Build the Release app.
-2. Build the Release `symphony` binary.
+2. Build arm64 and x86_64 Release `symphony` binaries and combine them into one universal executable.
 3. Archive and export using Developer ID signing.
 4. Copy `symphony` into the app bundle.
-5. Verify the code signature.
+5. Verify the app architecture slices are present in `symphony` and verify the code signature.
 6. Zip the app.
 7. Submit the zip to Apple notarization.
 8. Staple the notarization ticket.
@@ -93,6 +93,8 @@ The final distribution proof requires a separate Mac that has not built Auditori
 
 Only after this clean-Mac launch succeeds should the release build be treated as distribution-verified.
 
-## Current Blocker
+## Current Status
 
-As of 2026-06-09, the local machine had an `Apple Development` signing identity but no `Developer ID Application` identity. That certificate is required before the Developer ID signing and notarization flow can be completed.
+As of August 8, 2026, this machine has the Developer ID Application identity for team `824752FF3X`. The project script successfully archived and exported a Developer ID signed universal app with a Developer ID signed universal `symphony` executable, and strict signature verification passed.
+
+Notarization credentials were not available during that validation. Notarization, stapling, Gatekeeper acceptance, and launch on a separate clean Mac remain required before treating the zip as distribution-ready.
