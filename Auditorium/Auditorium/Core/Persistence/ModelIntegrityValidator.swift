@@ -42,6 +42,9 @@ enum ModelIntegrityValidator {
 		try validateRuntimeEvents(context: context, issues: &issues)
 		try validateCoordinationMessages(context: context, issues: &issues)
 		try validateReports(context: context, issues: &issues)
+		try validateTicketReportBacks(context: context, issues: &issues)
+		try validateContainerRuns(context: context, issues: &issues)
+		try validateDispatcherRuns(context: context, issues: &issues)
 		try validateProviderAccounts(context: context, issues: &issues)
 		try validateProjectEnvironmentSecrets(context: context, issues: &issues)
 		return issues
@@ -281,6 +284,24 @@ extension ModelIntegrityValidator {
 				field: "statusRaw",
 				issues: &issues
 			)
+			requireKnownRawValue(
+				record.lifecyclePhaseRaw,
+				as: TicketRunLifecyclePhase.self,
+				model: "TicketRunRecord",
+				id: id,
+				field: "lifecyclePhaseRaw",
+				issues: &issues
+			)
+			if let failedPhaseRaw = record.failedPhaseRaw {
+				requireKnownRawValue(
+					failedPhaseRaw,
+					as: TicketRunLifecyclePhase.self,
+					model: "TicketRunRecord",
+					id: id,
+					field: "failedPhaseRaw",
+					issues: &issues
+				)
+			}
 			requireNonNegative(record.retryCount, model: "TicketRunRecord", id: id, field: "retryCount", issues: &issues)
 			if !(0...1).contains(record.confidence) {
 				issues.append(
@@ -297,6 +318,8 @@ extension ModelIntegrityValidator {
 					("workspacePath", record.workspacePath),
 					("runtimeID", record.runtimeID),
 					("branchName", record.branchName),
+					("lifecyclePhaseRaw", record.lifecyclePhaseRaw),
+					("failedPhaseRaw", record.failedPhaseRaw ?? ""),
 					("logPath", record.logPath),
 					("pullRequestURL", record.pullRequestURL ?? ""),
 					("summary", record.summary),
@@ -459,6 +482,225 @@ extension ModelIntegrityValidator {
 		}
 	}
 
+	fileprivate static func validateTicketReportBacks(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
+		for record in try context.fetch(FetchDescriptor<TicketReportBackRecord>()) {
+			let id = record.id.uuidString
+			requireKnownRawValue(
+				record.providerRaw,
+				as: IssueProviderKind.self,
+				model: "TicketReportBackRecord",
+				id: id,
+				field: "providerRaw",
+				issues: &issues
+			)
+			requireKnownRawValue(
+				record.statusRaw,
+				as: TicketReportBackStatus.self,
+				model: "TicketReportBackRecord",
+				id: id,
+				field: "statusRaw",
+				issues: &issues
+			)
+			requireNonEmpty(record.externalTicketID, model: "TicketReportBackRecord", id: id, field: "externalTicketID", issues: &issues)
+			requireNonNegative(record.attemptCount, model: "TicketReportBackRecord", id: id, field: "attemptCount", issues: &issues)
+			scanSecrets(
+				[
+					("externalTicketID", record.externalTicketID),
+					("commentURL", record.commentURL ?? ""),
+					("failureReason", record.failureReason ?? ""),
+				],
+				model: "TicketReportBackRecord",
+				id: id,
+				issues: &issues
+			)
+		}
+	}
+
+	fileprivate static func validateContainerRuns(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
+		for record in try context.fetch(FetchDescriptor<ContainerRunRecord>()) {
+			let id = record.id.uuidString
+			requireKnownRawValue(
+				record.statusRaw,
+				as: ContainerRunStatus.self,
+				model: "ContainerRunRecord",
+				id: id,
+				field: "statusRaw",
+				issues: &issues
+			)
+			requireKnownRawValue(
+				record.cleanupEligibilityRaw,
+				as: ContainerCleanupEligibility.self,
+				model: "ContainerRunRecord",
+				id: id,
+				field: "cleanupEligibilityRaw",
+				issues: &issues
+			)
+			requireKnownRawValue(
+				record.reconciliationStateRaw,
+				as: ContainerReconciliationState.self,
+				model: "ContainerRunRecord",
+				id: id,
+				field: "reconciliationStateRaw",
+				issues: &issues
+			)
+			requireNonEmpty(record.runtimeID, model: "ContainerRunRecord", id: id, field: "runtimeID", issues: &issues)
+			requireNonEmpty(record.containerName, model: "ContainerRunRecord", id: id, field: "containerName", issues: &issues)
+			validateJSONStringArray(
+				record.environmentVariableNamesJSON,
+				model: "ContainerRunRecord",
+				id: id,
+				field: "environmentVariableNamesJSON",
+				issues: &issues
+			)
+			validateEnvironmentVariableNames(record.environmentVariableNames, model: "ContainerRunRecord", id: id, issues: &issues)
+			if let exitCode = record.exitCode {
+				requireNonNegative(exitCode, model: "ContainerRunRecord", id: id, field: "exitCode", issues: &issues)
+			}
+			scanSecrets(
+				[
+					("runtimeID", record.runtimeID),
+					("containerName", record.containerName),
+					("imageName", record.imageName),
+					("workspacePath", record.workspacePath),
+					("logPath", record.logPath),
+					("failureReason", record.failureReason ?? ""),
+				],
+				model: "ContainerRunRecord",
+				id: id,
+				issues: &issues
+			)
+		}
+	}
+
+	fileprivate static func validateDispatcherRuns(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
+		for record in try context.fetch(FetchDescriptor<DispatcherRunRecord>()) {
+			let id = record.id.uuidString
+			requireKnownRawValue(
+				record.statusRaw,
+				as: DispatcherRunStatus.self,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "statusRaw",
+				issues: &issues
+			)
+			requireNonNegative(
+				record.requestedConcurrency,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "requestedConcurrency",
+				issues: &issues
+			)
+			requireNonNegative(
+				record.effectiveConcurrency,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "effectiveConcurrency",
+				issues: &issues
+			)
+			requireNonNegative(record.selectedCount, model: "DispatcherRunRecord", id: id, field: "selectedCount", issues: &issues)
+			requireNonNegative(record.skippedCount, model: "DispatcherRunRecord", id: id, field: "skippedCount", issues: &issues)
+			requireNonNegative(record.pendingCount, model: "DispatcherRunRecord", id: id, field: "pendingCount", issues: &issues)
+			requireNonNegative(record.runningCount, model: "DispatcherRunRecord", id: id, field: "runningCount", issues: &issues)
+			requireNonNegative(record.terminalCount, model: "DispatcherRunRecord", id: id, field: "terminalCount", issues: &issues)
+			validateUUIDJSONArray(
+				record.selectedTicketRunIDsJSON,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "selectedTicketRunIDsJSON",
+				issues: &issues
+			)
+			validateUUIDJSONArray(
+				record.pendingTicketRunIDsJSON,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "pendingTicketRunIDsJSON",
+				issues: &issues
+			)
+			validateUUIDJSONArray(
+				record.runningTicketRunIDsJSON,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "runningTicketRunIDsJSON",
+				issues: &issues
+			)
+			validateUUIDJSONArray(
+				record.terminalTicketRunIDsJSON,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "terminalTicketRunIDsJSON",
+				issues: &issues
+			)
+			validateUUIDJSONArray(
+				record.skippedQueueItemIDsJSON,
+				model: "DispatcherRunRecord",
+				id: id,
+				field: "skippedQueueItemIDsJSON",
+				issues: &issues
+			)
+			validateSkipReasonCounts(record.skipReasonCountsJSON, model: "DispatcherRunRecord", id: id, issues: &issues)
+			if record.selectedCount != record.selectedTicketRunIDs.count {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "DispatcherRunRecord",
+						id: id,
+						field: "selectedCount",
+						reason: "selectedCount must match selectedTicketRunIDsJSON"
+					)
+				)
+			}
+			if record.skippedCount != record.skippedQueueItemIDs.count {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "DispatcherRunRecord",
+						id: id,
+						field: "skippedCount",
+						reason: "skippedCount must match skippedQueueItemIDsJSON"
+					)
+				)
+			}
+			if record.pendingCount != record.pendingTicketRunIDs.count {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "DispatcherRunRecord",
+						id: id,
+						field: "pendingCount",
+						reason: "pendingCount must match pendingTicketRunIDsJSON"
+					)
+				)
+			}
+			if record.runningCount != record.runningTicketRunIDs.count {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "DispatcherRunRecord",
+						id: id,
+						field: "runningCount",
+						reason: "runningCount must match runningTicketRunIDsJSON"
+					)
+				)
+			}
+			if record.terminalCount != record.terminalTicketRunIDs.count {
+				issues.append(
+					ModelIntegrityIssue(
+						model: "DispatcherRunRecord",
+						id: id,
+						field: "terminalCount",
+						reason: "terminalCount must match terminalTicketRunIDsJSON"
+					)
+				)
+			}
+			scanSecrets(
+				[
+					("statusRaw", record.statusRaw),
+					("resumeAction", record.resumeAction),
+					("failureReason", record.failureReason ?? ""),
+				],
+				model: "DispatcherRunRecord",
+				id: id,
+				issues: &issues
+			)
+		}
+	}
+
 	fileprivate static func validateProviderAccounts(context: ModelContext, issues: inout [ModelIntegrityIssue]) throws {
 		for record in try context.fetch(FetchDescriptor<ProviderAccountRecord>()) {
 			let id = record.id.uuidString
@@ -569,6 +811,86 @@ extension ModelIntegrityValidator {
 		else {
 			issues.append(ModelIntegrityIssue(model: model, id: id, field: field, reason: "value must be a JSON string array"))
 			return
+		}
+	}
+
+	fileprivate static func validateUUIDJSONArray(
+		_ value: String,
+		model: String,
+		id: String,
+		field: String,
+		issues: inout [ModelIntegrityIssue]
+	) {
+		guard let data = value.data(using: .utf8),
+			let strings = try? JSONDecoder().decode([String].self, from: data)
+		else {
+			issues.append(ModelIntegrityIssue(model: model, id: id, field: field, reason: "value must be a JSON UUID string array"))
+			return
+		}
+		for string in strings where UUID(uuidString: string) == nil {
+			issues.append(ModelIntegrityIssue(model: model, id: id, field: field, reason: "value must contain only UUID strings"))
+		}
+	}
+
+	fileprivate static func validateSkipReasonCounts(
+		_ value: String,
+		model: String,
+		id: String,
+		issues: inout [ModelIntegrityIssue]
+	) {
+		guard let data = value.data(using: .utf8),
+			let counts = try? JSONDecoder().decode([String: Int].self, from: data)
+		else {
+			issues.append(
+				ModelIntegrityIssue(
+					model: model,
+					id: id,
+					field: "skipReasonCountsJSON",
+					reason: "value must be a JSON string-int object"
+				)
+			)
+			return
+		}
+		for (reason, count) in counts {
+			requireKnownRawValue(
+				reason,
+				as: TicketDispatchSkipReason.self,
+				model: model,
+				id: id,
+				field: "skipReasonCountsJSON",
+				issues: &issues
+			)
+			requireNonNegative(count, model: model, id: id, field: "skipReasonCountsJSON", issues: &issues)
+		}
+	}
+
+	fileprivate static func validateEnvironmentVariableNames(
+		_ values: [String],
+		model: String,
+		id: String,
+		issues: inout [ModelIntegrityIssue]
+	) {
+		for value in values {
+			if value.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) == nil {
+				issues.append(
+					ModelIntegrityIssue(
+						model: model,
+						id: id,
+						field: "environmentVariableNamesJSON",
+						reason: "environment variable name must match [A-Za-z_][A-Za-z0-9_]*"
+					)
+				)
+			}
+			if containsSecretMaterial(value) {
+				issues.append(
+					ModelIntegrityIssue(
+						model: model,
+						id: id,
+						field: "environmentVariableNamesJSON",
+						reason: "environment variable name appears to contain secret material"
+					)
+				)
+			}
 		}
 	}
 

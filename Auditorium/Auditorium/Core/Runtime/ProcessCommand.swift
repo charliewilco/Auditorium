@@ -204,6 +204,28 @@ private final class ProcessExitBox: @unchecked Sendable {
 enum ProcessCommand {
 	private static let outputDrainNanoseconds: UInt64 = 500_000_000
 
+	nonisolated static func runBlocking(executable: String, arguments: [String], workingDirectory: URL? = nil) throws -> ProcessResult {
+		let process = Process()
+		let stdout = Pipe()
+		let stderr = Pipe()
+		process.executableURL = URL(fileURLWithPath: executable)
+		process.arguments = arguments
+		process.currentDirectoryURL = workingDirectory
+		process.standardOutput = stdout
+		process.standardError = stderr
+		try process.run()
+		stdout.fileHandleForWriting.closeFile()
+		stderr.fileHandleForWriting.closeFile()
+		let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+		let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+		process.waitUntilExit()
+		return ProcessResult(
+			exitCode: process.terminationStatus,
+			standardOutput: String(data: outputData, encoding: .utf8) ?? "",
+			standardError: String(data: errorData, encoding: .utf8) ?? ""
+		)
+	}
+
 	static func run(executable: String, arguments: [String], workingDirectory: URL? = nil) async throws -> ProcessResult {
 		try await runStreaming(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
 	}

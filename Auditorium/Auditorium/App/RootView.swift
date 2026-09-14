@@ -17,6 +17,9 @@ struct RootView: View {
 	@Query(sort: \CoordinationMessageRecord.createdAt, order: .reverse) private var coordinationMessages: [CoordinationMessageRecord]
 	@Query(sort: \PullRequestRecord.createdAt, order: .reverse) private var pullRequests: [PullRequestRecord]
 	@Query(sort: \ReportRecord.createdAt, order: .reverse) private var reports: [ReportRecord]
+	@Query(sort: \TicketReportBackRecord.updatedAt, order: .reverse) private var reportBacks: [TicketReportBackRecord]
+	@Query(sort: \ContainerRunRecord.lastSeenAt, order: .reverse) private var containerRuns: [ContainerRunRecord]
+	@Query(sort: \DispatcherRunRecord.updatedAt, order: .reverse) private var dispatcherRuns: [DispatcherRunRecord]
 	@Query(sort: \ProviderAccountRecord.updatedAt, order: .reverse) private var providerAccounts: [ProviderAccountRecord]
 	@State private var runtimeHealth: [RuntimeHealthCheck] = []
 	@State private var symphonyDoctorStatus: SymphonyDoctorStatus?
@@ -122,11 +125,13 @@ struct RootView: View {
 	private func reconcileInterruptedRunsIfNeeded() {
 		guard didReconcileInterruptedRuns == false else { return }
 		didReconcileInterruptedRuns = true
-		do {
-			_ = try RunReconciliationService().reconcileInterruptedRuns(context: modelContext)
-		}
-		catch {
-			NSAlert(error: error).runModal()
+		Task {
+			do {
+				_ = try await ensureRunCoordinator().resumeAfterLaunch(context: modelContext)
+			}
+			catch {
+				NSAlert(error: error).runModal()
+			}
 		}
 	}
 
@@ -173,6 +178,9 @@ struct RootView: View {
 				tickets: projectTickets,
 				queueItems: projectQueueItems,
 				preflightSummary: runPreflightSummary,
+				addTickets: addTicketsToQueue,
+				queueNextTickets: queueNextTickets,
+				fillQueueAndRun: fillQueueAndRun,
 				runQueue: runQueue,
 				dryRun: dryRun,
 				clearQueue: clearQueue,
@@ -190,7 +198,13 @@ struct RootView: View {
 				events: events,
 				coordinationMessages: coordinationMessages,
 				pullRequests: pullRequests,
-				reports: reports
+				reports: reports,
+				reportBacks: reportBacks,
+				containerRuns: containerRuns,
+				dispatcherRuns: dispatcherRuns.filter { $0.projectID == appState.selectedProjectID },
+				retryReportBacks: { Task { await retryReportBacks() } },
+				recoverInterruptedWork: recoverInterruptedWork,
+				recoverInterruptedWorkAndRun: recoverInterruptedWorkAndRun
 			)
 		case .reports:
 			ReportsView(
@@ -306,6 +320,67 @@ struct RootView: View {
 		addTicketsToQueue([ticket.id])
 	}
 
+	private func queueNextTickets() {
+		guard let project = selectedProject else { return }
+		Task {
+			do {
+				_ = try await ensureRunCoordinator().fillQueue(project: project, context: modelContext)
+				appState.selectedDestination = .queue
+			}
+			catch {
+				NSAlert(error: error).runModal()
+			}
+		}
+	}
+
+	private func fillQueueAndRun() {
+		guard let project = selectedProject else { return }
+		Task {
+			do {
+				_ = try await ensureRunCoordinator().fillQueue(project: project, context: modelContext)
+				runQueue()
+			}
+			catch {
+				NSAlert(error: error).runModal()
+			}
+		}
+	}
+
+	private func retryReportBacks() async {
+		guard let projectID = appState.selectedProjectID else { return }
+		await retryReportBacks(projectID: projectID)
+	}
+
+	private func retryReportBacks(projectID: UUID) async {
+		do {
+			_ = try await ensureRunCoordinator().retryHandoffs(projectID: projectID, context: modelContext)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func recoverInterruptedWork() {
+		do {
+			_ = try ensureRunCoordinator().prepareRecoveredWorkResume(projectID: appState.selectedProjectID, context: modelContext)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
+	private func recoverInterruptedWorkAndRun() {
+		guard let project = selectedProject else { return }
+		do {
+			let command = try ensureRunCoordinator().prepareRecoveredWorkResume(projectID: project.id, context: modelContext)
+			guard command.canStartSingleProject else { return }
+			startQueue(resumeCommand: command)
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
+	}
+
 	private func removeSelectedTicketFromQueue() {
 		guard let item = selectedQueueItem else { return }
 		removeQueueItem(item)
@@ -324,6 +399,10 @@ struct RootView: View {
 	}
 
 	private func runQueue() {
+		startQueue()
+	}
+
+	private func startQueue(resumeCommand: DispatcherResumeCommand? = nil) {
 		guard let project = selectedProject else { return }
 		let preferences = runSecurityPreferences
 		if let runPreflightSummary, runPreflightSummary.canStartRun == false {
@@ -352,7 +431,22 @@ struct RootView: View {
 			return
 		}
 		appState.selectedDestination = .runs
-		ensureRunCoordinator().startQueue(project: project, concurrency: appState.queueConcurrency, context: modelContext)
+		do {
+			if let resumeCommand {
+				try ensureRunCoordinator().startApprovedRecoveredWork(
+					resumeCommand,
+					project: project,
+					concurrency: appState.queueConcurrency,
+					context: modelContext
+				)
+			}
+			else {
+				ensureRunCoordinator().startQueue(project: project, concurrency: appState.queueConcurrency, context: modelContext)
+			}
+		}
+		catch {
+			NSAlert(error: error).runModal()
+		}
 	}
 
 	private func cancelActiveRun() {

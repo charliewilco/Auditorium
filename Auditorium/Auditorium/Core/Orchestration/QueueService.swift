@@ -4,6 +4,10 @@ import SwiftData
 @MainActor
 struct QueueService {
 	func addTickets(_ ticketIDs: Set<UUID>, projectID: UUID, context: ModelContext) throws {
+		try addTickets(Array(ticketIDs), projectID: projectID, context: context)
+	}
+
+	func addTickets(_ ticketIDs: [UUID], projectID: UUID, context: ModelContext) throws {
 		let existing = try context.fetch(FetchDescriptor<QueueItemRecord>()).filter { $0.projectID == projectID }
 		var nextPosition = (existing.map(\.position).max() ?? -1) + 1
 		let queuedIDs = Set(existing.map(\.ticketID))

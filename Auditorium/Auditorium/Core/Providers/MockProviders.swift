@@ -45,7 +45,7 @@ struct MockGitHubIssueTrackerProvider: IssueTrackerProvider {
 
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {}
 
-	func addComment(ticketID: String, body: String) async throws {}
+	func addComment(ticketID: String, body: String) async throws -> URL? { nil }
 }
 
 typealias MockLinearIssueProvider = MockGitHubIssueTrackerProvider

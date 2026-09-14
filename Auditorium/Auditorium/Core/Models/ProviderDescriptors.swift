@@ -97,6 +97,21 @@ struct AgentRunRequest: Sendable {
 	let repository: RepositoryDescriptor
 	let workspace: WorkspaceDescriptor
 	let policyMarkdown: String
+	let environment: [String: String]
+
+	init(
+		ticket: TicketDescriptor,
+		repository: RepositoryDescriptor,
+		workspace: WorkspaceDescriptor,
+		policyMarkdown: String,
+		environment: [String: String] = [:]
+	) {
+		self.ticket = ticket
+		self.repository = repository
+		self.workspace = workspace
+		self.policyMarkdown = policyMarkdown
+		self.environment = environment
+	}
 }
 
 struct AgentEvent: Sendable {

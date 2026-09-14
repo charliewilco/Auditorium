@@ -2164,7 +2164,16 @@ struct AuditoriumTests {
 
 		let result = try RunReconciliationService().reconcileInterruptedRuns(context: context, now: now)
 
-		#expect(result == RunReconciliationResult(reconciledRuns: 1, reconciledTicketRuns: 2))
+		#expect(
+			result
+				== RunReconciliationResult(
+					reconciledRuns: 1,
+					reconciledTicketRuns: 2,
+					killedContainers: [],
+					orphanedContainers: [],
+					reconciledProjectIDs: [project.id]
+				)
+		)
 		#expect(run.status == .failed)
 		#expect(run.endedAt == now)
 		#expect(run.completedTickets == 1)
@@ -5329,5 +5338,5 @@ private struct StaticIssueTrackerProvider: IssueTrackerProvider {
 	}
 
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws {}
-	func addComment(ticketID: String, body: String) async throws {}
+	func addComment(ticketID: String, body: String) async throws -> URL? { nil }
 }
