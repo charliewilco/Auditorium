@@ -9,6 +9,12 @@ struct RunsView: View {
 	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
 	let reports: [ReportRecord]
+	let reportBacks: [TicketReportBackRecord]
+	let containerRuns: [ContainerRunRecord]
+	let dispatcherRuns: [DispatcherRunRecord]
+	let retryReportBacks: () -> Void
+	let recoverInterruptedWork: () -> Void
+	let recoverInterruptedWorkAndRun: () -> Void
 
 	var body: some View {
 		NavigationSplitView {
@@ -35,7 +41,10 @@ struct RunsView: View {
 					events: events.filter { $0.runID == run.id },
 					coordinationMessages: coordinationMessages.filter { $0.runID == run.id },
 					pullRequests: pullRequests,
-					reports: reports.filter { $0.runID == run.id }
+					reports: reports.filter { $0.runID == run.id },
+					reportBacks: reportBacks,
+					containerRuns: containerRuns.filter { $0.runID == run.id },
+					dispatcherRun: dispatcherRuns.first { $0.runID == run.id }
 				)
 			}
 			else {
@@ -51,6 +60,20 @@ struct RunsView: View {
 			}
 		}
 		.navigationTitle("Runs")
+		.toolbar {
+			Button(action: recoverInterruptedWorkAndRun) {
+				Label("Recover and Run", systemImage: "play.circle")
+			}
+			.disabled(runs.isEmpty)
+			Button(action: recoverInterruptedWork) {
+				Label("Recover Queue", systemImage: "arrow.uturn.backward.circle")
+			}
+			.disabled(runs.isEmpty)
+			Button(action: retryReportBacks) {
+				Label("Retry Report-backs", systemImage: "arrow.clockwise")
+			}
+			.disabled(runs.isEmpty)
+		}
 		.onAppear {
 			if appState.selectedRunID == nil {
 				appState.selectedRunID = runs.first?.id
@@ -72,6 +95,9 @@ struct RunDetailView: View {
 	let coordinationMessages: [CoordinationMessageRecord]
 	let pullRequests: [PullRequestRecord]
 	let reports: [ReportRecord]
+	let reportBacks: [TicketReportBackRecord]
+	let containerRuns: [ContainerRunRecord]
+	let dispatcherRun: DispatcherRunRecord?
 
 	var progress: Double {
 		guard run.totalTickets > 0 else { return 0 }
@@ -95,6 +121,18 @@ struct RunDetailView: View {
 		)
 	}
 
+	var workbench: ReviewWorkbenchState {
+		ReviewWorkbenchState.make(
+			ticketRuns: ticketRuns,
+			tickets: tickets,
+			events: events,
+			coordinationMessages: coordinationMessages,
+			pullRequests: pullRequests,
+			reportBacks: reportBacks,
+			containerRuns: containerRuns
+		)
+	}
+
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 18) {
@@ -109,6 +147,7 @@ struct RunDetailView: View {
 					StatusBadge(title: run.status.title, tint: run.status.tint)
 				}
 				ProgressView(value: progress)
+				dispatcherSection
 				reviewPacketSection
 				LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
 					StatCard(title: "Total Tickets", value: "\(run.totalTickets)", symbol: "ticket", tint: .blue)
@@ -130,6 +169,50 @@ struct RunDetailView: View {
 			}
 			.padding()
 		}
+	}
+
+	private var dispatcherSection: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			HStack {
+				Text("Dispatcher")
+					.font(.headline)
+				Spacer()
+				if let dispatcherRun {
+					StatusBadge(title: dispatcherRun.status.title, tint: dispatcherTint(dispatcherRun.status))
+				}
+				else {
+					StatusBadge(title: "No State", tint: .secondary)
+				}
+			}
+			if let dispatcherRun {
+				LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+					ReviewPacketValue(title: "Selected", value: "\(dispatcherRun.selectedCount)")
+					ReviewPacketValue(title: "Pending", value: "\(dispatcherRun.pendingCount)")
+					ReviewPacketValue(title: "Running", value: "\(dispatcherRun.runningCount)")
+					ReviewPacketValue(title: "Terminal", value: "\(dispatcherRun.terminalCount)")
+					ReviewPacketValue(title: "Skipped", value: "\(dispatcherRun.skippedCount)")
+					ReviewPacketValue(
+						title: "Concurrency",
+						value: "\(dispatcherRun.effectiveConcurrency)/\(dispatcherRun.requestedConcurrency)"
+					)
+				}
+				Text(dispatcherRun.resumeAction)
+					.font(.caption.weight(.medium))
+				if let failureReason = dispatcherRun.failureReason, failureReason.isEmpty == false {
+					Text(failureReason)
+						.font(.caption)
+						.foregroundStyle(.secondary)
+						.lineLimit(3)
+				}
+			}
+			else {
+				Text("This run was created before dispatcher state was recorded.")
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
+		}
+		.padding()
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
 
 	private var crossTicketFindings: some View {
@@ -243,46 +326,103 @@ struct RunDetailView: View {
 
 	private var ticketExecutionList: some View {
 		VStack(alignment: .leading, spacing: 12) {
-			Text("Ticket Executions")
-				.font(.headline)
-			ForEach(ticketRuns) { ticketRun in
-				let ticket = tickets.first { $0.id == ticketRun.ticketID }
-				let related = relatedMessages(for: ticketRun, ticket: ticket)
+			HStack {
+				Text("Review Workbench")
+					.font(.headline)
+				Spacer()
+				StatusBadge(title: "\(workbench.rows.count) Tickets", tint: .blue)
+				if workbench.skippedItems.isEmpty == false {
+					StatusBadge(title: "\(workbench.skippedItems.count) Skipped", tint: .yellow)
+				}
+			}
+			ForEach(workbench.rows) { row in
 				VStack(alignment: .leading, spacing: 8) {
 					HStack {
 						VStack(alignment: .leading, spacing: 4) {
-							Text(ticket?.title ?? "Unknown Ticket")
+							Text("\(row.ticketExternalID): \(row.ticketTitle)")
 								.font(.callout.weight(.medium))
 							Text(
-								"\(ticketRun.branchName.isEmpty ? "No branch yet" : ticketRun.branchName) • \(ticketRun.runtimeID.isEmpty ? "No runtime yet" : ticketRun.runtimeID)"
+								"\(row.branchName.isEmpty ? "No branch yet" : row.branchName) • \(row.runtimeID.isEmpty ? "No runtime yet" : row.runtimeID)"
 							)
 							.font(.caption)
 							.foregroundStyle(.secondary)
-							Text(phaseText(for: ticketRun))
+							Text(phaseText(for: row))
 								.font(.caption)
 								.foregroundStyle(.secondary)
+							Text(row.reportBackSummary)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+							Text(row.containerSummary)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+								.lineLimit(1)
+							Text(row.nextAction)
+								.font(.caption.weight(.medium))
+								.foregroundStyle(.primary)
 						}
 						Spacer()
-						if let url = ticketRun.pullRequestURL, let link = URL(string: url) {
+						if let pullRequestURL = row.pullRequestURL, let link = URL(string: pullRequestURL) {
 							Link("PR", destination: link)
 						}
-						Text("Retry \(ticketRun.retryCount)")
-							.foregroundStyle(.secondary)
-						Text("\(Int(ticketRun.confidence * 100))%")
-							.frame(width: 44, alignment: .trailing)
-						StatusBadge(title: ticketRun.status.title, tint: ticketRun.status.tint)
+						if let reportBackCommentURL = row.reportBackCommentURL, let link = URL(string: reportBackCommentURL) {
+							Link("Handoff", destination: link)
+						}
+						if let reportBackStatus = row.reportBackStatus {
+							StatusBadge(title: reportBackStatus.title, tint: reportBackTint(reportBackStatus))
+						}
+						if let containerStatus = row.containerStatus {
+							StatusBadge(title: containerStatus.title, tint: containerTint(containerStatus))
+						}
+						StatusBadge(title: row.runStatus.title, tint: row.runStatus.tint)
 					}
-					if related.isEmpty == false {
-						VStack(alignment: .leading, spacing: 6) {
-							Text("Related Notes")
-								.font(.caption.weight(.semibold))
-								.foregroundStyle(.secondary)
-							ForEach(related) { message in
-								CoordinationMessageRow(
-									message: message,
-									ticket: ticketForIssue(message.sourceIssueNumber)
+					if row.changedFiles.isEmpty == false || row.logTail.isEmpty == false || row.failureReason?.isEmpty == false {
+						LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+							if row.changedFiles.isEmpty == false {
+								ReviewPacketValue(
+									title: "Changed Files",
+									value: row.changedFiles.joined(separator: ", ")
 								)
 							}
+							if let failureReason = row.failureReason, failureReason.isEmpty == false {
+								ReviewPacketValue(title: "Failure", value: failureReason)
+							}
+							if row.logTail.isEmpty == false {
+								VStack(alignment: .leading, spacing: 4) {
+									Text("Log Tail")
+										.font(.caption.weight(.semibold))
+										.foregroundStyle(.secondary)
+									Text(row.logTail)
+										.font(.system(.caption, design: .monospaced))
+										.lineLimit(6)
+										.textSelection(.enabled)
+								}
+								.frame(maxWidth: .infinity, alignment: .leading)
+							}
+						}
+					}
+				}
+				.padding(10)
+				.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+			}
+			if workbench.skippedItems.isEmpty == false {
+				VStack(alignment: .leading, spacing: 8) {
+					Text("Skipped by Dispatcher")
+						.font(.caption.weight(.semibold))
+						.foregroundStyle(.secondary)
+					ForEach(workbench.skippedItems) { item in
+						HStack(alignment: .top, spacing: 8) {
+							Image(systemName: "forward.end")
+								.foregroundStyle(.yellow)
+								.frame(width: 18)
+							VStack(alignment: .leading, spacing: 2) {
+								Text(item.reason.replacingOccurrences(of: "_", with: " ").capitalized)
+									.font(.caption)
+									.fontWeight(.semibold)
+								Text(item.detail)
+									.font(.caption)
+									.foregroundStyle(.secondary)
+							}
+							Spacer()
 						}
 					}
 				}
@@ -320,38 +460,44 @@ struct RunDetailView: View {
 		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
 	}
 
-	private func relatedMessages(for ticketRun: TicketRunRecord, ticket: TicketRecord?) -> [CoordinationMessageRecord] {
-		let issueNumber = ticket.flatMap { githubIssueNumber(from: $0.externalID) }
-		return
-			coordinationMessages
-			.filter { message in
-				message.ticketRunID == ticketRun.id || (issueNumber != nil && message.targetIssueNumber == issueNumber)
-			}
-			.sorted { $0.createdAt < $1.createdAt }
-	}
-
 	private func ticketForIssue(_ issueNumber: Int) -> TicketRecord? {
 		tickets.first { githubIssueNumber(from: $0.externalID) == issueNumber }
 	}
 
-	private func phaseText(for ticketRun: TicketRunRecord) -> String {
-		let ticketEvents = events.filter { $0.ticketRunID == ticketRun.id }
-		if ticketRun.pullRequestURL != nil || ticketEvents.contains(where: { $0.category == .pullRequest }) {
-			return "Phase: pull request ready"
+	private func phaseText(for row: ReviewWorkbenchState.Row) -> String {
+		if let failedPhase = row.failedPhase {
+			return "Phase: \(row.lifecyclePhase.title) at \(failedPhase.title)"
 		}
-		if ticketEvents.contains(where: { $0.category == .git && $0.message.localizedCaseInsensitiveContains("push") }) {
-			return "Phase: branch pushed"
+		return "Phase: \(row.lifecyclePhase.title)"
+	}
+
+	private func reportBackTint(_ status: TicketReportBackStatus) -> Color {
+		switch status {
+		case .pending: .secondary
+		case .inFlight: .blue
+		case .succeeded: .green
+		case .failed: .red
 		}
-		if ticketEvents.contains(where: { $0.category == .tests || $0.message.localizedCaseInsensitiveContains("validation") }) {
-			return "Phase: validation"
+	}
+
+	private func containerTint(_ status: ContainerRunStatus) -> Color {
+		switch status {
+		case .starting: .blue
+		case .running: .orange
+		case .completed: .green
+		case .failed, .killed, .orphaned: .red
 		}
-		if ticketEvents.contains(where: { $0.category == .agent }) {
-			return "Phase: agent running"
+	}
+
+	private func dispatcherTint(_ status: DispatcherRunStatus) -> Color {
+		switch status {
+		case .planned: .secondary
+		case .running: .orange
+		case .completed: .green
+		case .completedWithFailures, .reconciled: .yellow
+		case .canceled: .gray
+		case .failed: .red
 		}
-		if ticketRun.workspacePath.isEmpty == false || ticketEvents.contains(where: { $0.category == .runtime }) {
-			return "Phase: workspace prepared"
-		}
-		return "Phase: pending"
 	}
 
 	private func githubIssueNumber(from externalID: String) -> Int? {

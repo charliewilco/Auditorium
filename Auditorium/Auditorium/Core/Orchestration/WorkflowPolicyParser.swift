@@ -13,6 +13,23 @@ struct ParsedWorkflowPolicy: Sendable, Equatable {
 	let prompt: String
 }
 
+extension ParsedWorkflowPolicy {
+	static func defaultPolicy() -> ParsedWorkflowPolicy {
+		ParsedWorkflowPolicy(
+			concurrency: 1,
+			maxRetries: 0,
+			maxRetryBackoffMilliseconds: 300_000,
+			branchPrefix: "auditorium",
+			runTests: true,
+			openPullRequest: true,
+			handoffStatus: nil,
+			updateIssueLabels: false,
+			validationCommand: nil,
+			prompt: ""
+		)
+	}
+}
+
 enum WorkflowPolicyParserError: LocalizedError {
 	case invalidValue(String)
 

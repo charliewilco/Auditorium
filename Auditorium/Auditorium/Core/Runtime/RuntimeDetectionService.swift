@@ -27,11 +27,13 @@ struct RuntimeDetectionService {
 		}
 
 		let gitPath = await findExecutable(named: "git")
+		let containerPath = await findExecutable(named: "container")
 		let codexPath = await findExecutable(named: "codex")
 		let ghPath = await findExecutable(named: "gh")
 
 		var checks: [RuntimeHealthCheck] = []
 		checks.append(check(for: "git", displayName: "Git", path: gitPath))
+		checks.append(await containerReadiness(path: containerPath))
 		checks.append(check(for: "codex", displayName: "Codex CLI", path: codexPath))
 		checks.append(check(for: "gh", displayName: "GitHub CLI", path: ghPath))
 		return checks
@@ -166,6 +168,38 @@ struct RuntimeDetectionService {
 		await commandRunner(launchPath, arguments)
 	}
 
+	private func containerReadiness(path: String?) async -> RuntimeHealthCheck {
+		guard let path else {
+			return RuntimeHealthCheck(
+				id: "container",
+				name: "Container CLI",
+				state: .needsSetup,
+				detail: "container was not found.",
+				version: nil
+			)
+		}
+
+		let version = await commandOutput(path, arguments: ["--version"])
+		let status = await commandResult(path, arguments: ["system", "status"])
+		if status?.exitCode == 0 {
+			return RuntimeHealthCheck(
+				id: "container",
+				name: "Container CLI",
+				state: .available,
+				detail: "Container CLI is installed and the container system is running.",
+				version: version
+			)
+		}
+
+		return RuntimeHealthCheck(
+			id: "container",
+			name: "Container CLI",
+			state: .unavailable,
+			detail: containerUnavailableDetail(path: path, output: status?.output),
+			version: version
+		)
+	}
+
 	private func gitReadiness(path: String?) async -> RuntimeHealthCheck {
 		guard let path else {
 			return RuntimeHealthCheck(
@@ -255,6 +289,14 @@ struct RuntimeDetectionService {
 		)
 	}
 
+	private func containerUnavailableDetail(path: String, output: String?) -> String {
+		let trimmedOutput = output?.trimmingCharacters(in: .whitespacesAndNewlines)
+		if let trimmedOutput, trimmedOutput.isEmpty == false {
+			return "Container CLI is installed at \(path), but \(trimmedOutput)."
+		}
+		return "Container CLI is installed at \(path), but the container system is not running."
+	}
+
 	private func githubAuthenticatedDetail(output: String?) -> String {
 		guard let account = githubAccountName(from: output) else {
 			return "GitHub CLI is authenticated for github.com."
@@ -331,7 +373,7 @@ struct RuntimeDetectionService {
 
 	private static func implementationState(for kind: RuntimeProviderKind) -> ProviderImplementationState {
 		switch kind {
-		case .localWorkspace, .mockRuntime:
+		case .localWorkspace, .containerWorkspace, .mockRuntime:
 			.implemented
 		}
 	}
@@ -340,6 +382,8 @@ struct RuntimeDetectionService {
 		switch kind {
 		case .localWorkspace:
 			"Implemented with local clone, branch, process, and file workspace execution."
+		case .containerWorkspace:
+			"Implemented with Apple container workspaces, ephemeral Codex auth mounts, and runtime environment injection."
 		case .mockRuntime:
 			"Implemented as an offline mock runtime."
 		}

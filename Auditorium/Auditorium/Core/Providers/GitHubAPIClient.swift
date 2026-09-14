@@ -82,11 +82,12 @@ struct GitHubAPIClient: Sendable {
 		return issue.descriptor(repositoryFullName: repositoryFullName)
 	}
 
-	func addComment(repositoryFullName: String, issueNumber: String, body: String) async throws {
+	func addComment(repositoryFullName: String, issueNumber: String, body: String) async throws -> URL? {
 		let payload = ["body": body]
-		_ =
+		let response: GitHubCommentPayload =
 			try await send(path: "/repos/\(repositoryFullName)/issues/\(issueNumber)/comments", method: "POST", body: payload)
 			as GitHubCommentPayload
+		return response.htmlURL
 	}
 
 	func addLabels(repositoryFullName: String, issueNumber: String, labels: [String]) async throws {
@@ -489,6 +490,12 @@ struct GitHubPullRequestMarker: Decodable {}
 
 struct GitHubCommentPayload: Decodable {
 	let id: Int64
+	let htmlURL: URL?
+
+	enum CodingKeys: String, CodingKey {
+		case id
+		case htmlURL = "html_url"
+	}
 }
 
 struct GitHubLabelsRequest: Encodable {

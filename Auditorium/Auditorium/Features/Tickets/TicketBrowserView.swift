@@ -37,6 +37,15 @@ struct TicketBrowserView: View {
 		return result
 	}
 
+	private var queuedTicketIDs: Set<UUID> {
+		Set(queueItems.map(\.ticketID))
+	}
+
+	private var queueCandidateIDs: Set<UUID> {
+		let selectedIDs = selectedTickets.isEmpty ? Set(filteredTickets.prefix(1).map(\.id)) : selectedTickets
+		return selectedIDs.subtracting(queuedTicketIDs)
+	}
+
 	var body: some View {
 		@Bindable var appState = appState
 		VStack(spacing: 0) {
@@ -71,6 +80,15 @@ struct TicketBrowserView: View {
 					}
 					TableColumn("Status") { ticket in
 						StatusBadge(title: ticket.status.title, tint: ticket.status.tint)
+					}
+					TableColumn("Queue") { ticket in
+						if queuedTicketIDs.contains(ticket.id) {
+							StatusBadge(title: "Queued", tint: .purple)
+						}
+						else {
+							Text("Not queued")
+								.foregroundStyle(.secondary)
+						}
 					}
 					TableColumn("Priority") { ticket in
 						Text(ticket.priority.title)
@@ -117,13 +135,12 @@ struct TicketBrowserView: View {
 			.frame(width: 150)
 			Spacer()
 			Button {
-				let ids = selectedTickets.isEmpty ? Set(filteredTickets.prefix(1).map(\.id)) : selectedTickets
-				addToQueue(ids)
+				addToQueue(queueCandidateIDs)
 			} label: {
 				Label("Add to Queue", systemImage: "text.line.first.and.arrowtriangle.forward")
 			}
 			.buttonStyle(.borderedProminent)
-			.disabled(tickets.isEmpty)
+			.disabled(queueCandidateIDs.isEmpty)
 		}
 		.padding()
 	}

@@ -1,21 +1,24 @@
 import Foundation
 
-struct LocalProcessRuntimeProvider: RuntimeProvider {
+struct ContainerWorkspaceRuntimeProvider: RuntimeProvider {
 	let workspaceService: ApplicationWorkspaceService
 	let projectID: UUID
 	let sourceProvider: any SourceCodeProvider
 	let branchPrefix: String
+	let containerControl: ContainerRuntimeControl
 
 	init(
 		workspaceService: ApplicationWorkspaceService,
 		projectID: UUID,
 		sourceProvider: any SourceCodeProvider,
-		branchPrefix: String = "auditorium"
+		branchPrefix: String = "auditorium",
+		containerControl: ContainerRuntimeControl = ContainerRuntimeControl()
 	) {
 		self.workspaceService = workspaceService
 		self.projectID = projectID
 		self.sourceProvider = sourceProvider
 		self.branchPrefix = branchPrefix
+		self.containerControl = containerControl
 	}
 
 	func prepareWorkspace(for ticket: TicketDescriptor, repository: RepositoryDescriptor) async throws -> WorkspaceDescriptor {
@@ -30,7 +33,7 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 		try FileManager.default.createDirectory(at: metadataDirectory(for: workspace), withIntermediateDirectories: true)
 		return WorkspaceDescriptor(
 			path: workspace,
-			runtimeID: "local-\(workspaceService.sanitize(ticket.externalID))",
+			runtimeID: "container-\(workspaceService.sanitize(ticket.externalID))",
 			branchName: branchName
 		)
 	}
@@ -38,14 +41,15 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 	func startExecution(_ request: RuntimeExecutionRequest) async throws -> RuntimeExecutionHandle {
 		try Task.checkCancellation()
 		guard FileManager.default.fileExists(atPath: request.workspace.path.path()) else {
-			throw ProviderError.unavailable("Local workspace does not exist at \(request.workspace.path.path()).")
+			throw ProviderError.unavailable("Container workspace does not exist at \(request.workspace.path.path()).")
 		}
 		let handle = RuntimeExecutionHandle(id: request.workspace.runtimeID, workspacePath: request.workspace.path)
-		let metadata = LocalRuntimeHandleMetadata(
+		let metadata = ContainerRuntimeHandleMetadata(
 			id: handle.id,
 			workspacePath: handle.workspacePath.path(),
 			branchName: request.workspace.branchName,
 			ticketExternalID: request.ticket.externalID,
+			injectedVariableCount: request.environment.count,
 			startedAt: .now
 		)
 		let encoder = JSONEncoder()
@@ -58,27 +62,51 @@ struct LocalProcessRuntimeProvider: RuntimeProvider {
 	}
 
 	func stopExecution(handle: RuntimeExecutionHandle) async throws {
-		try FileManager.default.createDirectory(at: metadataDirectory(for: handle.workspacePath), withIntermediateDirectories: true)
-		try "stopped\n".write(
-			to: metadataDirectory(for: handle.workspacePath).appending(path: "runtime-stopped"),
-			atomically: true,
-			encoding: .utf8
+		let containerName = ContainerRuntimeControl.containerName(forRuntimeID: handle.id)
+		let killResult = await containerControl.killContainer(named: containerName)
+		let metadata = ContainerRuntimeStopMetadata(
+			id: handle.id,
+			containerName: containerName,
+			workspacePath: handle.workspacePath.path(),
+			stoppedAt: .now,
+			killExitCode: killResult.result?.exitCode,
+			killFailureReason: killResult.failureReason
+		)
+		let encoder = JSONEncoder()
+		encoder.dateEncodingStrategy = .iso8601
+		encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+		let metadataDirectory = metadataDirectory(for: handle.workspacePath)
+		try FileManager.default.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
+		try encoder.encode(metadata).write(
+			to: metadataDirectory.appending(path: "container-runtime-stopped"),
+			options: .atomic
 		)
 	}
 
 	func runtimeHandlePath(for workspace: URL) -> URL {
-		metadataDirectory(for: workspace).appending(path: "runtime-handle.json")
+		metadataDirectory(for: workspace).appending(path: "container-runtime-handle.json")
 	}
 
 	private func metadataDirectory(for workspace: URL) -> URL {
 		workspace.appending(path: ".auditorium")
 	}
+
 }
 
-private struct LocalRuntimeHandleMetadata: Codable {
+private struct ContainerRuntimeHandleMetadata: Codable {
 	let id: String
 	let workspacePath: String
 	let branchName: String
 	let ticketExternalID: String
+	let injectedVariableCount: Int
 	let startedAt: Date
+}
+
+private struct ContainerRuntimeStopMetadata: Codable {
+	let id: String
+	let containerName: String
+	let workspacePath: String
+	let stoppedAt: Date
+	let killExitCode: Int32?
+	let killFailureReason: String?
 }

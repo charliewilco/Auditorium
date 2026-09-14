@@ -103,7 +103,7 @@ protocol IssueTrackerProvider {
 
 	func listTickets(projectID: String) async throws -> [TicketDescriptor]
 	func updateTicketStatus(ticketID: String, status: TicketStatus) async throws
-	func addComment(ticketID: String, body: String) async throws
+	func addComment(ticketID: String, body: String) async throws -> URL?
 }
 ```
 
